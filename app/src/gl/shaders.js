@@ -3,9 +3,9 @@
 // is the engine's ("larger is nearer"), and every per-pixel decision is taken at the centre of a
 // low-resolution pixel exactly as the reference does, whatever the supersampling.
 
-const PREFIX = '#version 300 es\nprecision highp float;\nprecision highp int;\n';
+export const PREFIX = '#version 300 es\nprecision highp float;\nprecision highp int;\n';
 
-const CAMERA = /* glsl */`
+export const CAMERA = /* glsl */`
 uniform vec4 uView;    // W, H, SS, S: low-resolution size, supersampling, pixels per unit
 uniform vec4 uAngles;  // cos(yaw), sin(yaw), sin(pitch), cos(pitch)
 uniform vec2 uOrigin;  // OX, OY in low-resolution pixels
@@ -35,18 +35,18 @@ vec4 toClip(vec3 s) { return vec4(s.x / uView.x * 2.0 - 1.0, 1.0 - s.y / uView.y
 `;
 
 // for fragments of the supersampled scene buffers: the reference pixel this sample belongs to
-const SAMPLE = /* glsl */`
+export const SAMPLE = /* glsl */`
 ivec2 pixelIndex() { return ivec2(floor(vec2(gl_FragCoord.x, uView.y * uView.z - gl_FragCoord.y) / uView.z)); }
 vec2 pixelCentre() { return vec2(pixelIndex()) + 0.5; }
 `;
 
 // for full-screen passes over the resolved low-resolution buffers
-const PIXEL = /* glsl */`
+export const PIXEL = /* glsl */`
 ivec2 lr() { return ivec2(gl_FragCoord.xy); }                       // low-resolution framebuffer pixel
 ivec2 cpu(ivec2 q) { return ivec2(q.x, int(uView.y) - 1 - q.y); }    // the same pixel in top-left indexing
 `;
 
-const TABLES = /* glsl */`
+export const TABLES = /* glsl */`
 uniform sampler2D uHash;  // the engine's hash at integer lattice points, offset 256
 uniform sampler2D uRamp;  // x: ramp level, y: colour index
 float hashL(vec2 i) { return texelFetch(uHash, ivec2(i) + 256, 0).r; }
@@ -71,17 +71,17 @@ float masonryLevel(float a, float z, float base) {
 }
 `;
 
-const MRT = /* glsl */`
+export const MRT = /* glsl */`
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outClass;   // r: ground, g: kind / 255, b: kind of the ground underneath / 255, a: covered
 `;
 
-const CLASS = /* glsl */`
+export const CLASS = /* glsl */`
 bool isCovered(vec4 c) { return c.a > 0.5; }
 bool isGround(vec4 c) { return c.r > 0.5; }
 `;
 
-const FULLSCREEN_VS = PREFIX + /* glsl */`
+export const FULLSCREEN_VS = PREFIX + /* glsl */`
 void main() {
   vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
   gl_Position = vec4(p, 0.0, 1.0);
@@ -385,7 +385,7 @@ void main() {
     fs: PREFIX + CAMERA + PIXEL + TABLES + CLASS + /* glsl */`
 uniform sampler2D uColor; uniform sampler2D uClass; uniform sampler2D uDepthTex;
 uniform float uGradientY;
-const float EDGE = 0.28;
+uniform float uEdge; // depth difference that counts as an edge: 2.8 pixels' worth at this zoom
 out vec4 outColor;
 bool groundish(ivec2 q) { vec4 c = texelFetch(uClass, q, 0); return !(isCovered(c) && !isGround(c)); }
 float dep(ivec2 q) { return depthToD(texelFetch(uDepthTex, q, 0).r); }
@@ -399,9 +399,9 @@ void main() {
     bool above = groundish(q + ivec2(0, 1)), below = groundish(q - ivec2(0, 1));
     bool left = groundish(q - ivec2(1, 0)), right = groundish(q + ivec2(1, 0));
     if (above || below || left || right) c = floor(c * vec3(0.68, 0.66, 0.76));
-    else if (d - dep(q + ivec2(0, 1)) - uGradientY > EDGE || d - dep(q - ivec2(1, 0)) > EDGE)
+    else if (d - dep(q + ivec2(0, 1)) - uGradientY > uEdge || d - dep(q - ivec2(1, 0)) > uEdge)
       c = floor(mix(c, vec3(255.0, 232.0, 180.0), vec3(0.3, 0.3, 0.22)));
-    else if (dep(q + ivec2(1, 0)) - d > EDGE || dep(q - ivec2(0, 1)) - uGradientY - d > EDGE)
+    else if (dep(q + ivec2(1, 0)) - d > uEdge || dep(q - ivec2(0, 1)) - uGradientY - d > uEdge)
       c = floor(c * vec3(0.74, 0.72, 0.82));
     outColor = vec4(c / 255.0, 1.0);
   } else outColor = color;

@@ -1,37 +1,266 @@
 {
   "_comment": "调色板。每个颜色是一个基色，渲染时按 pixel-plays 的规则生成五级色阶（暗部偏紫、亮部偏暖）。索引就是在这里的次序，烘焙数据用索引引用颜色。seasons 里是可以按季节替换的颜色，未列出的四季不变。",
   "colours": {
-    "plaster_white": [236, 232, 220],
-    "plaster_grey": [196, 192, 182],
-    "plaster_beige": [224, 208, 178],
-    "plaster_rose": [228, 200, 190],
-    "plaster_cream": [240, 228, 200],
-    "concrete_grey": [170, 168, 160],
-    "concrete_pale": [198, 198, 192],
-    "tile_white": [228, 228, 222],
-    "brick_red": [176, 96, 72],
-    "whitewash": [244, 242, 232],
-    "whitewash_aged": [228, 224, 210],
-    "stone_pale": [214, 206, 190],
-    "glass_blue": [112, 150, 178],
-    "glass_grey": [138, 150, 160],
-    "glass_teal": [110, 160, 158],
-    "panel_white": [230, 232, 230],
-    "metal_blue": [92, 128, 164],
-    "metal_pale": [186, 192, 196],
-    "metal_dark": [86, 88, 92],
-    "wood_dark": [104, 78, 58],
-    "temple_wall": [226, 168, 96],
-    "temple_red": [156, 52, 44],
-    "window_dark": [52, 56, 70],
-    "tile_grey": [104, 104, 108],
-    "tile_slate": [84, 88, 98],
-    "tile_dark": [66, 66, 72],
-    "tile_red": [170, 86, 64],
-    "tile_brown": [124, 88, 66],
-    "roof_flat_grey": [176, 172, 164],
-    "roof_flat_dark": [112, 112, 116],
-    "roof_silver": [204, 206, 206]
+    "plaster_white": [
+      236,
+      232,
+      220
+    ],
+    "plaster_grey": [
+      196,
+      192,
+      182
+    ],
+    "plaster_beige": [
+      224,
+      208,
+      178
+    ],
+    "plaster_rose": [
+      228,
+      200,
+      190
+    ],
+    "plaster_cream": [
+      240,
+      228,
+      200
+    ],
+    "concrete_grey": [
+      170,
+      168,
+      160
+    ],
+    "concrete_pale": [
+      198,
+      198,
+      192
+    ],
+    "tile_white": [
+      228,
+      228,
+      222
+    ],
+    "brick_red": [
+      176,
+      96,
+      72
+    ],
+    "whitewash": [
+      244,
+      242,
+      232
+    ],
+    "whitewash_aged": [
+      228,
+      224,
+      210
+    ],
+    "stone_pale": [
+      214,
+      206,
+      190
+    ],
+    "glass_blue": [
+      112,
+      150,
+      178
+    ],
+    "glass_grey": [
+      138,
+      150,
+      160
+    ],
+    "glass_teal": [
+      110,
+      160,
+      158
+    ],
+    "panel_white": [
+      230,
+      232,
+      230
+    ],
+    "metal_blue": [
+      92,
+      128,
+      164
+    ],
+    "metal_pale": [
+      186,
+      192,
+      196
+    ],
+    "metal_dark": [
+      86,
+      88,
+      92
+    ],
+    "wood_dark": [
+      104,
+      78,
+      58
+    ],
+    "temple_wall": [
+      226,
+      168,
+      96
+    ],
+    "temple_red": [
+      156,
+      52,
+      44
+    ],
+    "window_dark": [
+      52,
+      56,
+      70
+    ],
+    "tile_grey": [
+      104,
+      104,
+      108
+    ],
+    "tile_slate": [
+      84,
+      88,
+      98
+    ],
+    "tile_dark": [
+      66,
+      66,
+      72
+    ],
+    "tile_red": [
+      170,
+      86,
+      64
+    ],
+    "tile_brown": [
+      124,
+      88,
+      66
+    ],
+    "roof_flat_grey": [
+      176,
+      172,
+      164
+    ],
+    "roof_flat_dark": [
+      112,
+      112,
+      116
+    ],
+    "roof_silver": [
+      204,
+      206,
+      206
+    ],
+    "grass": [
+      112,
+      146,
+      70
+    ],
+    "grass_dry": [
+      164,
+      164,
+      96
+    ],
+    "forest": [
+      62,
+      104,
+      60
+    ],
+    "forest_dark": [
+      48,
+      84,
+      56
+    ],
+    "rock": [
+      152,
+      144,
+      128
+    ],
+    "soil": [
+      150,
+      118,
+      86
+    ],
+    "sand": [
+      222,
+      206,
+      168
+    ],
+    "farmland": [
+      156,
+      164,
+      88
+    ],
+    "water_lake": [
+      64,
+      132,
+      124
+    ],
+    "water_river": [
+      138,
+      128,
+      92
+    ],
+    "water_canal": [
+      78,
+      124,
+      112
+    ],
+    "asphalt": [
+      96,
+      94,
+      96
+    ],
+    "asphalt_light": [
+      122,
+      120,
+      120
+    ],
+    "sidewalk": [
+      190,
+      184,
+      172
+    ],
+    "paving": [
+      206,
+      200,
+      186
+    ],
+    "lane": [
+      226,
+      222,
+      200
+    ],
+    "camphor": [
+      70,
+      112,
+      62
+    ],
+    "willow": [
+      128,
+      160,
+      84
+    ],
+    "plane": [
+      104,
+      134,
+      70
+    ],
+    "blossom": [
+      232,
+      172,
+      190
+    ],
+    "tea": [
+      140,
+      168,
+      96
+    ]
   },
   "seasons": {}
 }

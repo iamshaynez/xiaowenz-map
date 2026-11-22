@@ -7,6 +7,7 @@ import { Palette } from '../style/palette.js';
 const HASH_UNIT = 0, RAMP_UNIT = 1, FIRST_FREE_UNIT = 2;
 const WHITE = [1, 1, 1, 1], CLEAR = [0, 0, 0, 0], FAR = [1];
 export const NEAREST_DEPTH = 1000, FARTHEST_DEPTH = -1000;
+const EDGE_PX = 2.8; // shadeEdges() calls an edge where the depth jumps by 0.28 units, i.e. 2.8 pixels at 10 px per unit
 export const MODES = { plain: 0, rough: 1, gloss: 2, solid: 3 };
 
 // pixel-plays' project() in double precision, for things placed on the CPU (water streaks)
@@ -173,7 +174,8 @@ export class StyleRenderer {
     this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.workB, uClass: frame.class, uMask: frame.maskMoving, uStaticClass: frame.classStatic }, { uAO: 0 });
     // 4. edges read from the final depth buffer
     if (!edges) return frame.workAFbo;
-    this.fullscreen('edges', frame.workBFbo, { uColor: frame.workA, uClass: frame.class, uDepthTex: frame.depth }, { uGradientY: Math.cos(c.pitch) / (c.scale * Math.sin(c.pitch)) });
+    this.fullscreen('edges', frame.workBFbo, { uColor: frame.workA, uClass: frame.class, uDepthTex: frame.depth },
+      { uGradientY: Math.cos(c.pitch) / (c.scale * Math.sin(c.pitch)), uEdge: EDGE_PX / c.scale });
     return frame.workBFbo;
   }
 

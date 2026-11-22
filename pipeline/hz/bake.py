@@ -119,9 +119,10 @@ def coarse_mesh(polys, owner, base, top, ox, oy):
             vertex_count += count * 4
         faces = shapely.constrained_delaunay_triangles(poly)
         if not faces.is_empty:
-            tri = (numpy.asarray(shapely.get_coordinates(faces), dtype=numpy.float32).reshape(-1, 2) - [ox, oy])
-            cap = numpy.zeros((len(tri), 6), dtype=numpy.float32)
-            cap[:, :2] = tri
+            # each triangle comes back as a closed ring of four points, the first three of which are its corners
+            corners = numpy.asarray(shapely.get_coordinates(faces), dtype=numpy.float32).reshape(-1, 4, 2)[:, :3].reshape(-1, 2)
+            cap = numpy.zeros((len(corners), 6), dtype=numpy.float32)
+            cap[:, :2] = corners - [ox, oy]
             cap[:, 2] = roof_z
             cap[:, 5] = building
             verts.append(cap)
@@ -129,19 +130,28 @@ def coarse_mesh(polys, owner, base, top, ox, oy):
             vertex_count += len(cap)
     if not verts:
         return numpy.zeros((0, 6), dtype=numpy.float32), numpy.zeros(0, dtype=numpy.uint32)
-    return numpy.concatenate(verts), numpy.concatenate(index)
+    return numpy.concatenate(verts), numpy.concatenate(index).astype(numpy.uint32)
 
 
-def buildings_section(geoms, props, ox, oy):
+def coarse_outlines(geoms):
+    """The polygons the coarse meshes are built from, and which building each belongs to.
+
+    -> (polygons, owner): outlines simplified to COARSE_TOLERANCE_M, pieces smaller than MIN_PART_M2
+    dropped, exteriors counter-clockwise and holes clockwise so that one rule gives every wall its normal.
+    """
     polys = shapely.get_parts(geoms)
     parts_per_building = numpy.array([len(g.geoms) if g.geom_type == "MultiPolygon" else 1 for g in geoms], dtype=int)
     owner = numpy.repeat(numpy.arange(len(geoms)), parts_per_building)
     keep = shapely.area(polys) >= MIN_PART_M2
-    # counter-clockwise exteriors and clockwise holes, so that one rule gives every wall its outward normal
     polys = numpy.asarray([orient(p) for p in shapely.simplify(polys[keep], COARSE_TOLERANCE_M)], dtype=object)
     owner = owner[keep]
     valid = shapely.area(polys) > 1.0
-    verts, index = coarse_mesh(polys[valid], owner[valid], props[:, 0], props[:, 0] + props[:, 1], ox, oy)
+    return polys[valid], owner[valid]
+
+
+def buildings_section(geoms, props, ox, oy):
+    polys, owner = coarse_outlines(geoms)
+    verts, index = coarse_mesh(polys, owner, props[:, 0], props[:, 0] + props[:, 1], ox, oy)
     head = struct.pack("<III", len(geoms), len(verts), len(index))
     return head + props[:, :PROP_FLOATS].astype("<f4").tobytes() + verts.tobytes() + index.tobytes()
 
