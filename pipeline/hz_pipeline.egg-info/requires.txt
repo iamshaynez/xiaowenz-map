@@ -1,0 +1,6 @@
+osmium>=4
+shapely>=2
+numpy>=2
+pyproj>=3
+pyshp>=3
+tifffile>=2024

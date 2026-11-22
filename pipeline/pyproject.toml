@@ -1,0 +1,9 @@
+[project]
+name = "hz-pipeline"
+version = "0.1.0"
+description = "像素杭州的数据管线：开放地理数据 -> 主城区的瓦片"
+requires-python = ">=3.12"
+dependencies = ["osmium>=4", "shapely>=2", "numpy>=2", "pyproj>=3", "pyshp>=3", "tifffile>=2024", "imagecodecs>=2024"]
+
+[tool.setuptools]
+packages = ["hz"]

@@ -9,7 +9,7 @@
 
 ## 当前这一步
 
-阶段 1e：闸门 G3 数据充足（解析 OSM 提取包与 3D-GloBFP）。
+阶段 2a：建筑烘焙（类型推断、地标高度表、瓦片二进制），随后做闸门 G2。
 
 ## 阶段 1：落盘、探针、三道闸门
 
@@ -24,12 +24,14 @@
 - [x] 1e 闸门（结果见 `GATES.md`）
   - [x] G1 观感一致：四个机位全过；背面机位明暗分布差 2.08% 未达标，带例外继续（D014）。描边指标为容差 1 像素口径（D013）
   - [ ] G2 吞吐（本机真实显卡，960×540 与 640×400 内部分辨率 ≥ 60 帧，95% 的帧 ≤ 20 ms）
-  - [ ] G3 数据充足（建筑 ≥ 10 万栋；地形加载成功；西湖水面约 6.4 km²）
+  - [x] G3 数据充足：54.0 万栋，地形正确，西湖 6.02 km²（`GATES.md`）
 
 ## 阶段 2：数据底座
 
-- [ ] 下载并缓存原始数据到 `data/raw/`
-- [ ] OSM 归一化
+- [x] 下载并缓存原始数据到 `data/raw/`（四个文件：OSM 浙江提取包、3D-GloBFP 一块瓦片、Copernicus 地形、WorldCover）
+- [x] OSM 归一化（`pipeline/hz/osm_extract.py` → `data/work/osm.pkl`）
+- [x] OSM 与 3D-GloBFP 合并成统一建筑表（`pipeline/hz/buildings.py`、`hz/prepare.py` → `data/work/buildings.pkl`，540,483 栋）
+- [x] 地形网格（`pipeline/hz/terrain.py` → `data/work/terrain.bin`）
 - [ ] 地形网格
 - [ ] 楼高赋值
 - [ ] 缺失补齐
