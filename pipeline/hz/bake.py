@@ -1,22 +1,10 @@
-"""Bake the region into what the app loads.
+"""The building meshes of a tile, and the small binary forms that the baked files are made of.
 
-data/baked/overview.bin: the whole region for the overview tier, small enough to load at start-up.
-  GRID  heights on a 125 m grid over the region (int16 metres, north row first)
-  MASS  one box per 50 m cell that holds a building: centre, base, height, look
-
-data/baked/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it comes into view at the district tier.
-  TERR  heights of a 32 x 32 grid over the tile (int16 metres, north row first)
-  BLDB  buildings as coarse meshes (flat roofs, outlines simplified to 1.5 m)
-  META  JSON
-
-Every building belongs to the tile holding its centre and is drawn whole from there.
-
-Usage: python -m hz.bake [layer ...]      layers: terrain mass buildings (default: all)
+scene.py is the entry point that bakes everything. This module holds the pieces that turn outlines into
+meshes (coarse_mesh, buildings_section), the height grids (terrain_section, coarse_grid_section), the
+massing cells (massing_section) and the container every baked file is written in (container).
 """
-import json
-import pickle
 import struct
-import time
 
 import numpy
 import shapely
@@ -24,7 +12,7 @@ from shapely.geometry.polygon import orient
 
 from . import region
 
-MAGIC = b"HZT1"
+MAGIC = b"HZT1"                  # the first four bytes of every baked file
 COARSE_TOLERANCE_M = 1.5   # outlines are simplified to this at the district tier
 MIN_PART_M2 = 3.0          # polygon pieces smaller than this are dropped
 MIN_COURTYARD_M2 = 400.0   # courtyards smaller than this are roofed over at the district tier
@@ -169,75 +157,3 @@ def coarse_grid_section(grid, info, cell_m=125.0):
     row = numpy.clip(numpy.rint((gy0 + tny * cell - (y0 + numpy.arange(ny) * cell_m)) / cell - 0.5).astype(int), 0, tny - 1)
     heights = grid[numpy.ix_(row[::-1], col)]  # north to south
     return struct.pack("<HHddd", nx, ny, x0, y0, cell_m) + heights.astype("<i2").tobytes()
-
-
-def bake(only=None, log=print):
-    """-> data/baked/overview.bin (coarse terrain, massing cells) and data/baked/tiles/b/<x>_<y>.bin per tile."""
-    only = set(only or ("terrain", "mass", "buildings"))
-    t0 = time.time()
-    with open(region.WORK / "buildings.pkl", "rb") as f:
-        buildings = pickle.load(f)
-    from .classify import classify
-    from .terrain import load as load_terrain
-    grid, info = load_terrain(region.WORK / "terrain.bin")
-    classify(buildings, grid, info, log=log)
-    palette = json.loads((region.CURATED / "palette.json").read_text(encoding="utf-8"))["colours"]
-    colour_index = {name: i for i, name in enumerate(palette)}
-
-    geoms = numpy.asarray([b["geom"] for b in buildings], dtype=object)
-    centres = shapely.centroid(geoms)
-    cx, cy = shapely.get_x(centres), shapely.get_y(centres)
-    # per building: the nine property floats, then the centre, for grouping
-    props = numpy.array([[b["base"], b["height"], b["levels"], b["archetype"], b["roof"], colour_index[b["wall"]], colour_index[b["roof_colour"]], b["seed"], 0, x, y]
-                         for b, x, y in zip(buildings, cx, cy, strict=True)], dtype=numpy.float64)
-
-    west, south, east, north = region.region_bounds()
-    tx0, tx1 = int(numpy.floor(west / region.TILE_M)), int(numpy.floor(east / region.TILE_M))
-    ty0, ty1 = int(numpy.floor(south / region.TILE_M)), int(numpy.floor(north / region.TILE_M))
-    nx_tiles, ny_tiles = tx1 - tx0 + 1, ty1 - ty0 + 1
-    ix = numpy.clip(numpy.floor(cx / region.TILE_M).astype(int), tx0, tx1) - tx0
-    iy = numpy.clip(numpy.floor(cy / region.TILE_M).astype(int), ty0, ty1) - ty0
-    order = numpy.argsort(ix * ny_tiles + iy, kind="stable")
-    bounds = numpy.searchsorted((ix * ny_tiles + iy)[order], numpy.arange(nx_tiles * ny_tiles + 1))
-
-    region.BAKED.mkdir(parents=True, exist_ok=True)
-    out_dir = region.BAKED / "tiles" / "b"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for f in out_dir.glob("*.bin"):
-        f.unlink()
-
-    overview = []
-    if "terrain" in only:
-        overview.append((b"GRID", coarse_grid_section(grid, info)))
-    if "mass" in only:
-        overview.append((b"MASS", massing_section(props, 0.0, 0.0)))
-    (region.BAKED / "overview.bin").write_bytes(container(overview))
-
-    total_vertices, files = 0, 0
-    for tx in range(nx_tiles):
-        for ty in range(ny_tiles):
-            k = tx * ny_tiles + ty
-            sl = order[bounds[k]:bounds[k + 1]]
-            ox, oy = tile_origin(tx + tx0, ty + ty0)
-            sections = []
-            if "terrain" in only:
-                sections.append((b"TERR", terrain_section(ox, oy, grid, info)))
-            if "buildings" in only and len(sl):
-                section = buildings_section(geoms[sl], props[sl], ox, oy)
-                total_vertices += struct.unpack_from("<I", section, 4)[0]
-                sections.append((b"BLDB", section))
-            sections.append((b"META", json.dumps({"x0": ox, "y0": oy, "buildings": int(len(sl))}).encode("utf-8")))
-            (out_dir / f"{tx}_{ty}.bin").write_bytes(container(sections))
-            files += 1
-    index = {"tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "nx": nx_tiles, "ny": ny_tiles, "palette": list(palette),
-             "origin": [region.ORIGIN_E, region.ORIGIN_N], "epsg": region.EPSG, "bounds": [west, south, east, north], "coarseTolerance": COARSE_TOLERANCE_M}
-    (region.BAKED / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
-    size = sum(f.stat().st_size for f in out_dir.glob("*.bin"))
-    log(f"baked overview.bin ({(region.BAKED / 'overview.bin').stat().st_size / 1048576:.1f} MB) and {files} tiles: "
-        f"{len(buildings)} buildings, {total_vertices} mesh vertices, {size / 1048576:.0f} MB, {time.time() - t0:.0f} s")
-
-
-if __name__ == "__main__":
-    import sys
-
-    bake(sys.argv[1:] or None)
