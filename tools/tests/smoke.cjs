@@ -11,9 +11,13 @@ const root = path.resolve(__dirname, '../..');
 const outDir = path.resolve(root, process.argv[2] || 'out/smoke');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 5398;
+// places are in world metres, from hz.region.project(lon, lat)
 const SHOTS = [
   ['overview', ''],
+  ['boxes', 'c.scale = 0.08;'],                                                   // the overview tier, with its boxes
   ['district', 'c.scale = 0.2;'],
+  ['woods', 'c.x = 23968.08; c.y = 7640.83; c.scale = 0.5;'],                      // the wooded hills at Longjing (120.132 E, 30.229 N)
+  ['westlake', 'c.x = 26274.23; c.y = 11244.24; c.scale = 1.5;'],                  // Broken Bridge and the north shore (120.155 E, 30.262 N)
   ['street', 'c.zoomAt(c.width / 2, c.height / 2, 6);'],
 ];
 

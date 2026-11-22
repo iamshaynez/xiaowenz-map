@@ -41,6 +41,29 @@ def region_bounds():
     return float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())
 
 
+def region_corners():
+    """The corners of the region in world metres: south-west, south-east, north-east, north-west."""
+    xs, ys = project([WEST, EAST, EAST, WEST], [SOUTH, SOUTH, NORTH, NORTH])
+    return [(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
+
+
+def region_shape():
+    """The region as it stands on the ground: a rectangle turned by the convergence of the grid.
+
+    In UTM the region (a rectangle of longitude and latitude) is a quadrilateral whose edges run about
+    1.5 degrees off the grid axes, so its bounding box is not its outline. This is that outline, as the
+    app needs it to shape the island: the centre, the direction of its east axis, and its half sizes.
+    """
+    sw, se, ne, nw = region_corners()
+    dx, dy = se[0] - sw[0], se[1] - sw[1]
+    length = (dx * dx + dy * dy) ** 0.5
+    return {
+        "cx": (sw[0] + ne[0]) / 2, "cy": (sw[1] + ne[1]) / 2, "cos": dx / length, "sin": dy / length,
+        "halfWidth": length / 2,
+        "halfHeight": ((nw[0] - sw[0]) ** 2 + (nw[1] - sw[1]) ** 2) ** 0.5 / 2,
+    }
+
+
 def world_bounds():
     """(west, south, east, north) of the region plus its margin, in world metres."""
     west, south, east, north = region_bounds()

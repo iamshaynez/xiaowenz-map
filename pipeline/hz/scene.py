@@ -3,9 +3,11 @@
 data/baked/overview.bin: the whole region for the overview tier, small enough to load at start-up.
   GRID  heights on a 125 m grid over the region (int16 metres, north row first)
   MASS  one box per 50 m cell that holds a building: centre, base, height, look
-  LCV   the ground class of every 50 m cell (one byte), rows from the north
-  URB   for every 50 m cell: how much of it is built over, and how tall (two bytes)
-  RIBA  main roads, railways and canals as strips: for drawing as thin lines from far away
+  LCV   cells across and up (u16), west and south edge (f64), cell size (f64); then the ground
+        class of every 50 m cell (one byte), rows from the north
+  URB   the same header; then for every 50 m cell how much of it is built over and how tall (two bytes)
+  RIBA  main roads, railways and canals as strips, for drawing as thin lines from far away:
+        vertex count, index count, vertices (x, y, z, lateral, half width, class, dir x, dir y), indices
 
 data/baked/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it comes into view at the district tier.
   TERR  heights of a 32 x 32 grid over the tile (int16 metres, north row first)
@@ -15,8 +17,10 @@ data/baked/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it comes int
   ROAD  carriageways, walkways and railways on the ground: a mesh in the same form
   LAND  parks, woods, farmland, yards and urban ground: a mesh in the same form
   DECK  bridges and viaducts: a mesh in the same form, walls included
-  TREE  the trees of the tile, sorted into squares of 250 m
-  PLCE  JSON: the named places of the tile
+  TREE  the trees of the tile, sorted into squares of 250 m: cells per side (u32), count (u32), where
+        each cell's run starts (u32 per cell, and one more), then 16 bytes per tree: x, y relative to the
+        tile and z (float), species, crown radius in half-metres, seed, kind (a byte each)
+  PLCE  JSON: the named places of the tile: [name, kind key, kind, x, y]
   META  JSON
 
 Every building and tree belongs to the tile holding it and is drawn whole from there; ground is
@@ -93,7 +97,7 @@ def overview_rasters(props, areas, ground_data, cover, bounds, height, cell=MASS
     for cls in GROUND_PRIORITY:
         if cls in ground_data.layers:
             kinds[shapely.contains_xy(ground_data.layers[cls], cx, cy)] = cls
-    lcv = struct.pack("<ddd", x0, y0, cell) + kinds.astype("u1").tobytes()
+    lcv = struct.pack("<HHddd", nx, ny, x0, y0, cell) + kinds.astype("u1").tobytes()
 
     # built-over share and tallest building of a cell, from the buildings whose centre falls in it
     bx, by = props[:, 9], props[:, 10]
@@ -107,12 +111,51 @@ def overview_rasters(props, areas, ground_data, cover, bounds, height, cell=MASS
     share = numpy.clip(numpy.rint(255 * numpy.minimum(1.0, cover_share / (cell * cell) * 1.5)), 0, 255)
     # height on a logarithmic scale: 3 m is 0, 1 km would be 255
     tall = numpy.clip(numpy.rint(255 * numpy.log2(1 + tallest / 3.0) / numpy.log2(1 + 1000.0 / 3.0)), 0, 255)
-    urb = struct.pack("<ddd", x0, y0, cell) + numpy.column_stack([share, tall]).astype("u1").tobytes()
+    urb = struct.pack("<HHddd", nx, ny, x0, y0, cell) + numpy.column_stack([share, tall]).astype("u1").tobytes()
     return lcv, urb
 
 
+def in_water(geoms, water, share=0.6, log=None):
+    """-> a mask of the buildings that stand mostly in open water: boats and echoes on the river, not buildings.
+
+    How much of a building is over the water is measured with a lattice of 25 points over its box,
+    counted where they fall inside the building. The river's box covers the whole city, so every
+    building is tested against it; that is only quick with the river prepared, as the first argument.
+    """
+    parts = numpy.asarray(shapely.get_parts(water), dtype=object)
+    over = numpy.zeros(len(geoms))
+    inside = numpy.zeros(len(geoms))
+    if not len(parts):
+        return over > share
+    parts = parts[shapely.area(parts) > 100.0]
+    min_x, min_y, max_x, max_y = shapely.bounds(geoms).T
+    offsets = numpy.linspace(0.1, 0.9, 5)
+    across, up = numpy.meshgrid(offsets, offsets)
+    across, up = across.ravel(), up.ravel()
+    for part in parts:
+        west, south, east, north = part.bounds
+        near = numpy.flatnonzero((min_x <= east) & (max_x >= west) & (min_y <= north) & (max_y >= south))
+        if not len(near):
+            continue
+        shapely.prepare(part)
+        hits = near[shapely.intersects(part, geoms[near])]
+        if not hits.size:
+            continue
+        west_b, south_b, east_b, north_b = shapely.bounds(geoms[hits]).T
+        xs = west_b[:, None] + (east_b - west_b)[:, None] * across
+        ys = south_b[:, None] + (north_b - south_b)[:, None] * up
+        within = shapely.contains_xy(numpy.repeat(geoms[hits], across.size), xs.ravel(), ys.ravel()).reshape(xs.shape)
+        wet = shapely.contains_xy(part, xs.ravel(), ys.ravel()).reshape(xs.shape)
+        over[hits] += (within & wet).sum(axis=1)
+        inside[hits] = numpy.maximum(inside[hits], within.sum(axis=1))
+    return (inside > 0) & (over > share * inside)
+
+
 def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
-    """Strips along lines, for the overview: a vertex is x, y, z, lateral (-1 or 1), half width, class."""
+    """Strips along lines, for the overview: a vertex is x, y, z, lateral (-1 or 1), half width, class, dir x, dir y.
+
+    The direction lets the app widen a strip on the screen to at least one pixel however far out it is viewed from.
+    """
     verts, index = [], []
     count = 0
     for line, cls, half in lines:
@@ -128,7 +171,7 @@ def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
                 continue
             a, b, dx, dy = a[ok], b[ok], dx[ok] / length[ok], dy[ok] / length[ok]
             n = len(a)
-            quad = numpy.zeros((n, 4, 6), dtype=numpy.float32)
+            quad = numpy.zeros((n, 4, 8), dtype=numpy.float32)
             quad[:, 0, :2], quad[:, 1, :2], quad[:, 2, :2], quad[:, 3, :2] = a, a, b, b
             quad[:, 0, :2] -= numpy.column_stack([dy, -dx]) * half
             quad[:, 1, :2] += numpy.column_stack([dy, -dx]) * half
@@ -138,14 +181,15 @@ def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
             quad[:, :, 3] = (-1, 1, 1, -1)
             quad[:, :, 4] = half
             quad[:, :, 5] = cls
-            v = quad.reshape(-1, 6)
+            quad[:, :, 6], quad[:, :, 7] = dx[:, None], dy[:, None]
+            v = quad.reshape(-1, 8)
             verts.append(v)
             t = numpy.arange(n) * 4 + count
             index.append(numpy.column_stack([t, t + 1, t + 2, t, t + 2, t + 3]).reshape(-1).astype("<u4"))
             count += len(v)
     if not verts:
         return struct.pack("<II", 0, 0)
-    return struct.pack("<II", count, sum(len(i) for i in index)) + numpy.concatenate(verts).astype("<f4").tobytes() + numpy.concatenate(index).tobytes()
+    return struct.pack("<II", count, sum(len(i) for i in index)) + numpy.concatenate(verts).astype("<f4").tobytes() + numpy.concatenate(index).astype("<u4").tobytes()
 
 
 def overview_lines(osm, ground_data):
@@ -177,13 +221,23 @@ def bake(limit=None, log=print):
     ground_data = Ground.load(work / "ground.pkl")
     cover = load_cover(work / "landcover.npz")
     trees = numpy.load(work / "trees.npy")
+    # the map ends at the region's outline; trees farther out than the island's fringe would never be seen
+    region_polygon = shapely.Polygon(region.region_corners()).buffer(60.0)
+    inside = shapely.contains_xy(region_polygon, trees["x"], trees["y"])
+    trees = trees[inside]
     osm = Layers.load(work / "osm.pkl")
     palette = json.loads((region.CURATED / "palette.json").read_text(encoding="utf-8"))["colours"]
     colour_index = {name: i for i, name in enumerate(palette)}
 
     west, south, east, north = region.region_bounds()
     bounds = (west - region.MARGIN_M, south - region.MARGIN_M, east + region.MARGIN_M, north + region.MARGIN_M)
+    # what stands mostly in open water is a boat or an echo on the water, not a building
     geoms = numpy.asarray([b["geom"] for b in buildings], dtype=object)
+    afloat = in_water(geoms, ground_data.water)
+    if afloat.any():
+        log(f"left out {int(afloat.sum())} buildings standing in water")
+        buildings = [b for b, a in zip(buildings, afloat, strict=True) if not a]
+        geoms = geoms[~afloat]
     areas = shapely.area(geoms)
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
@@ -205,7 +259,7 @@ def bake(limit=None, log=print):
             continue
         at = geom if geom.geom_type == "Point" else geom.representative_point()
         tx, ty = region.tile_index(at.x, at.y)
-        places.setdefault((tx, ty), []).append([name, tags.get("kind_key"), tags.get("kind")])
+        places.setdefault((tx, ty), []).append([name, tags.get("kind_key"), tags.get("kind"), round(at.x, 1), round(at.y, 1)])
 
     # ---- the overview package ----
     region.BAKED.mkdir(parents=True, exist_ok=True)
@@ -259,6 +313,8 @@ def bake(limit=None, log=print):
         "tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
         "palette": list(palette), "origin": [region.ORIGIN_E, region.ORIGIN_N], "epsg": region.EPSG, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
+        "buildings": len(buildings), "leftOutOfWater": int(afloat.sum()),
+        "island": region.region_shape(),
         "groundClasses": {str(cls): {"colour": GROUND_COLOURS[cls], "lift": LIFT[cls]} for cls in GROUND_COLOURS},
         "treeCell": tree_data.CELL_M,
         "treeSpecies": {str(s): {"name": n, "crown": list(tree_data.CROWN_RADIUS_M[s])} for s, n in tree_data.SPECIES_NAMES.items()},

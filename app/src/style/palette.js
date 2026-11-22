@@ -19,6 +19,19 @@ export class Palette {
     return i;
   }
 
+  // Replace the table with these colours, in this order, one row each. The baked data refers to a
+  // colour by its place in a list of names, where two names may share a colour (a pavement and a
+  // plaza can be the same grey): they must keep a row each, or every colour after them would shift.
+  seat(list) {
+    this.colors = list.map(c => [c[0], c[1], c[2]]);
+    this.ids = new Map();
+    this.colors.forEach((c, i) => {
+      const key = c.join(',');
+      if (!this.ids.has(key)) this.ids.set(key, i);
+    });
+    return this;
+  }
+
   // RGBA8, width 5 (levels), height = number of colours
   bytes() {
     const out = new Uint8Array(this.colors.length * 5 * 4);

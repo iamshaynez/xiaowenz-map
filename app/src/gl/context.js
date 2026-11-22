@@ -3,6 +3,7 @@
 export function createContext(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false, powerPreference: 'high-performance' });
   if (!gl) throw new Error('这个浏览器不支持 WebGL2');
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);    // rows of byte textures (the land-cover grids) need not be a multiple of four wide
   return gl;
 }
 
@@ -55,7 +56,7 @@ export class Program {
     const vec = value && Array.isArray(value) && Array.isArray(value[0]) ? value.flat() : value;
     switch (u.type) {
       case FLOAT: gl.uniform1f(loc, value); break;
-      case INT: case BOOL: gl.uniform1i(loc, value); break;
+      case INT: case BOOL: gl.uniform1iv(loc, Int32Array.of(...[].concat(value))); break; // one value, or a whole array
       case VEC2: gl.uniform2fv(loc, vec); break;
       case VEC3: gl.uniform3fv(loc, vec); break;
       case VEC4: gl.uniform4fv(loc, vec); break;
@@ -89,7 +90,7 @@ export function framebuffer(gl, colours, depth = null) {
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   colours.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
-  gl.drawBuffers(colours.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
+  gl.drawBuffers(colours.length ? colours.map((_, i) => gl.COLOR_ATTACHMENT0 + i) : [gl.NONE]);   // depth only, when there are no colours
   if (depth) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depth, 0);
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error(`帧缓冲不完整: 0x${status.toString(16)}`);

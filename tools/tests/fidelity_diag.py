@@ -96,13 +96,6 @@ EDGE = 0.28
 
 def classify(z, obj, groundish):
     m = np.zeros((H, W), np.uint8)
-    z, o, g = z[1:-1, 1:-1], obj[1:-1, 1:-1], groundish
-    sil = g[:-2, 1:-1] | g[2:, 1:-1] | g[1:-1, :-2] | g[1:-1, 2:]
-    warm = (z - g_ if False else (z - zz[1:-1, 1:-1])) if False else None
-    return m
-
-def classify(z, obj, groundish):
-    m = np.zeros((H, W), np.uint8)
     d = z[1:-1, 1:-1]
     o = obj[1:-1, 1:-1]
     sil = groundish[:-2, 1:-1] | groundish[2:, 1:-1] | groundish[1:-1, :-2] | groundish[1:-1, 2:]

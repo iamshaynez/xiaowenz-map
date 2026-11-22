@@ -7,9 +7,11 @@
 // to read a pixel back, so every timed frame ends with a 1-pixel read; that read costs about 0.8 ms
 // and is part of what is measured, which errs on the safe side.
 //
-// Usage: NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs [--ss 2,4] [--frames 200]
+// Usage: NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs [--ss 2,4] [--frames 200] [--only a,b] [--out name]
+//   --out name   also saves the results to out/g2/<name>.json
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '../..');
@@ -26,17 +28,26 @@ const FRAMES = Number(flag('--frames', '200'));
 // The densest part of the old city (120.168 E, 30.279 N), where the most buildings are on screen at each
 // tier; in world metres, as the pipeline's projection places it.
 const CENTRE = [27572.51, 13097.93];
+// (120.132 E, 30.229 N) and (120.150 E, 30.261 N) in the same metres
+const LONGJING = [23968.08, 7640.83], BEISHAN = [25790.19, 11145.42];   // from hz.region.project, not from memory
 const CASES = [
   { name: 'overview', viewport: [1920, 1080], frame: [960, 540], setup: '' },
   { name: 'district-widest', viewport: [1920, 1080], frame: [960, 540], setup: 'c.scale = 0.125;' },
   { name: 'district-640', viewport: [1280, 800], frame: [640, 400], setup: 'c.scale = 0.125;' },
   { name: 'street-640', viewport: [1280, 800], frame: [640, 400], setup: 'c.scale = 6;' },
+  // trees are only drawn from 0.4 pixels per metre up: the wooded hills south-west of West Lake, where
+  // a frame holds the most of them, and the plane trees of Beishan Street along the lake
+  { name: 'woods-640', viewport: [1280, 800], frame: [640, 400], setup: 'c.scale = 0.5;', centre: LONGJING },
+  { name: 'street-trees-640', viewport: [1280, 800], frame: [640, 400], setup: 'c.scale = 3;', centre: BEISHAN },
 ];
+const ONLY = flag('--only', '').split(',').filter(Boolean);
+const OUT = flag('--out', '');
 
 async function run() {
   const results = [];
   for (const ss of SUPERSAMPLING) {
     for (const test of CASES) {
+      if (ONLY.length && !ONLY.includes(test.name)) continue;
       const browser = await chromium.launch({ executablePath: CHROME, headless: true });
       try {
         const page = await browser.newPage({ viewport: { width: test.viewport[0], height: test.viewport[1] } });
@@ -71,9 +82,9 @@ async function run() {
             tiles: settled.tiles, drawn: { ...app.renderer.drawn }, frame: [app.renderer.W, app.renderer.H, app.renderer.SS],
             glError: gl.getError(),
           };
-        }, { setup: test.setup, centre: CENTRE, frames: FRAMES });
+        }, { setup: test.setup, centre: test.centre || CENTRE, frames: FRAMES });
         results.push({ ss, ...test, ...result, errors });
-        console.log(`ss ${ss}  ${test.name.padEnd(15)} ${result.frame.join('x').padEnd(10)} tiles ${String(result.drawn.tiles).padStart(3)}  triangles ${String(Math.round(result.drawn.triangles)).padStart(8)}  mean ${String(result.ms).padStart(6)} ms  p95 ${String(result.p95).padStart(6)} ms  max ${String(result.max).padStart(6)} ms  gl ${result.glError}${errors.length ? '  ERRORS ' + errors[0] : ''}`);
+        console.log(`ss ${ss}  ${test.name.padEnd(15)} ${result.frame.join('x').padEnd(10)} tiles ${String(result.drawn.tiles).padStart(3)}  triangles ${String(Math.round(result.drawn.triangles)).padStart(8)}  trees ${String(result.drawn.trees).padStart(6)}  mean ${String(result.ms).padStart(6)} ms  p95 ${String(result.p95).padStart(6)} ms  max ${String(result.max).padStart(6)} ms  gl ${result.glError}${errors.length ? '  ERRORS ' + errors[0] : ''}`);
       } finally {
         await browser.close();
       }
@@ -94,8 +105,11 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     const results = await run();
-    const json = JSON.stringify(results);
-    console.log('JSON ' + json);
+    console.log('JSON ' + JSON.stringify(results));
+    if (OUT) {
+      fs.mkdirSync(path.join(root, 'out/g2'), { recursive: true });
+      fs.writeFileSync(path.join(root, `out/g2/${OUT}.json`), JSON.stringify({ date: new Date().toISOString(), results }, null, 1) + '\n');
+    }
   } catch (error) {
     console.error('THROUGHPUT TEST FAILED', error.stack || error);
     process.exitCode = 2;

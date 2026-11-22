@@ -1,18 +1,21 @@
 // What the app draws: the overview package, plus the 1 km tiles that are in view.
-// Tiles are fetched the first time they are needed and kept; the least recently used ones go first
-// when the cache is full.
-import { loadContainer, readBuildings, readGrid, readMassing } from './data.js';
+// Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
+// longest ago are let go.
+import { loadContainer, readBase, readBuildings, readCells, readGrid, readMassing, readMesh, readPlaces, readRibbons, readTrees } from './data.js';
 
-export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the boxes
-export const TALLEST = 420;                     // metres; anything higher would be a surprise
+export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
+export const BOX_SCALE = 0.04;          // from this zoom up the overview draws its boxes (1 pixel under 25 m)
+export const TREE_SCALE = 0.4;          // from this zoom up trees are drawn one by one (a crown is a pixel or more)
+export const SHADOW_SCALE = 0.125;      // from this zoom up shadows are drawn; farther out they are under a pixel
+export const TALLEST = 420;             // metres; anything higher would be a surprise
+const CAPACITY = 300;                   // tiles kept on the GPU
 
-// A grid mesh: one vertex buffer and index buffer for the whole grid, a height texture per tile or for the overview.
-function gridMesh(gl, nx, ny) {
+// ---- meshes and textures ----------------------------------------------------------------------------------------
+export function gridMesh(gl, nx, ny) {
   const points = new Float32Array(nx * ny * 2);
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    const o = (j * nx + i) * 2;
-    points[o] = i;
-    points[o + 1] = j;
+    points[(j * nx + i) * 2] = i;
+    points[(j * nx + i) * 2 + 1] = j;
   }
   const index = new Uint32Array((nx - 1) * (ny - 1) * 6);
   let o = 0;
@@ -32,22 +35,38 @@ function gridMesh(gl, nx, ny) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, index, gl.STATIC_DRAW);
   gl.bindVertexArray(null);
-  return { vao, vbo, ibo, count: index.length };
+  return { vao, buffers: [vbo, ibo], count: index.length };
 }
 
-function heightTexture(gl, grid) {
-  const t = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, grid.nx, grid.ny, 0, gl.RED, gl.FLOAT, Float32Array.from(grid.heights));
+export function floatTexture(gl, width, height, data) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, data);
+  nearest(gl);
+  return texture;
+}
+
+export function byteTexture(gl, width, height, data, channels = 1) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  const format = channels === 1 ? gl.RED : channels === 2 ? gl.RG : gl.RGBA;
+  gl.texImage2D(gl.TEXTURE_2D, 0, channels === 1 ? gl.R8 : gl.RG8, width, height, 0, format, gl.UNSIGNED_BYTE, data);
+  nearest(gl);
+  return texture;
+}
+
+function nearest(gl) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return t;
 }
 
-// Describe a buffer's attributes on a vertex array. parts: [{ data, layout: [[location, size], ...], divisor }]
-function assemble(gl, parts, indices) {
+// Assemble the buffers of a draw on a vertex array.
+// A part is { data, layout, divisor }, with one interleaved record per vertex or per instance.
+//   layout: [[location, floats], ...]                one record of floats; the attributes follow each other
+//   layout: [[location, size, type, byteOffset], ...] with `stride` in bytes; for records that hold bytes too
+export function assemble(gl, parts, indices) {
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const buffers = [];
@@ -55,27 +74,44 @@ function assemble(gl, parts, indices) {
     const buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
     gl.bufferData(gl.ARRAY_BUFFER, part.data, gl.STATIC_DRAW);
-    const stride = part.layout.reduce((sum, [, size]) => sum + size, 0) * 4;
-    let offset = 0;
-    for (const [location, size] of part.layout) {
+    const stride = part.stride ?? part.layout.reduce((sum, entry) => sum + entry[1], 0) * 4;
+    let floatAt = 0;
+    for (const entry of part.layout) {
+      const location = entry[0];
+      let size, type, offset;
+      if (part.stride) {
+        [size, type, offset] = entry.slice(1);
+      } else {
+        size = entry[1];
+        type = gl.FLOAT;
+        offset = floatAt * 4;
+        floatAt += size;
+      }
       gl.enableVertexAttribArray(location);
-      gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset);
+      gl.vertexAttribPointer(location, size, type, false, stride, offset);
       gl.vertexAttribDivisor(location, part.divisor || 0);
-      offset += size * 4;
     }
     buffers.push(buffer);
   }
+  let count = 0;
   if (indices) {
     const ibo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
     buffers.push(ibo);
+    count = indices.length;
   }
   gl.bindVertexArray(null);
-  return { vao, buffers };
+  return { vao, buffers, count };
 }
 
-// the unit box the massing cells are drawn with: a top and four walls, as a triangle list
+const release = (gl, object) => {
+  if (!object) return;
+  gl.deleteVertexArray(object.vao);
+  object.buffers.forEach(buffer => gl.deleteBuffer(buffer));
+};
+
+// the unit box the overview's cells are drawn with: a top and four walls, as a triangle list
 function unitBox() {
   const out = [];
   const quad = (corners, normal) => {
@@ -89,6 +125,9 @@ function unitBox() {
   return new Float32Array(out);
 }
 
+// a square from -1 to 1, as a strip of four vertices
+export const UNIT_SQUARE = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+
 export class World {
   constructor(gl, index, urlBase) {
     this.gl = gl;
@@ -97,9 +136,7 @@ export class World {
     this.overview = null;
     this.tiles = new Map();        // "x_y" -> tile
     this.pending = new Map();
-    this.capacity = 600;
     this.clock = 0;
-    this.frame = 0;
   }
 
   get loaded() { return this.tiles.size; }
@@ -109,24 +146,32 @@ export class World {
     const gl = this.gl;
     const grid = readGrid(sections.GRID);
     const cells = readMassing(sections.MASS);
+    const cover = readCells(sections.LCV, 1);
+    const built = readCells(sections.URB, 2);
+    const ribbons = sections.RIBA ? readRibbons(sections.RIBA) : null;
     this.overview = {
       grid,
       mesh: gridMesh(gl, grid.nx, grid.ny),
-      heights: heightTexture(gl, grid),
+      heights: floatTexture(gl, grid.nx, grid.ny, Float32Array.from(grid.heights)),
       boxes: assemble(gl, [
         { data: unitBox(), layout: [[0, 3], [1, 2]] },
         { data: cells, layout: [[2, 4], [3, 4]], divisor: 1 },
       ]),
       cells: cells.length / 8,
+      cover: { ...cover, texture: byteTexture(gl, cover.nx, cover.ny, cover.bytes) },
+      built: { ...built, texture: byteTexture(gl, built.nx, built.ny, built.bytes, 2) },
+      ribbons: ribbons && ribbons.indices.length ? assemble(gl, [
+        { data: ribbons.vertices, layout: [[0, 4], [1, 4]] },
+      ], ribbons.indices) : null,
     };
   }
 
   // the tiles a camera can see, nearest first
-  visible(camera, extraRows = 2) {
+  visible(camera) {
     const { index } = this;
     const halfW = camera.width / (2 * camera.scale) + 720;
     const halfV = camera.height / (2 * camera.scale) + 720;
-    const top = TALLEST * camera.cosPitch / camera.sinPitch;
+    const top = TALLEST * camera.cosPitch / camera.sinPitch;   // how far up the screen the top of a tall building reaches
     const size = index.tileSize;
     const out = [];
     for (let ty = 0; ty < index.ny; ty++) {
@@ -134,7 +179,7 @@ export class World {
         const x0 = (index.ix0 + tx) * size, y0 = (index.iy0 + ty) * size;
         const corners = [[x0, y0], [x0 + size, y0], [x0, y0 + size], [x0 + size, y0 + size]].map(([x, y]) => camera.axes(x, y));
         const us = corners.map(c => c.u), vs = corners.map(c => c.v);
-        if (Math.max(...us) < -halfW || Math.min(...us) > halfW || Math.max(...vs) < -halfV - extraRows * size || Math.min(...vs) > halfV + top) continue;
+        if (Math.max(...us) < -halfW || Math.min(...us) > halfW || Math.max(...vs) < -halfV || Math.min(...vs) > halfV + top) continue;
         const mid = camera.axes(x0 + size / 2, y0 + size / 2);
         out.push({ tx, ty, x0, y0, distance: Math.hypot(mid.u, mid.v) });
       }
@@ -166,48 +211,68 @@ export class World {
       if (!entry.sections && !entry.error) continue;
       this.pending.delete(key);
       if (entry.error) continue;
-      const { sections, tx, ty } = entry;
-      const grid = sections.TERR ? readGrid(sections.TERR) : null;
-      const buildings = sections.BLDB ? readBuildings(sections.BLDB) : null;
-      const size = this.index.tileSize;
-      const tile = { key, x0: (this.index.ix0 + tx) * size, y0: (this.index.iy0 + ty) * size, used: ++this.clock };
-      if (grid) {
-        tile.grid = grid;
-        tile.heights = heightTexture(gl, grid);
-        if (!this.tileMesh || this.tileMesh.nx !== grid.nx || this.tileMesh.ny !== grid.ny) {
-          this.tileMesh = gridMesh(gl, grid.nx, grid.ny);
-        }
-      }
-      if (buildings && buildings.indices.length) {
-        tile.buildings = assemble(gl, [
-          { data: buildings.vertices, layout: [[0, 3], [1, 2], [2, 1]] },
-        ], buildings.indices);
-        const t = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, t);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 9, buildings.buildings, 0, gl.RED, gl.FLOAT, buildings.props);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        tile.props = t;
-        tile.indexCount = buildings.indices.length;
-      }
-      this.tiles.set(key, tile);
+      this.tiles.set(key, this.buildTile(key, entry.tx, entry.ty, entry.sections));
       done++;
       if (done >= budget) break;
     }
-    while (this.tiles.size > this.capacity) {
+    while (this.tiles.size > CAPACITY) {
       const oldest = [...this.tiles.values()].sort((a, b) => a.used - b.used)[0];
-      this.release(oldest);
+      this.discard(oldest);
       this.tiles.delete(oldest.key);
     }
   }
 
-  release(tile) {
+  buildTile(key, tx, ty, sections) {
     const gl = this.gl;
-    if (tile.buildings) {
-      gl.deleteVertexArray(tile.buildings.vao);
-      tile.buildings.buffers.forEach(b => gl.deleteBuffer(b));
+    const size = this.index.tileSize;
+    const tile = { key, x0: (this.index.ix0 + tx) * size, y0: (this.index.iy0 + ty) * size, used: ++this.clock };
+    if (sections.TERR) {
+      tile.grid = readGrid(sections.TERR);
+      tile.heights = floatTexture(gl, tile.grid.nx, tile.grid.ny, Float32Array.from(tile.grid.heights));
+      if (!this.tileMesh || this.tileMesh.nx !== tile.grid.nx || this.tileMesh.ny !== tile.grid.ny) {
+        release(gl, this.tileMesh);
+        this.tileMesh = { ...gridMesh(gl, tile.grid.nx, tile.grid.ny), nx: tile.grid.nx, ny: tile.grid.ny };
+      }
     }
-    if (tile.heights) gl.deleteTexture(tile.heights);
-    if (tile.props) gl.deleteTexture(tile.props);
+    if (sections.BASE) tile.base = byteTexture(gl, 32, 32, readBase(sections.BASE));
+    if (sections.BLDB) {
+      const buildings = readBuildings(sections.BLDB);
+      if (buildings.indices.length) {
+        tile.buildings = assemble(gl, [{ data: buildings.vertices, layout: [[0, 3], [1, 2], [2, 1]] }], buildings.indices);
+        tile.props = floatTexture(gl, 9, buildings.buildings, buildings.props);
+      }
+    }
+    tile.ground = {};
+    for (const [name, id] of [['water', 'WATR'], ['road', 'ROAD'], ['land', 'LAND'], ['deck', 'DECK']]) {
+      if (!sections[id]) continue;
+      const mesh = readMesh(sections[id]);
+      if (mesh.indices.length) tile.ground[name] = assemble(gl, [{ data: mesh.vertices, layout: [[0, 3], [1, 1], [2, 1]] }], mesh.indices);
+    }
+    if (sections.TREE) {
+      const trees = readTrees(sections.TREE);
+      if (trees.count) {
+        tile.trees = trees;
+        tile.treeMesh = assemble(gl, [
+          { data: UNIT_SQUARE, layout: [[0, 2]] },
+          { data: trees.records, stride: 16, layout: [[1, 4, gl.FLOAT, 0], [2, 4, gl.UNSIGNED_BYTE, 12]], divisor: 1 },
+        ]);
+      }
+    }
+    if (sections.PLCE) tile.places = readPlaces(sections.PLCE);
+    // how high and how low the tile reaches: what the sun's picture must hold
+    tile.floor = tile.grid ? tile.grid.heights.reduce((min, h) => Math.min(min, h), Infinity) : 0;
+    tile.top = tile.grid ? tile.grid.heights.reduce((max, h) => Math.max(max, h), -Infinity) : 0;
+    if (tile.props) {
+      for (let k = 0; k < tile.props.length; k += 9) tile.top = Math.max(tile.top, tile.props[k] + tile.props[k + 1]);
+    }
+    return tile;
+  }
+
+  discard(tile) {
+    const gl = this.gl;
+    release(gl, tile.buildings);
+    Object.values(tile.ground).forEach(mesh => release(gl, mesh));
+    release(gl, tile.treeMesh);
+    for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);
   }
 }

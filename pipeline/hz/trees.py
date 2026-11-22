@@ -28,7 +28,7 @@ CAMPHOR, WILLOW, PLANE, PINE, BAMBOO, BLOSSOM = range(6)
 SPECIES_NAMES = {CAMPHOR: "camphor", WILLOW: "willow", PLANE: "plane", PINE: "pine", BAMBOO: "bamboo", BLOSSOM: "blossom"}
 KIND_NAMES = {0: "woods", 1: "lawns", 2: "streets", 3: "shores"}
 WOODS, LAWNS, STREETS, SHORES = range(4)
-RECORD = numpy.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("species", "u1"), ("size", "u1"), ("seed", "u1"), ("kind", "u1"), ("pad", "u1")])
+RECORD = numpy.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("species", "u1"), ("size", "u1"), ("seed", "u1"), ("kind", "u1")])   # 16 bytes
 
 CROWN_RADIUS_M = {CAMPHOR: (3.8, 5.6), WILLOW: (3.6, 5.0), PLANE: (3.8, 5.8), PINE: (2.6, 3.8), BAMBOO: (2.0, 3.0), BLOSSOM: (2.4, 3.4)}
 WOODS_MIX = (CAMPHOR, CAMPHOR, CAMPHOR, PINE, PINE, BAMBOO, BAMBOO, PLANE)      # what a Hangzhou hill is made of

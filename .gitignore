@@ -1,5 +1,6 @@
-# raw downloads and baked output are rebuilt by the pipeline
+# raw downloads, the pipeline's intermediates and the baked output are all rebuilt by the pipeline
 data/raw/
+data/work/
 data/baked/
 # scratch and harness output
 out/

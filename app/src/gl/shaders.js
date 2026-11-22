@@ -417,7 +417,7 @@ out vec4 outColor;
 void main() {
   float v = texelFetch(uDepthTex, ivec2(gl_FragCoord.xy), 0).r;
   // three bytes hold the full 24-bit depth; a fourth would exceed single precision
-  float n = floor(clamp(v, 0.0, 1.0) * 16777215.0 + 0.5);
+  float n = min(floor(clamp(v, 0.0, 1.0) * 16777215.0 + 0.5), 16777215.0);   // 1.0 would round up to 2^24
   float b0 = mod(n, 256.0);
   n = floor(n / 256.0);
   float b1 = mod(n, 256.0);

@@ -1,7 +1,7 @@
 // 像素杭州：主城区活地图。启动、输入和帧循环。
 import { createContext } from './gl/context.js';
 import { CityRenderer } from './render/city.js';
-import { DISTRICT_SCALE, World } from './world/store.js';
+import { DISTRICT_SCALE, TREE_SCALE, World } from './world/store.js';
 
 const canvas = document.getElementById('c');
 const readout = document.getElementById('readout');
@@ -22,7 +22,10 @@ async function boot() {
     fetch(`${DATA}/curated/palette.json`).then(r => r.json()),
   ]);
   const gl = createContext(canvas);
-  const supersampling = [1, 2, 3, 4].includes(Number(new URLSearchParams(location.search).get('ss'))) ? Number(new URLSearchParams(location.search).get('ss')) : 2;
+  // supersampling only decides whether a pixel is covered (D015): four samples each way on a desktop,
+  // two on a touch screen, where the frame is smaller and the GPU slower; ?ss= overrides
+  const asked = Number(new URLSearchParams(location.search).get('ss'));
+  const supersampling = [1, 2, 3, 4].includes(asked) ? asked : matchMedia('(pointer: coarse)').matches ? 2 : 4;
   const renderer = new CityRenderer(gl, width, height, supersampling);
   canvas.width = width;
   canvas.height = height;
@@ -34,10 +37,14 @@ async function boot() {
   const colours = paletteFile.colours;
   const names = index.palette.slice();
   for (const name of Object.keys(colours)) if (!names.includes(name)) names.push(name);
-  names.forEach(name => renderer.palette.id(colours[name]));
+  renderer.palette.seat(names.map(name => colours[name]));
   renderer.updatePalette();
-  const place = name => names.indexOf(name);
-  renderer.ground = [place('grass'), place('forest'), place('rock')];
+  const place = name => {
+    const at = names.indexOf(name);
+    if (at < 0) throw new Error(`调色板里没有 ${name}`);
+    return at;
+  };
+  renderer.setLook(index, place);
 
   const world = new World(gl, index, `${DATA}/baked`);
   await world.loadOverview();
@@ -124,15 +131,18 @@ async function boot() {
   };
 
   // ---- loop ----------------------------------------------------------------------------
-  let dirty = true, last = performance.now();
+  // the wind and the water only show once trees are drawn; farther out a frame is made only when something changes
+  const animated = () => camera.scale >= TREE_SCALE && !frozen;
+  let dirty = true, frozen = false, last = performance.now();
   const frame = now => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (pan(dt)) dirty = true;
+    if (!frozen) renderer.time = now / 1000;
     // tiles are only wanted from the district tier on; the overview draws from its own package
     if (camera.scale >= DISTRICT_SCALE * 0.5) world.request(world.visible(camera), 10);
     world.upload(4);
-    if (dirty || world.pending.size) {
+    if (dirty || world.pending.size || animated()) {
       renderer.present(renderer.render(world));
       dirty = false;
       readout.textContent = `${tierName(camera.scale)} · 1 像素 ≈ ${pixelSize(camera.scale)} · 瓦片 ${world.tiles.size}${world.pending.size ? '（加载中）' : ''} · 三角形 ${Math.round(renderer.drawn.triangles / 1000)} 千`;
@@ -147,6 +157,8 @@ async function boot() {
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     overview,
     touch: () => { dirty = true; },
+    // hold the wind and the water still, so that two frames of the same view are the same
+    freeze(value = true) { frozen = value; if (value) renderer.time = 0; },
     // average time of a frame, measured the only way a browser lets you: by reading a pixel back
     bench(frames = 60) {
       const start = performance.now();
