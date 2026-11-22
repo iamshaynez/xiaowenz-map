@@ -1,0 +1,17 @@
+# raw downloads and baked output are rebuilt by the pipeline
+data/raw/
+data/baked/
+# scratch and harness output
+out/
+.video_agent/
+.zcode/
+.DS_Store
+# upstream reference checkout, cloned by hand
+reference/
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# node
+node_modules/
