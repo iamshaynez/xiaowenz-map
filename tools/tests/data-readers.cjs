@@ -45,7 +45,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   assert.deepEqual([cover.nx, cover.ny, cover.x0, cover.y0, cover.cell], [built.nx, built.ny, built.x0, built.y0, built.cell]);
   let wet = 0, lakes = 0;
   for (const c of cover.bytes) {
-    assert.ok(c <= 23, 'ground class id');
+    assert.ok(c <= 24, 'ground class id');
     if (c >= 1 && c <= 4) wet++;
     if (c === 1) lakes++;
   }
@@ -66,7 +66,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   const seen = new Set();
   const sample = [files[0], files[Math.floor(files.length / 3)], files[Math.floor(files.length * 2 / 3)], files[files.length - 1],
     ...files.filter(f => /^2[0-9]_1[0-9]\.bin$/.test(f)).slice(0, 6)];
-  let buildings = 0, trees = 0;
+  let buildings = 0, trees = 0, rooftop = 0, routes = 0;
   for (const name of sample) {
     const t = read(`tiles/b/${name}`);
     const [tx, ty] = name.replace('.bin', '').split('_').map(Number);
@@ -82,7 +82,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     if (t.BASE) {
       const base = data.readBase(t.BASE);
       assert.equal(base.length, 1024);
-      assert.ok(base.every(c => c <= 23), 'base class id');
+      assert.ok(base.every(c => c <= 24), 'base class id');
     }
     if (t.BLDB) {
       const b = data.readBuildings(t.BLDB);
@@ -94,6 +94,18 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
       assert.ok(Array.from(b.props.filter((_, k) => k % 9 === 1)).every(h => h > 0 && h < 1000), 'building heights in range');
       buildings += b.buildings;
     }
+    if (t.ROOF) {
+      const boxes = data.readBoxes(t.ROOF);
+      assert.equal(t.ROOF.bytes.length, 4 + boxes.length * 4);
+      assert.equal(boxes.length % 8, 0);
+      for (let k = 0; k < boxes.length; k += 8) {
+        const [x, y, base, height, halfW, halfD] = boxes.subarray(k, k + 6);
+        assert.ok(x >= 0 && x < index.tileSize && y >= 0 && y < index.tileSize, 'rooftop box inside its tile');
+        assert.ok(height > 0 && height < 20 && halfW > 0 && halfW < 10 && halfD > 0 && halfD < 10 && base > -50 && base < 1800, 'rooftop box in range');
+        assert.ok(Number.isInteger(boxes[k + 6]) && boxes[k + 7] < 255, 'rooftop box colours');
+      }
+      rooftop += boxes.length / 8;
+    }
     for (const id of ['WATR', 'ROAD', 'LAND', 'DECK']) {
       if (!t[id]) continue;
       const m = data.readMesh(t[id]);
@@ -101,7 +113,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
       assert.equal(m.vertices.length % 5, 0);
       assert.ok(m.indices.every(i => i < m.vertices.length / 5), `${id} index in range`);
       const classes = m.vertices.filter((_, k) => k % 5 === 3);
-      assert.ok(classes.every(c => c >= 1 && c <= 23 && Number.isInteger(c)), `${id} class in range`);
+      assert.ok(classes.every(c => c >= 1 && c <= 24 && Number.isInteger(c)), `${id} class in range`);
     }
     if (t.TREE) {
       const tr = data.readTrees(t.TREE);
@@ -119,10 +131,27 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
       trees += tr.count;
     }
     if (t.PLCE) assert.ok(Array.isArray(data.readPlaces(t.PLCE)));
+    if (t.PATH) {
+      const lines = data.readPaths(t.PATH);
+      assert.equal(t.PATH.bytes.length, 4 + lines.reduce((sum, l) => sum + 12 + l.points.length * 4, 0));
+      for (const line of lines) {
+        assert.ok([5, 6, 7, 8, 9, 10, 200, 201, 202].includes(line.cls), `line class ${line.cls}`);
+        assert.ok(line.points.length >= 8 && line.length > 0 && line.width > 0, 'line has points, a length and a width');
+        for (let i = 0; i < line.points.length; i += 4) {
+          const [x, y, z, dist] = line.points.subarray(i, i + 4);
+          assert.ok(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z), 'line point is finite');
+          // lines are drawn whole from the tile holding their middle, so their ends may be a long way outside it
+          assert.ok(Math.abs(x) < 120000 && Math.abs(y) < 120000 && z > -50 && z < 1800, 'line point in range');
+          if (i) assert.ok(dist >= line.points[i - 1], 'distances increase along the line');
+        }
+        assert.ok(Math.abs(line.points[line.points.length - 1] - line.length) < 0.5, 'the last distance is the length');
+      }
+      routes += lines.length;
+    }
   }
-  for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
+  for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
   console.log(`overview: grid ${grid.nx}x${grid.ny}, ${cells} massing cells, cover ${cover.nx}x${cover.ny} (${area(wet).toFixed(1)} km² of water), ${ribbons.indices.length / 3} ribbon triangles`);
-  console.log(`tiles: ${sample.length} sampled of ${files.length}, sections ${[...seen].sort().join(' ')}, ${buildings} buildings, ${trees} trees`);
+  console.log(`tiles: ${sample.length} sampled of ${files.length}, sections ${[...seen].sort().join(' ')}, ${buildings} buildings, ${rooftop} rooftop boxes, ${routes} routes, ${trees} trees`);
 })().catch(error => {
   console.error('DATA READERS FAILED:', error.message);
   process.exitCode = 1;

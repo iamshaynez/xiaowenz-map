@@ -92,13 +92,15 @@ function compare(rendered, expected, ground) {
   return { shadowPixels: count, extra, missing, share: (extra + missing) / Math.max(1, count) };
 }
 
-// the tree: its crown where the projection puts it, its shadow where the ellipse says. At this zoom the
-// tree is drawn in its detailed form: the crown sits at 1.6 radii, and its shadow is the circle of its
-// radius thrown from there (aloneShade: no box is expected to shade anything else)
+// the tree: its crown where the projection puts it, its shadow where the ellipse says. It is a camphor:
+// at this zoom it is drawn in its detailed form, the crown 15% larger than its radius, sitting 1.1 radii
+// (and 30% more for the detail) above the ground, with an outline made lumpy by noise to about an eighth
+// of its radius. Its shadow is the circle of its radius thrown from the crown's centre (aloneShade: no
+// box is expected to shade anything else)
 function checkTree(cam, shadow, tree, cls, mask, aloneShade = true) {
-  const lift = tree.radius * 1.6;
+  const lift = tree.radius * 1.1 * 1.3;
   const centre = project(cam, tree.x, tree.y, tree.z + lift);
-  const radius = Math.max(tree.radius * cam.scale, 0.75) * 1.2;      // the detail tier, from scale 2.5 up
+  const radius = Math.max(tree.radius * cam.scale, 0.75) * 1.15;
   const d = shadowDirection(cam, shadow);
   const ellipse = project(cam, tree.x + d.x * lift, tree.y + d.y * lift, tree.z);
   const rx = tree.radius * cam.scale * 1.05, ry = rx * Math.sin(cam.pitch) + 1;
@@ -106,8 +108,8 @@ function checkTree(cam, shadow, tree, cls, mask, aloneShade = true) {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = y * W + x, kind = cls[k * 4 + 1], ground = cls[k * 4] > 127;
     const crownDistance = Math.hypot(x + 0.5 - centre.sx, y + 0.5 - centre.sy) / radius;
-    if (crownDistance < 0.92) { out.crownInside++; if (kind !== 3) out.crownInsideWrong++; }
-    if (crownDistance > 1.08) { out.crownOutside++; if (kind === 3) out.crownOutsideWrong++; }
+    if (crownDistance < 0.84) { out.crownInside++; if (kind !== 3) out.crownInsideWrong++; }
+    if (crownDistance > 1.14) { out.crownOutside++; if (kind === 3) out.crownOutsideWrong++; }
     if (!ground) continue;
     const e = Math.hypot((x + 0.5 - ellipse.sx) / rx, (y + 0.5 - ellipse.sy) / ry);
     const shaded = mask[k] > 100;

@@ -18,7 +18,17 @@ const SHOTS = [
   ['district', 'c.scale = 0.2;'],
   ['woods', 'c.x = 23968.08; c.y = 7640.83; c.scale = 0.5;'],                      // the wooded hills at Longjing (120.132 E, 30.229 N)
   ['westlake', 'c.x = 26274.23; c.y = 11244.24; c.scale = 1.5;'],                  // Broken Bridge and the north shore (120.155 E, 30.262 N)
-  ['street', 'c.zoomAt(c.width / 2, c.height / 2, 6);'],
+  ['village', 'c.x = 22250; c.y = 6750; c.scale = 3;'],                             // where the pitched roofs are densest, the tea villages (120.114 E, 30.221 N)
+  ['canal', 'c.x = 25847.11; c.y = 17246.29; c.scale = 1.5;'],                   // Gongchen Bridge on the Grand Canal (120.149 E, 30.316 N)
+  ['hefang', 'c.x = 26697.29; c.y = 8903.72; c.scale = 3;'],                    // He Fang Street, the old town (120.160 E, 30.241 N)
+  ['beishan-street', 'c.x = 25790.19; c.y = 11145.42; c.scale = 4;'],            // Beishan Street under the trees (120.150 E, 30.261 N)
+  ['zhaohui', 'c.x = 27792.62; c.y = 14201.93; c.scale = 3;'],                   // a housing estate of walk-ups (120.170 E, 30.289 N)
+  ['qianjiang', 'c.x = 31725.17; c.y = 9666.81; c.scale = 2;'],                  // the towers of Qianjiang New City (120.212 E, 30.249 N)
+  ['street', 'c.x = 27542.89; c.y = 12805.15; c.scale = 6;'],                    // a main street by Wulin Square, found in the data (120.1678 E, 30.2764 N)
+  // the same view in other seasons: [name, camera code, season]
+  ['westlake-winter', 'c.x = 26274.23; c.y = 11244.24; c.scale = 1.5;', 'winter'],
+  ['village-autumn', 'c.x = 22250; c.y = 6750; c.scale = 3;', 'autumn'],
+  ['village-spring', 'c.x = 22250; c.y = 6750; c.scale = 3;', 'spring'],
 ];
 
 (async () => {
@@ -42,15 +52,16 @@ const SHOTS = [
     page.on('requestfailed', r => errors.push('requestfailed: ' + r.url()));
     await page.goto(`http://127.0.0.1:${PORT}/app/`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
-    for (const [name, setup] of SHOTS) {
-      const result = await page.evaluate(async code => {
+    for (const [name, setup, season] of SHOTS) {
+      const result = await page.evaluate(async ({ code, season }) => {
         const app = window.__hz;
+        app.setSeason(season || 'summer');
         if (code) new Function('c', code)(app.camera);
         app.touch();
         await new Promise(resolve => setTimeout(resolve, 120));
         const settled = await app.settle();
         return { settled, bench: app.bench(40), readout: document.getElementById('readout').textContent };
-      }, setup);
+      }, { code: setup, season });
       await page.screenshot({ path: path.join(outDir, `${name}.png`) });
       console.log(name.padEnd(9), JSON.stringify(result));
     }
