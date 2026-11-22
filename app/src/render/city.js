@@ -7,8 +7,11 @@ import { Program, depth24, framebuffer } from '../gl/context.js';
 import { CITY_SHADERS } from '../gl/city-shaders.js';
 import { TREE_SHADERS } from '../gl/shaders-trees.js';
 import { SHADOW_SHADERS } from '../gl/shaders-shadow.js';
+import { LIFE_SHADERS } from '../gl/shaders-life.js';
+import { DEBUG_SHADERS } from '../gl/shaders-debug.js';
+import { Traffic, TRAFFIC_COLOURS } from '../life/traffic.js';
+import { assemble, BOX_SCALE, DISTRICT_SCALE, LIFE_SCALE, ROOF_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE, UNIT_BOX } from '../world/store.js';
 import { CityCamera } from '../gl/city-camera.js';
-import { BOX_SCALE, DISTRICT_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE } from '../world/store.js';
 import { StyleRenderer } from './style.js';
 
 const WHITE = [1, 1, 1, 1], CLEAR = [0, 0, 0, 0], FAR = [1];
@@ -20,6 +23,8 @@ const SHADOW_SIZE = 1024;                // the sun's picture, in texels
 // -0.12 seen through its camera, so a shadow points the same way as in the reference at every zoom.
 export const SHADOW = [1.004, 0.834];
 const SHADOW_SLACK_M = 0.05;             // how much nearer the sun something must stand than a point to shade it
+const CAR_SCALE = 1.2, PERSON_SCALE = 5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
+const RECORD = 12;                        // floats per moving box, as traffic.js writes them
 const ISLAND_CORNER_M = 7000, ISLAND_BAND_M = 1500;
 
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -27,7 +32,7 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 export class CityRenderer extends StyleRenderer {
   constructor(gl, width, height, ss = 2) {
     super(gl, width, height, ss);
-    for (const [name, s] of Object.entries({ ...CITY_SHADERS, ...TREE_SHADERS, ...SHADOW_SHADERS })) {
+    for (const [name, s] of Object.entries({ ...CITY_SHADERS, ...TREE_SHADERS, ...SHADOW_SHADERS, ...LIFE_SHADERS, ...DEBUG_SHADERS })) {
       this.programs[name] = new Program(gl, s.vs, s.fs, name);
     }
     this.city = new CityCamera();
@@ -35,14 +40,30 @@ export class CityRenderer extends StyleRenderer {
     this.city.height = height;
     this.city.ss = ss;
     this.time = 0;                       // seconds; the wind and the water move with it
+    this.bare = 0;                       // winter: 1 once the deciduous trees have lost their leaves
+    this.snow = 0;                       // 1 where snow lies
+    this.snowColour = [1, 1, 1];
     this.detailScale = 2.5;              // from this zoom up a tree shows its trunk
     this.emptyMask = this.blackTexture();
+    // what moves: two instance buffers (vehicles, people) filled afresh every frame
+    this.traffic = new Traffic();
+    this.lifeMesh = this.lifeMeshOf(this.traffic.boxes);
+    this.folkMesh = this.lifeMeshOf(this.traffic.folks);
     this.shadowMap = depth24(gl, SHADOW_SIZE, SHADOW_SIZE);
     this.shadowFbo = framebuffer(gl, [], this.shadowMap);
     this.shadowOn = 0;
     this.shadowBias = 0;
     this.light = { dir: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0], box: [0, 0, 1, 1], depth: [0, 1] };
     this.drawn = { tiles: 0, triangles: 0, trees: 0 };
+    this.landmarks = [];              // set by the page: the list from landmarks/index.js
+  }
+
+  lifeMeshOf(data) {
+    const { gl } = this;
+    return assemble(gl, [
+      { data: UNIT_BOX, layout: [[0, 3], [1, 2]] },
+      { data, stride: RECORD * 4, layout: [[2, 4, gl.FLOAT, 0], [3, 4, gl.FLOAT, 16], [4, 4, gl.FLOAT, 32]], divisor: 1 },
+    ]);
   }
 
   // an empty shadow mask: a single black texel; it also stands in for textures a shader does not read
@@ -59,10 +80,16 @@ export class CityRenderer extends StyleRenderer {
   // What the baked data refers to by name or by number: the palette index behind every ground class,
   // tree species and tone of the overview. `place` is a colour name -> palette index.
   setLook(index, place) {
-    this.groundPal = new Array(24).fill(0);
+    this.groundPal = new Array(25).fill(0);
     for (const [id, info] of Object.entries(index.groundClasses)) this.groundPal[Number(id)] = place(info.colour);
     this.species = Object.keys(index.treeSpecies).sort((a, b) => a - b).map(id => place(index.treeSpecies[id].name));
     this.bark = place('bark');
+    this.barkPale = place('bark_pale');
+    this.snowIndex = place('snow');
+    this.window = place('window_dark');
+    this.wood = place('wood_dark');
+    this.red = place('temple_red');
+    this.trafficColours = TRAFFIC_COLOURS.map(name => place(name));
     this.treeCell = index.treeCell;
     this.tones = [place('urban_ground'), place('roof_flat_grey'), place('glass_grey')];
     // the island is the region itself, turned as it stands on the ground; its edge wanders up to 600 m
@@ -93,7 +120,11 @@ export class CityRenderer extends StyleRenderer {
       .set('uShadowBox', this.light.box)
       .set('uShadowDepth', this.light.depth)
       .set('uShadowOn', this.shadowOn)
-      .set('uShadowBias', this.shadowBias);
+      .set('uShadowBias', this.shadowBias)
+      .set('uBare', this.bare)
+      .set('uSnow', this.snow)
+      .set('uSnowColour', this.snowColour)
+      .set('uSnowIndex', this.snowIndex);
     gl.activeTexture(gl.TEXTURE0 + HASH_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, this.hashTexture);
     prog.set('uHash', HASH_UNIT);
@@ -105,6 +136,17 @@ export class CityRenderer extends StyleRenderer {
       gl.bindTexture(gl.TEXTURE_2D, this.shadowMap);
       prog.set('uShadowMap', SHADOW_UNIT);
     }
+  }
+
+  // The season: `colours` is the season's table (every colour the map uses, by name, in the palette's own
+  // order); `winter` says whether the leaves are down and snow lies.
+  setSeason(colours, winter = {}) {
+    this.palette.seat(colours);
+    this.updatePalette();
+    this.bare = winter.bare ? 1 : 0;
+    this.snow = winter.snow ? 1 : 0;
+    const white = colours[this.snowIndex];
+    this.snowColour = [white[0] / 255, white[1] / 255, white[2] / 255];
   }
 
   bind(unit, texture) {
@@ -119,8 +161,11 @@ export class CityRenderer extends StyleRenderer {
     const district = city.scale >= DISTRICT_SCALE;
     const tiles = district && world.overview ? this.visibleTiles(world) : [];
     // shadows belong to the district tier: farther out they are smaller than a pixel
+    this.drawn = { tiles: tiles.length, triangles: 0, trees: 0, landmarks: 0 };
     this.shadowOn = district && shadows && world.overview && city.scale >= SHADOW_SCALE ? 1 : 0;
-    if (this.shadowOn) this.castShadows(tiles);      // changes the framebuffer and the colour masks; the scene sets its own
+    const life = district && world.overview && city.scale >= LIFE_SCALE;
+    if (life) this.updateLife(tiles);
+    if (this.shadowOn) this.castShadows(tiles, life && city.scale >= CAR_SCALE);   // changes the framebuffer and the colour masks; the scene sets its own
     frame.bindScene();
     gl.disable(gl.BLEND);
     gl.depthMask(true);
@@ -130,9 +175,8 @@ export class CityRenderer extends StyleRenderer {
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.colorMask(true, true, true, true, false, false, true, true);
-    this.drawn = { tiles: tiles.length, triangles: 0, trees: 0 };
     if (world.overview) {
-      if (district) this.drawDistrict(tiles, world, city.scale >= TREE_SCALE);
+      if (district) this.drawDistrict(tiles, world, city.scale >= TREE_SCALE, life);
       else this.drawOverview(world);
     }
     this.resolve();
@@ -210,7 +254,7 @@ export class CityRenderer extends StyleRenderer {
     gl.bindVertexArray(null);
   }
 
-  drawDistrict(tiles, world, withTrees) {
+  drawDistrict(tiles, world, withTrees, withLife) {
     const { gl, city } = this;
     for (const tile of tiles) {
       if (!tile.heights) continue;
@@ -232,6 +276,10 @@ export class CityRenderer extends StyleRenderer {
     }
     const buildings = this.programs.buildings.use();
     this.applyCamera(buildings);
+    // facades once a pixel is under about 0.8 m: the shader draws them from half of uDetail on
+    buildings.set('uDetail', Math.min(1, Math.max(0, city.scale - 0.6)))
+      .set('uMid', Math.min(1, Math.max(0, city.scale - 0.3)))
+      .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uLift', 0);
     for (const tile of tiles) {
       if (!tile.buildings) continue;
       buildings.set('uProps', this.bind(FIRST_FREE_UNIT, tile.props)).set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
@@ -239,8 +287,106 @@ export class CityRenderer extends StyleRenderer {
       gl.drawElements(gl.TRIANGLES, tile.buildings.count, gl.UNSIGNED_INT, 0);
       this.drawn.triangles += tile.buildings.count / 3;
     }
+    if (city.scale >= ROOF_SCALE) this.drawRoofs(tiles);
+    // (the roofs were drawn with their own shader: this one has to be chosen again)
+    this.eachLandmark(buildings, (program, part, z) => {
+      program.use().set('uProps', this.bind(FIRST_FREE_UNIT, part.props)).set('uLift', z).set('uOffset', [part.x - city.x, part.y - city.y]);
+      gl.bindVertexArray(part.mesh.vao);
+      gl.drawElements(gl.TRIANGLES, part.mesh.count, gl.UNSIGNED_INT, 0);
+      this.drawn.triangles += part.mesh.count / 3;
+    });
     if (withTrees) this.drawTrees(tiles);
+    if (withLife) this.drawLife();
     gl.bindVertexArray(null);
+  }
+
+  // every part of a landmark that can be in view, with the height of the ground it stands on less what
+  // of it is bedded in (a tower two metres, a bridge nothing: its deck meets the road)
+  eachLandmark(program, draw) {
+    const { city, W, H, groundAt } = this;
+    this.drawn.landmarks = 0;
+    if (!groundAt) return;
+    for (const landmark of this.landmarks) {
+      for (const part of landmark.parts) {
+        const c = city.axes(part.x, part.y), scale = city.scale;
+        if (Math.abs(c.u) * scale > W / 2 + (part.reach + 10) * scale) continue;
+        if (Math.abs(c.v) * city.sinPitch * scale > H / 2 + (part.reach + 10) * scale + part.top * city.cosPitch * scale) continue;
+        draw(program, part, groundAt(part.x, part.y) - part.bed);
+        this.drawn.landmarks++;
+      }
+    }
+  }
+
+  // For tests: how much of a landmark is in the frame just made, and how much of that can be seen. Its
+  // parts are drawn again in one flat colour into the scene's own buffers: once against the depth the
+  // scene left (what is not hidden behind something else), once over everything (what is in the frame at
+  // all). The scene's colour is spoilt by this; the next frame is drawn afresh anyway.
+  // -> { all, seen, box, lift, cover }: counts of the frame's pixels; box = [x0, y0, x1, y1] of what
+  //    can be seen, from the top-left corner; lift = the height the landmark stands at; cover = per
+  //    pixel, 2 seen, 1 hidden, 0 nothing there
+  landmarkMask(id) {
+    const { gl, frame, city, W, H, SS, groundAt } = this;
+    const landmark = this.landmarks.find(item => item.id === id);
+    if (!landmark || !landmark.parts.length || !groundAt) return { all: 0, seen: 0, box: null, lift: 0 };
+    const prog = this.programs.mask.use();
+    this.applyCamera(prog, { shadowMap: false });
+    frame.bindScene();
+    gl.disable(gl.BLEND);
+    gl.colorMask(true, true, true, true, false, false, false, false);
+    const bytes = new Uint8Array(W * SS * H * SS * 4);
+    let lift = 0;
+    const measure = against => {
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(against ? gl.LEQUAL : gl.ALWAYS);
+      gl.depthMask(false);
+      gl.clearBufferfv(gl.COLOR, 0, CLEAR);
+      for (const part of landmark.parts) {
+        lift = groundAt(part.x, part.y) - part.bed;
+        prog.set('uOffset', [part.x - city.x, part.y - city.y]).set('uLift', lift);
+        gl.bindVertexArray(part.mesh.vao);
+        gl.drawElements(gl.TRIANGLES, part.mesh.count, gl.UNSIGNED_INT, 0);
+      }
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
+      gl.readPixels(0, 0, W * SS, H * SS, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+      const hit = new Uint8Array(W * H);
+      let count = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const row = (H - 1 - y) * SS, col = x * SS;
+        let on = 0;
+        for (let sy = 0; sy < SS && !on; sy++) {
+          const at = ((row + sy) * W * SS + col) * 4;
+          for (let sx = 0; sx < SS; sx++) if (bytes[at + sx * 4]) { on = 1; break; }
+        }
+        if (!on) continue;
+        hit[y * W + x] = 1;
+        count++;
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      return { count, box: count ? [x0, y0, x1, y1] : null, hit };
+    };
+    const seen = measure(true), all = measure(false);
+    // per pixel of the frame, in rows from the top: 2 what can be seen, 1 what is hidden, 0 nothing there
+    const cover = new Uint8Array(W * H);
+    for (let k = 0; k < cover.length; k++) cover[k] = all.hit[k] ? (seen.hit[k] ? 2 : 1) : 0;
+    gl.depthMask(true);
+    gl.depthFunc(gl.LESS);
+    gl.colorMask(true, true, true, true, false, false, true, true);
+    gl.bindVertexArray(null);
+    return { all: all.count, seen: seen.count, box: seen.box, boxAll: all.box, lift, cover };
+  }
+
+  // what stands on flat roofs, drawn once it is more than a pixel
+  drawRoofs(tiles) {
+    const { gl, city } = this;
+    const boxes = this.programs.roofBoxes.use();
+    this.applyCamera(boxes);
+    for (const tile of tiles) {
+      if (!tile.roofs) continue;
+      boxes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+      gl.bindVertexArray(tile.roofs.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.roofs.count);
+      this.drawn.triangles += tile.roofs.count * 10;
+    }
   }
 
   // ---- shadows --------------------------------------------------------------------------------------------
@@ -284,7 +430,7 @@ export class CityRenderer extends StyleRenderer {
   }
 
   // draw the buildings and trees of the tiles as the sun sees them, depth only
-  castShadows(tiles) {
+  castShadows(tiles, withLife) {
     const { gl, city } = this;
     this.aimLight(tiles);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo);
@@ -304,11 +450,27 @@ export class CityRenderer extends StyleRenderer {
     gl.bindTexture(gl.TEXTURE_2D, null);
     const buildings = this.programs.shadowBuildings.use();
     this.applyCamera(buildings, { shadowMap: false });
+    buildings.set('uLift', 0);
     for (const tile of tiles) {
       if (!tile.buildings) continue;
-      buildings.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+      buildings.set('uProps', this.bind(FIRST_FREE_UNIT, tile.props)).set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
       gl.bindVertexArray(tile.buildings.vao);
       gl.drawElements(gl.TRIANGLES, tile.buildings.count, gl.UNSIGNED_INT, 0);
+    }
+    this.eachLandmark(buildings, (program, part, z) => {
+      program.set('uProps', this.bind(FIRST_FREE_UNIT, part.props)).set('uLift', z).set('uOffset', [part.x - city.x, part.y - city.y]);
+      gl.bindVertexArray(part.mesh.vao);
+      gl.drawElements(gl.TRIANGLES, part.mesh.count, gl.UNSIGNED_INT, 0);
+    });
+    if (city.scale >= ROOF_SCALE) {
+      const boxes = this.programs.shadowBoxes.use();
+      this.applyCamera(boxes, { shadowMap: false });
+      for (const tile of tiles) {
+        if (!tile.roofs) continue;
+        boxes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(tile.roofs.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.roofs.count);
+      }
     }
     if (city.scale >= TREE_SCALE) {
       const runs = this.treeRuns(tiles);
@@ -321,9 +483,40 @@ export class CityRenderer extends StyleRenderer {
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, run.count);
       }
     }
+    if (withLife && this.traffic.count) {
+      const life = this.programs.shadowLife.use();
+      this.applyCamera(life, { shadowMap: false });
+      gl.bindVertexArray(this.lifeMesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, this.traffic.count);
+    }
     gl.bindVertexArray(null);
     gl.colorMask(true, true, true, true);
     // the scene pass sets its own framebuffer, depth range and colour masks
+  }
+
+  // ---- what moves -------------------------------------------------------------------------------------------
+  // where everything is at this moment, and its boxes uploaded
+  updateLife(tiles) {
+    const { gl, city, W, H } = this;
+    const which = { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE };
+    this.drawn.life = this.traffic.place(tiles, this.time, city, { W, H, scale: city.scale }, which, this.trafficColours);
+    const { count, people, boxes, folks } = this.traffic;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lifeMesh.buffers[1]);
+    gl.bufferData(gl.ARRAY_BUFFER, count ? boxes.subarray(0, count * RECORD) : new Float32Array(0), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.folkMesh.buffers[1]);
+    gl.bufferData(gl.ARRAY_BUFFER, people ? folks.subarray(0, people * RECORD) : new Float32Array(0), gl.DYNAMIC_DRAW);
+  }
+
+  drawLife() {
+    const { gl } = this;
+    const boxes = this.programs.lifeBoxes.use();
+    this.applyCamera(boxes);
+    boxes.set('uWindow', this.window);
+    for (const [mesh, count] of [[this.lifeMesh, this.traffic.count], [this.folkMesh, this.traffic.people]]) {
+      if (!count) continue;
+      gl.bindVertexArray(mesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, count);
+    }
   }
 
   // ---- trees ----------------------------------------------------------------------------------------------
@@ -367,6 +560,7 @@ export class CityRenderer extends StyleRenderer {
     trees.set('uTime', this.time)
       .set('uSpecies', this.species)
       .set('uBark', this.bark)
+      .set('uBarkPale', this.barkPale)
       .set('uDetail', city.scale >= this.detailScale ? 1 : 0);
     for (const part of city.scale >= this.detailScale ? [0, 1] : [0]) {
       trees.set('uPart', part);

@@ -30,10 +30,11 @@ vec2 unproject(float sx, float sy, float z) {
 // face turned towards the lower left 2.3, the one towards the lower right 1.2. A wall's outward normal,
 // turned into the camera's frame, is compared with the direction of the light; (0, 0) means "up".
 // The light stays where it is on the screen when the city is turned, so shadows always fall to the right.
+// The normal comes as its level part: nothing for an up-facing surface, a unit vector for a wall, and for
+// a sloped roof as much of one as the slope is steep. The rest of it is the share that faces up.
 float faceLight(vec2 n) {
-  if (n == vec2(0.0)) return 3.4;
   float cx = n.x * uCentre.z - n.y * uCentre.w, cy = n.x * uCentre.w + n.y * uCentre.z;
-  return 1.75 + 0.55 * (cy - cx);
+  return 1.75 + 0.55 * (cy - cx) + 1.65 * sqrt(max(0.0, 1.0 - dot(n, n)));
 }
 `;
 
@@ -76,6 +77,8 @@ float grainAt(vec2 world, float sizeInPixels, float seed) {
 // the ground as a rectangle turned a little (index.json's "island" says how much), its corners rounded.
 // A band along the edge is broken up by noise and scattered away with the Bayer pattern, the way
 // groundColor() in the reference scatters its own fringe.
+
+
 // Needs NOISE.
 export const ISLAND = /* glsl */`
 uniform vec4 uIsland;   // centre x, centre y, half-width, half-height, all in world metres
@@ -101,13 +104,14 @@ export const GROUND_CLASSES = {
   ROAD_MAJOR: 5, ROAD_SECONDARY: 6, ROAD_MINOR: 7, ROAD_SERVICE: 8, ROAD_PEDESTRIAN: 9, PATH: 10,
   RAIL: 11, WALL: 12, SIDEWALK: 13,
   GRASS: 14, FOREST: 15, FARMLAND: 16, YARD: 17, SAND: 18, ROCK: 19, WETLAND: 20, PITCH: 21, URBAN: 22, CEMETERY: 23,
+  TEA: 24,                     // the tea hills: terraces the satellite map takes for trees
 };
 
 export const GROUND_GLSL = /* glsl */`
 const int WATER_LAKE = 1, WATER_RIVER = 2, WATER_CANAL = 3, WATER_POND = 4;
 const int ROAD_MAJOR = 5, ROAD_MINOR = 7, ROAD_PEDESTRIAN = 9, PATH = 10, WALL = 12, SIDEWALK = 13;
-const int GRASS = 14, FOREST = 15, FARMLAND = 16, YARD = 17, URBAN = 22;
-uniform int uGroundPal[24];   // the palette index of each ground class
+const int GRASS = 14, FOREST = 15, FARMLAND = 16, YARD = 17, URBAN = 22, TEA = 24;
+uniform int uGroundPal[25];   // the palette index of each ground class
 uniform float uTime;          // seconds; tests freeze it
 `;
 
@@ -148,4 +152,17 @@ float inSun(vec3 q) {
 }
 // the shadow tint of the reference, for a colour in 0..1
 vec3 inShade(vec3 color) { return floor(color * 255.0 * vec3(0.54, 0.52, 0.72)) / 255.0; }
+`;
+
+// Winter. Snow lies on what faces up, in a share that depends on the surface: nothing on water, a dusting on
+// the cleared roads, nearly all of a lawn. The Bayer pattern and a slow noise break the edge of it.
+export const SEASON = /* glsl */`
+uniform float uSnow;          // 1 where snow lies
+uniform int uSnowIndex;       // the palette index of snow
+const float SNOWED[25] = float[25](0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.25, 0.3, 0.3, 0.6, 0.7, 0.15, 0.2, 0.65, 0.94, 0.6, 0.96, 0.8, 0.96, 0.85, 0.96, 0.9, 0.6, 0.96, 0.0);
+// The noise breaks the edge of the snow into patches; it must not put snow where none lies at all (the
+// water), so a cover of nothing stays nothing.
+bool snowed(float cover, vec2 world, ivec2 pixel) {
+  return uSnow > 0.5 && cover > 0.0 && bayerAt(pixel) < cover + (noiseAt(world * 0.03) - 0.5) * 0.5;
+}
 `;

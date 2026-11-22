@@ -1,12 +1,14 @@
 // What the app draws: the overview package, plus the 1 km tiles that are in view.
 // Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
 // longest ago are let go.
-import { loadContainer, readBase, readBuildings, readCells, readGrid, readMassing, readMesh, readPlaces, readRibbons, readTrees } from './data.js';
+import { loadContainer, readBase, readBoxes, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees } from './data.js';
 
 export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
 export const BOX_SCALE = 0.04;          // from this zoom up the overview draws its boxes (1 pixel under 25 m)
 export const TREE_SCALE = 0.4;          // from this zoom up trees are drawn one by one (a crown is a pixel or more)
 export const SHADOW_SCALE = 0.125;      // from this zoom up shadows are drawn; farther out they are under a pixel
+export const LIFE_SCALE = 0.3;           // from this zoom up boats are drawn; cars from 1.2, the lake's own boats from 0.8, people from 5
+export const ROOF_SCALE = 0.6;          // from this zoom up what stands on flat roofs is drawn; farther out it is under a pixel
 export const TALLEST = 420;             // metres; anything higher would be a surprise
 const CAPACITY = 300;                   // tiles kept on the GPU
 
@@ -111,7 +113,7 @@ const release = (gl, object) => {
   object.buffers.forEach(buffer => gl.deleteBuffer(buffer));
 };
 
-// the unit box the overview's cells are drawn with: a top and four walls, as a triangle list
+// the unit box the overview's cells and the rooftop boxes are drawn with: a top and four walls, as a triangle list
 function unitBox() {
   const out = [];
   const quad = (corners, normal) => {
@@ -124,6 +126,8 @@ function unitBox() {
   quad([[-1, -1, 0], [1, -1, 0], [1, -1, 1], [-1, -1, 1]], [0, -1]);
   return new Float32Array(out);
 }
+
+export const UNIT_BOX = unitBox();
 
 // a square from -1 to 1, as a strip of four vertices
 export const UNIT_SQUARE = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
@@ -141,6 +145,30 @@ export class World {
 
   get loaded() { return this.tiles.size; }
 
+  // the height of the ground at a point of the world: read from the tile that holds it when that tile is
+  // loaded, smoothly between its grid points; otherwise from the overview's coarse grid
+  groundAt(x, y) {
+    const { index } = this, size = index.tileSize;
+    const tx = Math.floor(x / size) - index.ix0, ty = Math.floor(y / size) - index.iy0;
+    const tile = this.tiles.get(`${tx}_${ty}`);
+    if (tile && tile.grid) {
+      const g = tile.grid, fx = (x - g.x0) / g.cell, fromSouth = (y - g.y0) / g.cell;
+      const i = Math.min(g.nx - 2, Math.max(0, Math.floor(fx))), j = Math.min(g.ny - 2, Math.max(0, Math.floor(fromSouth)));
+      const u = Math.min(1, Math.max(0, fx - i)), v = Math.min(1, Math.max(0, fromSouth - j));
+      const h = (a, b) => g.heights[(g.ny - 1 - b) * g.nx + a];        // row 0 of the grid is the northern edge
+      // read the way the mesh is drawn (gridMesh): a cell is two triangles, a-c-b and b-c-d, with a
+      // south-west, b south-east, c north-west and d north-east; the bake stands everything on this surface
+      const a = h(i, j), b = h(i + 1, j), c = h(i, j + 1), d = h(i + 1, j + 1);
+      return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
+    }
+    const o = this.overview;
+    if (!o) return 0;
+    const g = o.grid;
+    const i = Math.min(g.nx - 1, Math.max(0, Math.floor((x - g.x0) / g.cell)));
+    const j = Math.min(g.ny - 1, Math.max(0, Math.floor((g.y0 + g.ny * g.cell - y) / g.cell)));
+    return g.heights[j * g.nx + i];
+  }
+
   async loadOverview() {
     const sections = await loadContainer(`${this.urlBase}/overview.bin`);
     const gl = this.gl;
@@ -154,7 +182,7 @@ export class World {
       mesh: gridMesh(gl, grid.nx, grid.ny),
       heights: floatTexture(gl, grid.nx, grid.ny, Float32Array.from(grid.heights)),
       boxes: assemble(gl, [
-        { data: unitBox(), layout: [[0, 3], [1, 2]] },
+        { data: UNIT_BOX, layout: [[0, 3], [1, 2]] },
         { data: cells, layout: [[2, 4], [3, 4]], divisor: 1 },
       ]),
       cells: cells.length / 8,
@@ -242,6 +270,13 @@ export class World {
         tile.props = floatTexture(gl, 9, buildings.buildings, buildings.props);
       }
     }
+    if (sections.ROOF) {
+      const boxes = readBoxes(sections.ROOF);
+      if (boxes.length) {
+        tile.roofs = assemble(gl, [{ data: UNIT_BOX, layout: [[0, 3], [1, 2]] }, { data: boxes, layout: [[2, 4], [3, 4]], divisor: 1 }]);
+        tile.roofs.count = boxes.length / 8;
+      }
+    }
     tile.ground = {};
     for (const [name, id] of [['water', 'WATR'], ['road', 'ROAD'], ['land', 'LAND'], ['deck', 'DECK']]) {
       if (!sections[id]) continue;
@@ -259,11 +294,13 @@ export class World {
       }
     }
     if (sections.PLCE) tile.places = readPlaces(sections.PLCE);
+    if (sections.PATH) tile.paths = readPaths(sections.PATH);
     // how high and how low the tile reaches: what the sun's picture must hold
     tile.floor = tile.grid ? tile.grid.heights.reduce((min, h) => Math.min(min, h), Infinity) : 0;
     tile.top = tile.grid ? tile.grid.heights.reduce((max, h) => Math.max(max, h), -Infinity) : 0;
     if (tile.props) {
       for (let k = 0; k < tile.props.length; k += 9) tile.top = Math.max(tile.top, tile.props[k] + tile.props[k + 1]);
+      tile.top += 4;                     // room for what stands on the roofs
     }
     return tile;
   }
@@ -271,6 +308,7 @@ export class World {
   discard(tile) {
     const gl = this.gl;
     release(gl, tile.buildings);
+    release(gl, tile.roofs);
     Object.values(tile.ground).forEach(mesh => release(gl, mesh));
     release(gl, tile.treeMesh);
     for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);

@@ -80,6 +80,13 @@ export function readBuildings(section) {
   };
 }
 
+// ROOF: boxes put on flat roofs by rule: count, then 8 floats per box: x, y relative to the tile, base, height,
+// half width, half depth, wall colour, roof colour
+export function readBoxes(section) {
+  const buffer = ownCopy(section).buffer;
+  return new Float32Array(buffer, 4, new DataView(buffer).getUint32(0, true) * 8);
+}
+
 // WATR, ROAD, LAND and DECK: vertex count, index count, then vertices of five floats
 // (x, y, z, class, seed) and indices
 export function readMesh(section) {
@@ -116,6 +123,30 @@ export function readRibbons(section) {
     vertices: new Float32Array(buffer, 8, vertices * 8),
     indices: new Uint32Array(buffer, 8 + vertices * 32, indices),
   };
+}
+
+// PATH: the lines things move along. u32 count, then per line u16 points, u8 class, u8 spare, f32 width, f32 length,
+// and per point x, y relative to the tile, z, distance from the start (f32 each)
+export function readPaths(section) {
+  const buffer = ownCopy(section).buffer, view = new DataView(buffer);
+  const count = view.getUint32(0, true);
+  const lines = [];
+  let at = 4;
+  for (let k = 0; k < count; k++) {
+    const points = view.getUint16(at, true), cls = view.getUint8(at + 2), width = view.getFloat32(at + 4, true), length = view.getFloat32(at + 8, true);
+    at += 12;
+    const data = new Float32Array(buffer, at, points * 4);
+    at += points * 16;
+    // the middle of the line's box and half its diagonal, for deciding whether it can be in view
+    let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+    for (let i = 0; i < data.length; i += 4) {
+      west = Math.min(west, data[i]); east = Math.max(east, data[i]);
+      south = Math.min(south, data[i + 1]); north = Math.max(north, data[i + 1]);
+    }
+    lines.push({ cls, width, length, points: data, cx: (west + east) / 2, cy: (south + north) / 2, reach: Math.hypot(east - west, north - south) / 2 });
+  }
+  if (at !== buffer.byteLength) throw new Error('truncated paths');
+  return lines;
 }
 
 // PLCE: JSON: [name, kind key, kind]
