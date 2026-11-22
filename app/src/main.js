@@ -88,13 +88,27 @@ async function boot() {
 
   // ---- input ------------------------------------------------------------------------------------------
   const pointers = new Map();
-  let pinch = null;
-  const toFrame = e => ({ x: e.clientX - canvas.getBoundingClientRect().left, y: e.clientY - canvas.getBoundingClientRect().top });
+  let pinch = null;            // two fingers: how far apart they were, where their middle was, and what is drawn under it
+  let wheelZoom = null;        // a turn of the wheel not yet applied: where the cursor is, and by how much to zoom
+  // a pointer's position in the frame's own pixels. The canvas shows each of them as pixelScale CSS pixels,
+  // and the camera works in the frame's pixels.
+  const toFrame = e => {
+    const box = canvas.getBoundingClientRect();
+    return { x: (e.clientX - box.left) * width / box.width, y: (e.clientY - box.top) * height / box.height };
+  };
+  // the height of what is drawn at a point of the frame: what a zoom holds on to. Where nothing is drawn
+  // yet (tiles on their way, the white outside the island) it is the ground from the overview's grid.
+  const surfaceAt = at => {
+    const depth = renderer.depthAt(at.x, at.y);
+    if (depth !== null) return camera.heightAt(at.x, at.y, depth);
+    const ground = camera.unproject(at.x, at.y);
+    return world.groundAt(ground.x, ground.y);
+  };
   canvas.addEventListener('pointerdown', e => {
     canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, toFrame(e));
-    if (pointers.size === 2) pinch = pinchState();
+    if (pointers.size === 2) pinch = { ...pinchState(), height: surfaceAt(pinchState()) };
   });
   const pinchState = () => {
     const [a, b] = [...pointers.values()];
@@ -105,18 +119,22 @@ async function boot() {
     const was = pointers.get(e.pointerId), now = toFrame(e);
     pointers.set(e.pointerId, now);
     if (pointers.size === 2 && pinch) {
-      // two fingers: zoom by how far apart they are, keeping the middle of them where it is on the ground
-      const state = pinchState();
-      const kept = camera.unproject(pinch.x, pinch.y);
-      camera.zoomAt(state.x, state.y, camera.scale * state.distance / pinch.distance);
-      const after = camera.unproject(pinch.x, pinch.y);
+      // two fingers: zoom by how far apart they are, about the middle of them, and the middle carries what
+      // was under it along (so two fingers together pan). All at the height of what was under the middle
+      // when the second finger touched: the thing seen there stays under the fingers.
+      const state = pinchState(), { x, y, height } = pinch;
+      const kept = camera.unprojectAt(x, y, camera.scale, height);
+      camera.zoomAt(state.x, state.y, camera.scale * state.distance / pinch.distance, height);
+      const after = camera.unprojectAt(state.x, state.y, camera.scale, height);
       camera.x += kept.x - after.x;
       camera.y += kept.y - after.y;
-      pinch = state;
+      pinch = { ...state, height };
     } else if (pointers.size === 1) {
-      // one finger or a mouse: turn the city, and tilt it with a pull up or down
-      camera.yaw -= (now.x - was.x) * 0.006;
-      camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + (now.y - was.y) * 0.005));
+      // one finger or a mouse: turn the city, and tilt it with a pull up or down, by how far the hand moved
+      // on the page (CSS pixels), whatever the size of a frame's pixel
+      const across = (now.x - was.x) * pixelScale, down = (now.y - was.y) * pixelScale;
+      camera.yaw -= across * 0.006;
+      camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
       ui.follow();                 // turns around the landmark last flown to, if there is one
     }
     dirty = true;
@@ -126,9 +144,11 @@ async function boot() {
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    const at = toFrame(e);
-    const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016));
-    camera.zoomAt(at.x, at.y, Math.min(24, Math.max(0.004, camera.scale * factor)));
+    // not applied here: the zoom holds on to what the frame on show draws under the cursor, so it is done
+    // just before the next frame is drawn (see the loop), and turns that pile up between two frames are
+    // done together
+    const at = toFrame(e), factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016));
+    wheelZoom = wheelZoom ? { x: at.x, y: at.y, factor: wheelZoom.factor * factor } : { x: at.x, y: at.y, factor };
     dirty = true;
   }, { passive: false });
   const keys = new Set();
@@ -177,6 +197,14 @@ async function boot() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (ui.tick(now) || pan(dt)) dirty = true;
+    if (wheelZoom) {
+      // zoom about the point under the cursor; that point is read from the frame on show, so this comes
+      // before the frame is drawn again
+      const { x, y, factor } = wheelZoom;
+      wheelZoom = null;
+      camera.zoomAt(x, y, Math.min(24, Math.max(0.004, camera.scale * factor)), surfaceAt({ x, y }));
+      dirty = true;
+    }
     if (!frozen) renderer.time = now / 1000;
     // tiles are only wanted from the district tier on; the overview draws from its own package
     if (camera.scale >= DISTRICT_SCALE * 0.5) world.request(world.visible(camera), 10);
@@ -197,6 +225,14 @@ async function boot() {
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things
     landmarkMask: id => renderer.landmarkMask(id),
+    // the world point drawn at a position on the page (CSS pixels from the canvas's corner): what a zoom
+    // there holds on to
+    under(clientX, clientY) {
+      const box = canvas.getBoundingClientRect();
+      const at = { x: (clientX - box.left) * width / box.width, y: (clientY - box.top) * height / box.height };
+      const z = surfaceAt(at), point = camera.unproject(at.x, at.y, z);
+      return { x: point.x, y: point.y, z };
+    },
     overview,
     touch: () => { dirty = true; },
     season: () => season,

@@ -105,6 +105,7 @@ export class CityRenderer extends StyleRenderer {
   applyCamera(prog, { shadowMap = true } = {}) {
     const { gl, W, H, SS } = this, c = this.city;
     const [near, far] = c.depthRange(TALLEST);
+    this.depthRange = [near, far];
     prog.set('uView', [W, H, SS, c.scale])
       .set('uAngles', [c.cos, c.sin, c.sinPitch, c.cosPitch])
       .set('uOrigin', c.origin())
@@ -158,6 +159,7 @@ export class CityRenderer extends StyleRenderer {
   // -> the framebuffer holding the finished picture
   render(world, { edges = true, shadows = true } = {}) {
     const { gl, frame, city } = this;
+    this.frames = (this.frames || 0) + 1;
     const district = city.scale >= DISTRICT_SCALE;
     const tiles = district && world.overview ? this.visibleTiles(world) : [];
     // shadows belong to the district tier: farther out they are smaller than a pixel
@@ -185,6 +187,27 @@ export class CityRenderer extends StyleRenderer {
     this.fullscreen('edges', frame.workBFbo, { uColor: frame.workA, uClass: frame.class, uDepthTex: frame.depth },
       { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
     return frame.workBFbo;
+  }
+
+  // The engine depth of what the last frame shows at one of its pixels: the nearest thing drawn there,
+  // or null where nothing is. A depth texture cannot be read back on its own, so the frame's depth is
+  // packed into colours once per frame; a pixel of that is cheap to read, cheap enough for the zoom to ask
+  // for the height under the cursor at every turn of the wheel.
+  depthAt(sx, sy) {
+    const { gl, frame, W, H } = this;
+    if (!this.depthRange) return null;
+    const x = Math.min(W - 1, Math.max(0, Math.floor(sx))), y = Math.min(H - 1, Math.max(0, Math.floor(sy)));
+    if (this.packed !== this.frames) {
+      this.fullscreen('packDepth', frame.packedDepthFbo, { uDepthTex: frame.depth });
+      this.packed = this.frames;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, frame.packedDepthFbo);
+    const bytes = this.depthPixel || (this.depthPixel = new Uint8Array(4));
+    gl.readPixels(x, H - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    const z = (bytes[0] + bytes[1] * 256 + bytes[2] * 65536) / 16777215;
+    if (z >= 0.99999) return null;                 // nothing drawn there: the depth is still cleared
+    const [near, far] = this.depthRange;
+    return near - z * (near - far);
   }
 
   // copy a finished frame to the canvas

@@ -1,6 +1,7 @@
 // The page on a phone: a small touch screen, held upright and sideways. What is checked: it loads and
 // draws at a sensible resolution, the list of places opens from its button, a touch turns the city, two
-// fingers zoom it, the season buttons work, and nothing runs off the side of the page.
+// fingers zoom it about what is under their middle and pan when they move together, the season buttons
+// work, and nothing runs off the side of the page.
 //
 // Usage: NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs [out-dir]
 const { chromium, devices } = require('playwright');
@@ -86,11 +87,25 @@ async function run(browser, device, name) {
   const after = await page.evaluate(() => ({ yaw: window.__hz.camera.yaw, pitch: window.__hz.camera.pitch, scale: window.__hz.camera.scale }));
   check(Math.abs(after.yaw - before.yaw) > 0.1 && Math.abs(after.pitch - before.pitch) > 0.02, `${name}: a finger drag turns and tilts (yaw ${before.yaw.toFixed(2)} -> ${after.yaw.toFixed(2)}, pitch ${before.pitch.toFixed(2)} -> ${after.pitch.toFixed(2)})`);
   check(Math.abs(after.scale - before.scale) < 1e-6, `${name}: one finger does not zoom`);
-  // two fingers zoom
-  await pinch(client, w * 0.5, h * 0.5, 40, 140);
+  // two fingers zoom, about what is under their middle: it stays there. The view is of a pagoda on a hill
+  // and the middle of the page is half-way up it: a zoom taken about the ground under the fingers, as it
+  // used to be, leaves the pagoda sliding up the page.
+  const middle = { x: w * 0.5, y: h * 0.5 };
+  const held = await under(page, middle.x, middle.y);
+  await pinch(client, middle.x, middle.y, 40, 140);
   const zoomed = await page.evaluate(() => window.__hz.camera.scale);
   check(zoomed > after.scale * 1.5, `${name}: two fingers spread zoom in (${after.scale.toFixed(2)} -> ${zoomed.toFixed(2)})`);
   await page.evaluate(() => window.__hz.settle(30000));
+  const still = await under(page, middle.x, middle.y);
+  const slipped = Math.hypot(still.x - held.x, still.y - held.y, still.z - held.z);
+  check(slipped < 2, `${name}: what was under the middle of the fingers stays there (${slipped.toFixed(1)} m off; was ${held.z.toFixed(0)} m up)`);
+  // two fingers together carry the map along
+  const shift = { x: w * 0.12, y: h * 0.1 };
+  await move2(client, middle.x, middle.y, 60, shift.x, shift.y);
+  await page.evaluate(() => window.__hz.settle(30000));
+  const carried = await under(page, middle.x + shift.x, middle.y + shift.y);
+  const left = Math.hypot(carried.x - still.x, carried.y - still.y, carried.z - still.z);
+  check(left < 3, `${name}: two fingers moving together pan: what was under their middle follows it (${left.toFixed(1)} m off)`);
   await page.screenshot({ path: path.join(outDir, `${name}-zoomed.png`) });
   // seasons by their buttons
   await page.click('#seasons button[data-season="winter"]');
@@ -101,6 +116,19 @@ async function run(browser, device, name) {
   console.log(name.padEnd(10), JSON.stringify({ viewport: info.viewport, frame: info.frame, shown: info.shown, yaw: +after.yaw.toFixed(2), zoom: +zoomed.toFixed(2) }));
   await context.close();
 }
+
+// two fingers moving together across the canvas: a pan
+async function move2(client, x, y, spread, dx, dy, steps = 8) {
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x - spread, y, id: 1 }, { x: x + spread, y, id: 2 }] });
+  for (let k = 1; k <= steps; k++) {
+    await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x - spread + dx * k / steps, y: y + dy * k / steps, id: 1 }, { x: x + spread + dx * k / steps, y: y + dy * k / steps, id: 2 }] });
+    await wait(16);
+  }
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+// the world point the page draws at a position on the page
+const under = (page, x, y) => page.evaluate(({ x, y }) => window.__hz.under(x, y), { x, y });
 
 (async () => {
   const server = spawn('node', [path.join(root, 'serve.mjs')], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });

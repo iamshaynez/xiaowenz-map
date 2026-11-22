@@ -23,8 +23,8 @@ node serve.mjs
 | 动作 | 鼠标键盘 | 触屏 |
 |---|---|---|
 | 旋转、俯仰 | 拖动 | 单指拖动 |
-| 缩放 | 滚轮（对着光标） | 双指张开 |
-| 平移 | W A S D 或方向键 | 双指拖动 |
+| 缩放 | 滚轮（以鼠标下面的东西为锚点） | 双指张开（以两指中间的东西为锚点） |
+| 平移 | W A S D 或方向键 | 两指一起移动 |
 | 回到全景 | R 或"全景"按钮 | "全景"按钮 |
 | 正俯视 | M 或"俯视"按钮 | "俯视"按钮 |
 | 季节 | 1 2 3 4 或右上角的按钮 | 按钮 |
@@ -53,13 +53,14 @@ NODE_PATH="$(npm root -g)" node tools/tests/shadows.cjs                         
 NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs                               # 真实城市的十四个视角
 NODE_PATH="$(npm root -g)" node tools/tests/tour.cjs                                 # 24 处地标、四季、缩放阶梯，顺带出验收图
 NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs                         # 每处地标的取景：露出来多少像素、在不在中央、是不是自己的颜色
+NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs                             # 滚轮缩放的锚点：鼠标下面的东西不动
 NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs                               # 两种手机的模拟
 NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --ss 2,4 --out 名字        # 吞吐
 NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10                    # 随机漫游十分钟
 NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                             # 与原版参照逐像素比（闸门 G1）
 ```
 
-浏览器测试各自起一个本地服务器（端口 5390–5398），不要同时跑两个。`fidelity.cjs` 的退出码是 1：它停下来报的就是下面那项已知的例外，其余指标全过。
+浏览器测试各自起一个本地服务器（端口 5390–5399），不要同时跑两个。`fidelity.cjs` 的退出码是 1：它停下来报的就是下面那项已知的例外，其余指标全过。
 
 浏览器测试需要全局安装的 Playwright 和 `/Applications/Google Chrome.app`。
 

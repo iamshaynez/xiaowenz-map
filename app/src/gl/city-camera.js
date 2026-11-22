@@ -75,13 +75,22 @@ export class CityCamera {
   // how much the depth changes per pixel row on a flat floor (the reference's GRADIENT_Y)
   get gradientY() { return this.cosPitch / (this.scale * this.sinPitch); }
 
-  // keep the point under a screen position where it is while the zoom changes
-  zoomAt(sx, sy, scale) {
-    const before = this.unproject(sx, sy);
-    const after = this.unprojectAt(sx, sy, scale);
+  // keep the point under a screen position where it is while the zoom changes. `height` is the height of
+  // what is drawn there (the ground, a roof, a hill top), so that the thing seen under the cursor stays
+  // under the cursor. At height 0 it is the ground point under the cursor that stays, and whatever stands
+  // on that ground slides up the page as the zoom comes in: by its height, times the change in zoom.
+  zoomAt(sx, sy, scale, height = 0) {
+    const before = this.unprojectAt(sx, sy, this.scale, height);
+    const after = this.unprojectAt(sx, sy, scale, height);
     this.x += before.x - after.x;
     this.y += before.y - after.y;
     this.scale = scale;
+  }
+
+  // the height of the point drawn at a screen position, from its engine depth (what project() returns as d):
+  // d = v cos(pitch) + z sin(pitch) and (sy - H/2) / scale = v sin(pitch) - z cos(pitch)
+  heightAt(sx, sy, depth) {
+    return this.sinPitch * depth - this.cosPitch * ((sy - this.height / 2) / this.scale);
   }
 }
 
