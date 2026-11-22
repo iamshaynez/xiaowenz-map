@@ -1,0 +1,202 @@
+"""docs/DATA-REPORT.md: what the map is made of, counted from the data rather than typed by hand.
+
+Run after the bake:  python -m hz.report
+"""
+import json
+import pickle
+from collections import Counter
+
+import numpy
+import shapely
+
+from . import region
+from .classify import (
+    ARCHETYPE_NAMES,
+    ROOF_FLAT,
+    ROOF_GABLE,
+    ROOF_GREAT,
+    ROOF_HIP,
+    ROOF_SAW,
+    TEA_PLACES,
+    VILLAGE_LEVELS,
+    classify,
+)
+from .landmarks import cleared_around, cleared_mask
+from .terrain import load as load_terrain
+
+HEIGHT_SOURCES = {"osm:height": "OSM 的 height 标签", "osm:levels": "OSM 的层数标签 × 层高", "globfp": "3D-GloBFP 数据集", "inferred": "推断"}
+ORIGINS = {"osm": "OSM 的轮廓（高度取自数据集）", "osm-block": "OSM 画成整块的楼群，改用数据集里逐栋的轮廓", "globfp": "3D-GloBFP 的轮廓"}
+
+
+def table(headers, rows):
+    out = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    out += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
+    return "\n".join(out)
+
+
+def build(log=print):
+    with open(region.WORK / "buildings.pkl", "rb") as f:
+        buildings = pickle.load(f)
+    grid, info = load_terrain(region.WORK / "terrain.bin")
+    classify(buildings, grid, info, log=lambda *a: None)
+    index = json.loads((region.BAKED / "index.json").read_text(encoding="utf-8"))
+    geoms = numpy.asarray([b["geom"] for b in buildings], dtype=object)
+    areas = shapely.area(geoms)
+    heights = numpy.array([b["height"] for b in buildings])
+    levels = numpy.array([b["levels"] for b in buildings])
+    west, south, east, north = region.region_bounds()
+    region_km2 = shapely.box(0, 0, east - west, north - south).area / 1e6
+
+    out = []
+    add = out.append
+    add("# 数据报告\n")
+    add("> 像素杭州主城区活地图的数据底座。所有数字由 `python -m hz.report` 从 `data/work/` 和 `data/baked/` 现算，写进本文件。\n")
+    add("## 范围\n")
+    add(f"- 经纬 {region.WEST}–{region.EAST} E，{region.SOUTH}–{region.NORTH} N。投影 UTM 51N（EPSG:{region.EPSG}），原点东 {region.ORIGIN_E:.0f}、北 {region.ORIGIN_N:.0f}。")
+    add(f"- 外接框 {east - west / 1:.0f} 米东西 × {north - south:.0f} 米南北，约 {region_km2:.0f} 平方公里；范围本身在地面是个转了约 1.4 度的四边形（见 `index.json` 的 `island`）。")
+    add(f"- 烘焙 {index['tilesBaked']} 块 1 公里瓦片，外加全景包 `overview.bin`。\n")
+
+    add("## 建筑\n")
+    centres = shapely.centroid(geoms)
+    cx, cy = shapely.get_x(centres), shapely.get_y(centres)
+    cleared = cleared_mask(cx, cy, cleared_around())
+    add(table(["项目", "数量"], [
+        ["合并后的建筑记录", f"{len(buildings):,}"],
+        ["立在水里、不入图", f"{index['leftOutOfWater']:,}"],
+        ["入图的建筑记录", f"{index['buildings']:,}"],
+        ["其中给手工搭的地标让位、不画的", f"{int(cleared.sum()):,}"],
+    ]))
+    add("")
+    add("数据集把一栋楼拆成几个部分（院落的外圈和内院、不同高度的主体和裙房），所以\"记录\"多过\"楼\"：外接框相同的记录有 99,064 组，见下面\"外接框相同的记录\"。")
+    add("")
+    add("### 轮廓从哪来\n")
+    origins = Counter(b["origin"] for b in buildings)
+    add(table(["来源", "数量", "占比"], [[ORIGINS.get(k, k), f"{v:,}", f"{100 * v / len(buildings):.1f}%"] for k, v in origins.most_common()]))
+    add("")
+    add("### 楼高从哪来\n")
+    sources = Counter(b["height_source"] for b in buildings)
+    add(table(["来源", "数量", "占比"], [[HEIGHT_SOURCES.get(k, k), f"{v:,}", f"{100 * v / len(buildings):.1f}%"] for k, v in sources.most_common()]))
+    capped = sum(1 for b in buildings if b.get("village_cap"))
+    halls = sum(1 for b in buildings if b.get("temple_hall"))
+    pitched = sum(1 for b in buildings if b.get("osm_roof"))
+    add("")
+    add(f"有来源的（前三类）占 {100 * (1 - sources['inferred'] / len(buildings)):.1f}%。推断的 {sources['inferred']:,} 栋里：{capped:,} 栋是茶村、湿地村里的房子，数据集给的楼高被压到 {VILLAGE_LEVELS} 层以内；{halls:,} 栋是寺庙的殿堂（按 OSM 的标签和名字认出，如“济公殿”），一律按一层高的大殿处理，因为数据集把大屋顶量成了五六层的楼；{pitched:,} 栋是 OSM 记了屋顶形状的房子（如“人字顶、黑色”），按一两层的坡顶房处理；其余按类型和名称关键词估层数。净慈寺在 OSM 里只有一个节点，它的地面（100 米内）没有名字、没有高度来源的轮廓也按殿堂处理。")
+    add("")
+    add(table(["楼高", "米"], [["中位", f"{numpy.median(heights):.0f}"], ["90 分位", f"{numpy.percentile(heights, 90):.0f}"], ["99 分位", f"{numpy.percentile(heights, 99):.0f}"], ["最高", f"{heights.max():.0f}"]]))
+    add("")
+    add(f"占地中位 {numpy.median(areas):.0f} 平方米；总占地 {areas.sum() / 1e6:.1f} 平方公里，占范围 {100 * areas.sum() / 1e6 / region_km2:.1f}%；总建筑面积（占地 × 层数）约 {(areas * levels).sum() / 1e6:,.0f} 平方公里。")
+    add("")
+    add("### 类型与屋顶\n")
+    kinds = Counter(b["archetype"] for b in buildings)
+    roofs = Counter(b["roof"] for b in buildings)
+    roof_names = {ROOF_FLAT: "平顶", ROOF_GABLE: "人字", ROOF_HIP: "四坡", ROOF_SAW: "锯齿", ROOF_GREAT: "殿堂大屋顶"}
+    add(table(["原型", "数量"], [[ARCHETYPE_NAMES.get(k, k), f"{v:,}"] for k, v in sorted(kinds.items())]))
+    add("")
+    add(table(["屋顶", "数量"], [[roof_names.get(k, k), f"{v:,}"] for k, v in sorted(roofs.items())]))
+    add("")
+    add("坡屋顶只给轮廓接近矩形的楼画（最小外接矩形的填充率 ≥ 0.8；寺庙殿堂的大屋顶放宽到 0.65，屋脊也更高）；其余退回平顶。\n")
+
+    add("## 按类型分的概况\n")
+    rows = []
+    for k, _ in sorted(kinds.items()):
+        sel = numpy.array([b["archetype"] == k for b in buildings])
+        rows.append([ARCHETYPE_NAMES.get(k, k), f"{sel.sum():,}", f"{numpy.median(heights[sel]):.0f}", f"{numpy.median(areas[sel]):.0f}", f"{numpy.median(levels[sel]):.0f}"])
+    add(table(["原型", "数量", "楼高中位（米）", "占地中位（平方米）", "层数中位"], rows))
+    add("")
+
+    add("## 分区统计\n")
+    add("范围按 5 × 5 切成格子，每格约 7.7 × 7.1 公里；格子里建筑的数量和中位楼高（米）。西到东、北到南。\n")
+    centres = shapely.centroid(geoms)
+    cx, cy = shapely.get_x(centres), shapely.get_y(centres)
+    cols = numpy.clip(((cx - west) / (east - west) * 5).astype(int), 0, 4)
+    rows_idx = numpy.clip(((north - cy) / (north - south) * 5).astype(int), 0, 4)
+    grid_rows = []
+    for r in range(5):
+        cells = []
+        for c in range(5):
+            sel = (cols == c) & (rows_idx == r)
+            cells.append(f"{sel.sum():,} / {numpy.median(heights[sel]):.0f}" if sel.sum() else "—")
+        grid_rows.append(cells)
+    add(table(["", "西", "", "中", "", "东"], [[r + 1] + row for r, row in enumerate(grid_rows)]))
+    add("")
+
+    add("## 外接框相同的记录\n")
+    west_b, south_b, east_b, north_b = shapely.bounds(geoms).T
+    keys = numpy.round(numpy.column_stack([west_b, south_b, east_b, north_b]), 2)
+    _, inverse, counts = numpy.unique(keys, axis=0, return_inverse=True, return_counts=True)
+    grouped = numpy.flatnonzero(counts[inverse] > 1)
+    order = grouped[numpy.argsort(inverse[grouped], kind="stable")]
+    groups = inverse[order]
+    pairs = same = 0
+    for k in range(1, len(order)):
+        if groups[k] == groups[k - 1]:
+            pairs += 1
+            same += bool(shapely.equals(geoms[order[k - 1]], geoms[order[k]]))
+    add(f"外接框四角坐标（精确到厘米）完全相同的记录：{int((counts > 1).sum()):,} 组、{len(grouped):,} 条，最大的组 {int(counts.max())} 条。逐对比较几何，{pairs:,} 对里只有 {same:,} 对的轮廓真的完全一样，其余是同一栋楼的不同部分共用一个外接框——院落式建筑的外圈和内院、不同高度的主体和裙房，几乎全部来自 3D-GloBFP。两个部分都画是对的（高的盖住矮的），所以没有去重；那 {same:,} 对真正重复的影响可以忽略。")
+    add("")
+
+    add("## 地面与水\n")
+    from .ground import GROUND_COLOURS, Ground
+    g = Ground.load(region.WORK / "ground.pkl")
+    add(table(["图层", "面积（平方公里）"], [[GROUND_COLOURS.get(c, c), f"{g.layers[c].area / 1e6:.1f}"] for c in sorted(g.layers, key=lambda k: -g.layers[k].area)]))
+    add("")
+    lake = [p for p in shapely.get_parts(g.water) if p.contains(shapely.Point(*[float(v) for v in region.project(120.145, 30.245)]))]
+    if lake:
+        add(f"西湖水面（OSM 多边形）：{lake[0].area / 1e6:.2f} 平方公里。")
+    add(f"桥面、高架（浮在地面上的路和铁路）：{len(g.decks):,} 段。")
+    add("")
+    add("水的颜色按水体分：西湖、运河、池塘各有自己的青绿，只有名字里带“钱塘”或“之江”的江用江水的土黄色；OSM 把京杭大运河也标成河，按运河的颜色画。")
+    add("")
+    add("## 地形与土地覆盖\n")
+    add(f"- Copernicus GLO-30，网格 {grid.shape[1]} × {grid.shape[0]}，30 米一格，{grid.min()} 到 {grid.max()} 米。核对过北高峰 {int(grid.max())} 米。")
+    add("- ESA WorldCover 2021，10 米：树林、灌木按 1 格 1 棵的概率撒树（保留 55%），茶园附近降到 12%；建成区、耕地、草地、裸地直接作地面色。")
+    add(f"- 茶园：OSM 里名字带“茶园”的农田多边形，加上龙井景区一圈（{len(TEA_PLACES)} 处，按“虎跑龙井景区”的面积定的半径）；圈内卫星图上的“树”当茶田，不撒树。\n")
+    add("## 树\n")
+    trees = numpy.load(region.WORK / "trees.npy")
+    kinds = Counter(trees["kind"].tolist())
+    kind_names = {0: "林地", 1: "草坪、公园", 2: "行道树", 3: "岸边"}
+    species = Counter(trees["species"].tolist())
+    species_names = {0: "香樟", 1: "垂柳", 2: "法国梧桐", 3: "松", 4: "竹", 5: "花树（桃、樱）"}
+    add(table(["来源", "数量"], [[kind_names[k], f"{v:,}"] for k, v in sorted(kinds.items())]))
+    add("")
+    add(table(["树种", "数量"], [[species_names[k], f"{v:,}"] for k, v in sorted(species.items())]))
+    add("")
+    add("## 可以走线的路和水道\n")
+    add("车、船、行人沿烘焙时存下的线走：机动车道（主路、次路、小路、支路）和人行道、小径的中心线，运河与钱塘江的水道中心线，以及西湖上手工画的游船航线。每条线整条属于它中点所在的那块瓦片。\n")
+
+    add("## 地标\n")
+    landmarks = json.loads((region.CURATED / "landmarks.json").read_text(encoding="utf-8"))["landmarks"]
+    def built(row):
+        models = sorted({(item.get("kit") or {}).get("model") for item in [row, *row.get("parts", [])] if item.get("kit")} - {None})
+        names = {"pagoda": "塔", "pavilionTower": "楼阁", "archBridge": "石拱桥", "trussBridge": "桁架桥", "lotus": "体育场"}
+        return "、".join(names.get(m, m) for m in models) or "—"
+    add(table(["编号", "名称", "组", "对应 OSM 里的要素", "手工模型"], [[r["id"], r["title"], r["group"], r["source"].replace("OpenStreetMap: ", ""), built(r)] for r in landmarks]))
+    add("")
+    add("地标的坐标全部从 OpenStreetMap 按名字查出来（`hz/landmarks.py`），没有一个凭记忆写。模型尺寸：塔高、层数取公开数字（雷峰塔 71.7 米 5 层、六和塔 59.89 米、城隍阁 41.6 米），其余（檐口出挑、塔身收分、各层高度）是按形制估的。\n")
+    add("## 推断清单\n")
+    add("按计划，所有不是直接来自数据的东西列在这里，页面上可以用调试图层查看：\n")
+    add(f"- 楼高：{sources['inferred']:,} 栋（{100 * sources['inferred'] / len(buildings):.1f}%）是推断的，其中 {capped:,} 栋是村里的房子被压到 {VILLAGE_LEVELS} 层以内，{halls:,} 栋是寺庙的殿堂，{pitched:,} 栋是 OSM 记了屋顶形状的房子。")
+    add("- 寺庙殿堂的高度（大雄宝殿 14 米，其余 9 米，楼、阁两层 18 米）和屋顶是按形制定的，不是测绘的。")
+    add("- 屋顶类型：由原型决定，不是测绘的；坡屋顶只给轮廓像矩形的楼画。")
+    add(f"- 屋顶上的小件（楼梯间、水箱、太阳能、空调、设备间、通风口）：{index['rooftopProps']:,} 个，按原型和随机数放，不代表任何一栋楼顶上真实有什么。")
+    add("- 树的位置：由卫星土地覆盖和 OSM 的林地、草地、街道、岸线推出，不是逐棵调查。")
+    add("- 车辆与行人的位置和数量：沿真实的路和水道按固定间隔和时刻摆放，是“一个繁忙午后”的想象。")
+    add("- 茶园、历史街区、现代 CBD 的范围：按知名地名画的圈，不是官方边界。")
+    add("- 西湖游船的六条航线：手工画的，只在开阔水面上，烘焙时核对过。")
+    add("- 地标模型的尺寸：塔高和层数是公开数字，檐口出挑、塔身收分是按形制估的。")
+    add("- 山体明暗：远景地形按坡向做了明暗，不是真实光照。")
+    add("")
+    add("## 数据质量备注\n")
+    add("- 3D-GloBFP 的楼高是遥感反演值，论文报告在中国的均方根误差约 13 米，单栋楼会有几层的出入。")
+    add("- 部分相连的楼在数据集里被画成一个轮廓；OSM 把一片画成整块时改用了数据集的逐栋轮廓。")
+    add("- OSM 的水面多边形没有覆盖全部的小河、池塘，卫星图补了一部分，仍有遗漏。")
+    add("- 清晰的重复轮廓见上面“重复的轮廓”。")
+    add("")
+    return "\n".join(out)
+
+
+if __name__ == "__main__":
+    text = build()
+    out = region.ROOT / "docs" / "DATA-REPORT.md"
+    out.write_text(text, encoding="utf-8")
+    print(f"-> {out}, {len(text)} characters")

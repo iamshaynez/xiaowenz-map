@@ -22,9 +22,10 @@ WATER_LAKE, WATER_RIVER, WATER_CANAL, WATER_POND = 1, 2, 3, 4
 ROAD_MAJOR, ROAD_SECONDARY, ROAD_MINOR, ROAD_SERVICE, ROAD_PEDESTRIAN, PATH = 5, 6, 7, 8, 9, 10
 RAIL, WALL, SIDEWALK = 11, 12, 13
 GRASS, FOREST, FARMLAND, YARD, SAND, ROCK, WETLAND, PITCH, URBAN, CEMETERY = 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+TEA = 24                    # only ever comes from the land-cover map in the tea hills; no polygon of OSM has it
 WATER_CLASSES = (WATER_LAKE, WATER_RIVER, WATER_CANAL, WATER_POND)
 ROAD_CLASSES = (ROAD_MAJOR, ROAD_SECONDARY, ROAD_MINOR, ROAD_SERVICE, ROAD_PEDESTRIAN, PATH, SIDEWALK)
-LAND_CLASSES = (FOREST, FARMLAND, GRASS, CEMETERY, PITCH, WETLAND, SAND, ROCK, YARD, URBAN)   # specific first
+LAND_CLASSES = (FOREST, TEA, FARMLAND, GRASS, CEMETERY, PITCH, WETLAND, SAND, ROCK, YARD, URBAN)   # specific first
 
 # the base colour of each class, by name in the central palette
 GROUND_COLOURS = {
@@ -32,10 +33,10 @@ GROUND_COLOURS = {
     ROAD_MAJOR: "asphalt", ROAD_SECONDARY: "asphalt", ROAD_MINOR: "asphalt_light", ROAD_SERVICE: "asphalt_light",
     ROAD_PEDESTRIAN: "paving", PATH: "gravel", RAIL: "rail", WALL: "concrete_grey", SIDEWALK: "sidewalk",
     GRASS: "grass", FOREST: "forest_floor", FARMLAND: "farmland", YARD: "yard", SAND: "sand", ROCK: "rock",
-    WETLAND: "wetland", PITCH: "pitch", URBAN: "urban_ground", CEMETERY: "grass_dry",
+    WETLAND: "wetland", PITCH: "pitch", URBAN: "urban_ground", CEMETERY: "grass_dry", TEA: "tea",
 }
 # how far each class floats above the terrain, in metres; what floats higher is drawn over what is lower
-LIFT = {URBAN: 0.02, GRASS: 0.03, FOREST: 0.03, FARMLAND: 0.03, YARD: 0.03, SAND: 0.03, ROCK: 0.03, WETLAND: 0.03, CEMETERY: 0.03,
+LIFT = {URBAN: 0.02, GRASS: 0.03, FOREST: 0.03, FARMLAND: 0.03, YARD: 0.03, SAND: 0.03, ROCK: 0.03, WETLAND: 0.03, CEMETERY: 0.03, TEA: 0.03,
         PITCH: 0.04, SIDEWALK: 0.05, PATH: 0.066, ROAD_PEDESTRIAN: 0.068, ROAD_SERVICE: 0.070, ROAD_MINOR: 0.072,
         ROAD_SECONDARY: 0.076, ROAD_MAJOR: 0.080, RAIL: 0.09, WALL: 0.0,
         WATER_LAKE: 0.10, WATER_RIVER: 0.10, WATER_CANAL: 0.10, WATER_POND: 0.10}
@@ -53,6 +54,9 @@ PAVEMENT = {ROAD_MAJOR: 4.5, ROAD_SECONDARY: 3.5, ROAD_MINOR: 3.0}      # metres
 WATERWAY_WIDTH = {"river": 12, "stream": 4, "canal": 9, "ditch": 3, "drain": 3}
 RAIL_WIDTH = 3.5
 CLEARANCE = 6.0                                                        # a deck floats this far above what it crosses
+COVER_WATER_TOLERANCE_M = 7.0   # the satellite map's water comes in 10 m cells: their corners are taken off by this much
+COVER_WATER_MIN_M2 = 120.0       # smaller patches of it are dropped
+RIVER_SIDE_M = 150.0            # water the satellite shows this close to the mapped river is taken to be the river's own
 
 PIECE_M = 40.0          # polygons are cut to this size before triangulation
 SIMPLIFY_M = 0.4        # outlines are simplified to this before they are triangulated
@@ -67,6 +71,14 @@ def _layer(tags):
         return 0
 
 
+def _elevated(tags):
+    """On a bridge or a viaduct: said so by its layer, or by its bridge tag (which means a layer of one
+    even where OSM leaves the layer out, as it mostly does). Tunnels are not elevated whatever their layer."""
+    if tags.get("tunnel"):
+        return False
+    return _layer(tags) >= 1 or tags.get("bridge") not in (None, "no")
+
+
 def _union(shapes):
     shapes = numpy.asarray(shapes, dtype=object)
     return shapely.union_all(shapes) if len(shapes) else shapely.Polygon()
@@ -75,7 +87,10 @@ def _union(shapes):
 def water_class(tags, area):
     kind = tags.get("water") or tags.get("landuse") or tags.get("waterway") or "water"
     if kind in ("river", "riverbank"):
-        return WATER_RIVER
+        # only the great river carries the loess-brown water; the canals and streams that the map also calls
+        # rivers (the Grand Canal among them) are the green-grey of canals
+        name = tags.get("name", "")
+        return WATER_RIVER if "钱塘" in name or "之江" in name else WATER_CANAL
     if kind == "canal":
         return WATER_CANAL
     if kind in ("lake", "reservoir") or area > 80000:
@@ -99,7 +114,8 @@ def land_class(tags):
     if use == "cemetery" or amenity == "grave_yard":
         return CEMETERY
     if use in ("farmland", "orchard", "vineyard", "plantation", "greenhouse_horticulture"):
-        return FARMLAND
+        return TEA if "茶园" in (tags.get("name") or "") else FARMLAND     # a tea plantation mapped and named as such
+
     if use in ("grass", "meadow", "village_green", "greenfield"):
         return GRASS
     if use in ("industrial", "railway", "construction", "brownfield", "landfill", "quarry", "port", "military", "garages"):
@@ -221,14 +237,14 @@ def prepare(osm, bounds, log=print):
         line = geom.intersection(keep)
         if line.is_empty:
             continue
-        roads.append((line.buffer(WIDTH[kind] / 2, quad_segs=3), GROUP[kind], line, _layer(tags) >= 1, WIDTH[kind]))
+        roads.append((line.buffer(WIDTH[kind] / 2, quad_segs=3), GROUP[kind], line, _elevated(tags), WIDTH[kind]))
     for geom, tags in osm.rail:
         if tags.get("railway") not in ("rail", "tram", "narrow_gauge") or tags.get("tunnel") or geom.length < 1:
             continue
         line = geom.intersection(keep)
         if line.is_empty:
             continue
-        rails.append((line.buffer(RAIL_WIDTH, quad_segs=2), line, _layer(tags) >= 1 and tags.get("bridge") == "yes"))
+        rails.append((line.buffer(RAIL_WIDTH, quad_segs=2), line, _elevated(tags)))
 
     # ---- carriageways on the ground ----
     carriageway = {}
@@ -283,6 +299,61 @@ def prepare(osm, bounds, log=print):
 
 
 # --- on the terrain ---------------------------------------------------------------------------------------------
+def water_from_cover(g, cover, buildings=(), log=print):
+    """Ponds and channels the map does not have but the satellite land cover shows: its water cells, joined
+    row by row, with the corners taken off, laid over the land as ponds. Only what lies outside the mapped
+    water is added, and a cell that holds a building is not water: in dense quarters the satellite map takes
+    dark roofs for water. -> how many patches."""
+    from .landcover import WATER
+    classes, x0, y0, step = cover
+    wet = classes == WATER
+    footprints = numpy.asarray(list(buildings), dtype=object)
+    if len(footprints):
+        # every cell a building's box reaches is land, not only the one its middle falls in: a great roof
+        # lies over many cells
+        west_b, south_b, east_b, north_b = shapely.bounds(footprints).T
+        rows_n, cols_n = classes.shape
+        west_g, north_g = x0, y0 + rows_n * step
+        inside = (west_b >= west_g) & (east_b < west_g + cols_n * step) & (south_b >= y0) & (north_b < north_g)
+        c0 = numpy.floor((west_b[inside] - x0) / step).astype(int)
+        r0 = numpy.floor((north_g - north_b[inside]) / step).astype(int)
+        widths = numpy.floor((east_b[inside] - x0) / step).astype(int) - c0 + 1
+        heights = numpy.floor((north_g - south_b[inside]) / step).astype(int) - r0 + 1
+        counts = widths * heights
+        within = numpy.arange(int(counts.sum())) - numpy.repeat(numpy.cumsum(counts) - counts, counts)
+        widths = numpy.repeat(widths, counts)
+        wet[numpy.repeat(r0, counts) + within // widths, numpy.repeat(c0, counts) + within % widths] = False
+    rows, cols = numpy.nonzero(wet)
+    if not len(rows):
+        return 0
+    north = y0 + classes.shape[0] * step
+    order = numpy.lexsort((cols, rows))
+    rows, cols = rows[order], cols[order]
+    starts = numpy.ones(len(rows), dtype=bool)
+    starts[1:] = (rows[1:] != rows[:-1]) | (cols[1:] != cols[:-1] + 1)        # a new run of cells in a row
+    first = numpy.flatnonzero(starts)
+    last = numpy.r_[first[1:], len(rows)] - 1
+    south = north - (rows[first] + 1) * step
+    west, east = x0 + cols[first] * step, x0 + (cols[last] + 1) * step
+    shapely.prepare(g.water)
+    outside = ~shapely.contains_xy(g.water, (west + east) / 2, south + step / 2)   # runs already inside mapped water are not wanted
+    if not outside.any():
+        return 0
+    joined = shapely.simplify(shapely.union_all(shapely.box(west[outside], south[outside], east[outside], south[outside] + step)), COVER_WATER_TOLERANCE_M)
+    patches = numpy.asarray([p for p in shapely.get_parts(joined.difference(g.water)) if p.area >= COVER_WATER_MIN_M2], dtype=object)
+    if not len(patches):
+        return 0
+    # most of it is the great river's own channel, which the map draws wider than the water reaches: what
+    # lies by the river takes the river's colour, the rest is a pond
+    by_river = shapely.distance(patches, g.layers[WATER_RIVER]) < RIVER_SIDE_M if WATER_RIVER in g.layers else numpy.zeros(len(patches), dtype=bool)
+    if by_river.any():
+        g.index(WATER_RIVER, shapely.union_all([g.layers[WATER_RIVER], *patches[by_river]]))
+    if (~by_river).any():
+        g.index(WATER_POND, shapely.union_all([g.layers.get(WATER_POND, shapely.Polygon()), *patches[~by_river]]))
+    g.water = shapely.union_all([g.water, *patches])
+    return len(patches)
+
+
 def sample_terrain(terrain, info):
     """-> f(x, y): the terrain height read bilinearly from the grid, for arrays of world metres.
 
@@ -331,17 +402,23 @@ def triangulate(polygon):
     return numpy.concatenate(out) if out else numpy.zeros((0, 2))
 
 
-def mesh(ground, classes, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M):
+def mesh(ground, classes, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M, reclassify=None):
     """Triangles for the ground of one tile.
 
-    classes: the ground classes to include. -> (vertices float32[n, 5], indices uint32[m]); a vertex is
-    x, y, z, class, seed, with x and y relative to the tile's south-west corner.
+    classes: the ground classes to include. reclassify: optional (x, y, class) -> class, applied to each
+    polygon whole, for places where one class should have been another.
+    -> (vertices float32[n, 5], indices uint32[m]); a vertex is x, y, z, class, seed, with x and y relative
+    to the tile's south-west corner.
     """
     query = shapely.box(x0 - margin, y0 - margin, x0 + size + margin, y0 + size + margin)
     verts, index = [], []
     count = 0
     for cls in classes:
         for part in ground.in_box(cls, query):
+            if reclassify is not None:
+                # a polygon is one surface: it is reclassified whole, by a point inside it
+                inside = part.representative_point()
+                cls = reclassify(float(inside.x), float(inside.y), cls)
             # clip to the tile before anything else: a river or a forest may reach across half the region,
             # and cutting it to pieces first would redo the whole of it for every tile it touches
             clipped = shapely.simplify(part.intersection(query), SIMPLIFY_M)

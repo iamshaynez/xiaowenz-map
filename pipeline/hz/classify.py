@@ -8,17 +8,33 @@ historic districts around West Lake and the canal.
 import numpy
 import shapely
 
+from . import region
+from .bake import TERRAIN_CELLS, surface
 
 # archetypes; the app uses the same numbers
 JIANGNAN, WALKUP, FARMHOUSE, TOWER, OFFICE, INDUSTRIAL, PUBLIC, TEMPLE, STATION, SHED = range(1, 11)
 ARCHETYPE_NAMES = {JIANGNAN: "江南民居", WALKUP: "老式多层", FARMHOUSE: "城中村农居", TOWER: "高层住宅", OFFICE: "写字楼商业",
                    INDUSTRIAL: "厂房", PUBLIC: "公共建筑", TEMPLE: "寺庙园林", STATION: "交通设施", SHED: "附属小房"}
-ROOF_FLAT, ROOF_GABLE, ROOF_HIP, ROOF_SAW = range(4)
+ROOF_FLAT, ROOF_GABLE, ROOF_HIP, ROOF_SAW, ROOF_GREAT = range(5)      # a great hip roof: a temple hall's, higher and needing less of a rectangle
 
 # storey heights in metres by archetype; a level count and a height describe the same building through these
-FLOOR_M = {JIANGNAN: 3.2, WALKUP: 2.9, FARMHOUSE: 3.1, TOWER: 2.95, OFFICE: 3.9, INDUSTRIAL: 5.5, PUBLIC: 3.8, TEMPLE: 4.2, STATION: 8.0, SHED: 2.6}
+FLOOR_M = {JIANGNAN: 3.2, WALKUP: 2.9, FARMHOUSE: 3.1, TOWER: 2.95, OFFICE: 3.9, INDUSTRIAL: 5.5, PUBLIC: 3.8, TEMPLE: 9.0, STATION: 8.0, SHED: 2.6}
 
 TEMPLE_BUILDINGS = {"temple", "pagoda", "shrine", "monastery", "religious", "church", "cathedral", "mosque", "religious_building", "stupa", "pavilion"}
+# a hall of a temple by its name: most of Lingyin's halls are mapped as plain buildings called 济公殿, 华严殿...
+HALL_NAMES = ("殿", "禅堂", "经堂", "戒堂", "念佛堂", "钟楼", "鼓楼")
+# temple grounds where OSM names only the place and leaves the halls unnamed: there a building with nothing
+# said about it is a hall. (centre lon, centre lat, radius km)
+TEMPLE_GROUNDS = [
+    (120.14434, 30.23132, 0.10),  # Jingci Temple
+]
+# what a building is said to be, when it is said to be something other than a hall
+NOT_HALLS = {"apartments", "residential", "house", "detached", "terrace", "dormitory", "hotel", "commercial", "retail", "office", "school", "kindergarten",
+             "university", "college", "hospital", "civic", "public", "government", "industrial", "warehouse", "garage", "garages", "shed", "hut", "parking"}
+# roof shapes someone walked past and wrote down (OSM roof:shape), and the roof they give; and roof:colour
+PITCHED_ROOFS = {"gabled": ROOF_GABLE, "hipped": ROOF_HIP, "pyramidal": ROOF_HIP, "half-hipped": ROOF_HIP, "half_hipped": ROOF_HIP, "hip_and_gable": ROOF_HIP}
+ROOF_COLOURS = {"black": "tile_dark", "dark": "tile_dark", "grey": "tile_grey", "gray": "tile_grey", "slate": "tile_slate", "orange": "tile_red",
+                "red": "tile_red", "brown": "tile_brown", "white": "tile_white"}
 STATION_BUILDINGS = {"train_station", "transportation", "station", "terminal", "airport", "hangar", "aerodrome"}
 SHED_BUILDINGS = {"garage", "garages", "shed", "hut", "carport", "roof", "service", "toilets", "parking", "storage", "outbuilding", "cabin", "container", "tent"}
 INDUSTRIAL_BUILDINGS = {"industrial", "warehouse", "factory", "manufacture", "storage_tank", "hangar", "depot", "cold_storage", "processing_plant", "water_tower"}
@@ -29,19 +45,29 @@ PUBLIC_BUILDINGS = {"civic", "public", "government", "hospital", "school", "univ
 COMMERCIAL_BUILDINGS = {"commercial", "retail", "office", "hotel", "supermarket", "mall", "department_store"}
 COMMERCIAL_USES = {"shop", "office", "hotel"}
 
-# places with a look of their own: (centre lon, centre lat, radius km). JIANGNAN applies to low buildings inside.
+# places with a look of their own: (centre lon, centre lat, radius km, village). JIANGNAN applies to low
+# buildings inside. In a village (the last four... see True) the houses are low whatever the height data
+# says: the heights there come from the satellite data set, whose error is a few storeys.
 HISTORIC_PLACES = [
-    (120.1465, 30.2460, 1.10),  # north shore of West Lake: Gushan, Beishan Street
-    (120.1480, 30.2340, 0.95),  # Leifeng, Nanping, the south shore
-    (120.1600, 30.2410, 0.70),  # He Fang Street, Southern Song imperial street, Wushan
-    (120.1100, 30.2410, 0.80),  # Lingyin, Tianzhu
-    (120.1220, 30.2170, 1.30),  # Longjing, Meijiawu, Manjuelong
-    (120.1490, 30.3160, 0.55),  # Gongchen Bridge and Qiaoxi
-    (120.1440, 30.3080, 0.35),  # Xiaohe Zhijie
-    (120.1400, 30.3250, 0.35),  # Dadou Road
-    (120.1850, 30.3220, 0.80),  # Tangqi is just outside; Xixi villages
-    (120.0740, 30.2720, 1.40),  # Xixi wetland
+    (120.1465, 30.2460, 1.10, False),  # north shore of West Lake: Gushan, Beishan Street
+    (120.1480, 30.2340, 0.95, False),  # Leifeng, Nanping, the south shore
+    (120.1443, 30.2313, 0.20, True),   # Jingci Temple and its neighbours, between the lake road and the hill: no towers
+    (120.1600, 30.2410, 0.70, False),  # He Fang Street, Southern Song imperial street, Wushan
+    (120.1000, 30.2420, 1.10, True),   # Lingyin, Yongfu, Tianzhu: the temples and the villages among them
+    (120.1220, 30.2170, 1.30, True),   # Longjing, Meijiawu, Manjuelong: the tea villages
+    (120.1490, 30.3160, 0.55, False),  # Gongchen Bridge and Qiaoxi
+    (120.1440, 30.3080, 0.35, False),  # Xiaohe Zhijie
+    (120.1400, 30.3250, 0.35, False),  # Dadou Road
+    (120.1850, 30.3220, 0.80, True),   # the villages of Xixi, by Tangqi
+    (120.0740, 30.2720, 1.40, True),   # Xixi wetland
 ]
+VILLAGE_LEVELS = 3          # no house in a village has more storeys, unless OSM itself says so
+# the tea hills: the satellite land-cover map reads the terraces of tea bushes as trees. (centre lon, centre
+# lat, radius km). There the "trees" are drawn as tea, and few real trees are put among them.
+TEA_PLACES = [
+    (120.1156, 30.2266, 1.60),  # the circle with the area of OSM's scenic area "虎跑龙井景区" (8.4 km2): Longjing, Meijiawu, Manjuelong
+]
+TRUSTED_SOURCES = ("osm:height", "osm:levels")
 # glass and steel clusters: OFFICE is preferred for tall buildings inside
 MODERN_CENTRES = [
     (120.2120, 30.2490, 1.70),  # Qianjiang New City
@@ -52,16 +78,47 @@ MODERN_CENTRES = [
 
 
 def _zone_masks(cx, cy):
-    """(is historic, is modern) for building centroids in world metres."""
-    from . import region
-    lon, lat = region.unproject(cx, cy)
+    """(is historic, is modern, is in a village of the historic kind) for building centroids in world metres."""
     historic = numpy.zeros(len(cx), dtype=bool)
     modern = numpy.zeros(len(cx), dtype=bool)
-    for places, mask in ((HISTORIC_PLACES, historic), (MODERN_CENTRES, modern)):
-        for lo, la, radius in places:
+    village = numpy.zeros(len(cx), dtype=bool)
+    for lo, la, radius in MODERN_CENTRES:
+        xs, ys = region.project(lo, la)
+        modern |= numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
+    for lo, la, radius, houses in HISTORIC_PLACES:
+        xs, ys = region.project(lo, la)
+        inside = numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
+        historic |= inside
+        village |= inside & houses
+    return historic, modern, village
+
+
+def in_tea_zones(cx, cy):
+    """-> which of these points (world metres) lie in the tea hills."""
+    tea = numpy.zeros(len(cx), dtype=bool)
+    for lo, la, radius in TEA_PLACES:
+        xs, ys = region.project(lo, la)
+        tea |= numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
+    return tea
+
+
+def in_temple_grounds(cx, cy):
+    """-> which of these points (world metres) lie in a temple's grounds (see TEMPLE_GROUNDS)."""
+    inside = numpy.zeros(len(cx), dtype=bool)
+    for lo, la, radius in TEMPLE_GROUNDS:
+        xs, ys = region.project(lo, la)
+        inside |= numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
+    return inside
+
+
+def in_historic_villages(cx, cy):
+    """-> which of these points (world metres) lie in a village of the historic kind (see HISTORIC_PLACES)."""
+    village = numpy.zeros(len(cx), dtype=bool)
+    for lo, la, radius, houses in HISTORIC_PLACES:
+        if houses:
             xs, ys = region.project(lo, la)
-            mask |= numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
-    return historic, modern
+            village |= numpy.hypot(cx - float(xs), cy - float(ys)) <= radius * 1000
+    return village
 
 
 def classify(buildings, terrain, terrain_info, landmarks=None, log=print):
@@ -70,21 +127,31 @@ def classify(buildings, terrain, terrain_info, landmarks=None, log=print):
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
     area = shapely.area(geoms)
-    historic, modern = _zone_masks(cx, cy)
-    x0, y0, cell, tnx, tny = terrain_info
-    col = numpy.clip(((cx - x0) / cell).astype(int), 0, tnx - 1)
-    row = numpy.clip(((y0 + tny * cell - cy) / cell).astype(int), 0, tny - 1)
-    ground = terrain[row, col].astype(float)
+    historic, modern, village = _zone_masks(cx, cy)
+    grounds = in_temple_grounds(cx, cy)
+    # the ground as the app draws it: a building stands on the mesh, and on a slope its base is the lowest
+    # ground around its outline, half a metre lower, so that no gap shows under its walls
+    on_ground = surface(terrain, terrain_info, region.TILE_M / TERRAIN_CELLS)
+    bounds = shapely.bounds(geoms)
+    around = on_ground(numpy.column_stack([bounds[:, 0], bounds[:, 2], bounds[:, 0], bounds[:, 2], cx]),
+                       numpy.column_stack([bounds[:, 1], bounds[:, 1], bounds[:, 3], bounds[:, 3], cy]))
+    ground = around[:, 4]
+    base = around.min(axis=1) - 0.5
     hull_share = shapely.area(shapely.convex_hull(geoms)) / numpy.maximum(area, 1)
 
     counts = {}
+    capped = 0
+    halls = 0
+    pitched = 0
     for n, b in enumerate(buildings):
         tags, seed = b["tags"], n % 251
         kind = tags.get("building", "yes")
+        name = str(tags.get("name", ""))
         amenity, use = tags.get("amenity"), tags.get("shop") or tags.get("office")
         levels = b.get("levels")
         metres = b.get("height")
-        if kind in TEMPLE_BUILDINGS or amenity == "place_of_worship" or tags.get("religion") or tags.get("historic") in TEMPLE_BUILDINGS:
+        if kind in TEMPLE_BUILDINGS or amenity == "place_of_worship" or tags.get("religion") or tags.get("historic") in TEMPLE_BUILDINGS or name.endswith(HALL_NAMES) \
+                or (grounds[n] and kind not in NOT_HALLS and not (amenity or use) and not name):
             archetype = TEMPLE
         elif kind in STATION_BUILDINGS or amenity in ("bus_station", "ferry_terminal"):
             archetype = STATION
@@ -101,6 +168,7 @@ def classify(buildings, terrain, terrain_info, landmarks=None, log=print):
         floor = FLOOR_M[archetype]
 
         # levels and height describe one building: settle them together
+        given = metres                                  # the height as mapped or measured, before the storeys take over
         if levels is None and metres is not None:
             levels = max(1, round(metres / floor))
         if levels is None:
@@ -110,12 +178,44 @@ def classify(buildings, terrain, terrain_info, landmarks=None, log=print):
         metres = levels * floor
         if archetype == SHED:
             metres = min(metres, 6.0)
+        if archetype == TEMPLE:
+            if kind == "pagoda" or b["height_source"] in TRUSTED_SOURCES:
+                if given is not None:
+                    levels, metres = max(1, round(given / floor)), given     # the height stands as mapped; the storeys follow it
+            else:
+                # a hall is one tall storey under a great roof, two for a bell tower or a loft. The height data
+                # set reads the roof and the steps up to it and calls it five storeys of flats.
+                levels = 2 if name.endswith(("楼", "阁")) else 1
+                metres = 2 * floor if levels == 2 else (14.0 if "大雄宝殿" in name else floor)
+                b["height_source"], b["temple_hall"] = "inferred", True
+                halls += 1
+        # a pitched roof written down on the spot makes the building a house under that roof; the height data
+        # set, reading the slope of it, calls the same house fourteen storeys
+        osm_roof = PITCHED_ROOFS.get(str(tags.get("roof:shape", "")).lower())
+        if osm_roof is not None and b["height_source"] not in TRUSTED_SOURCES and archetype != TEMPLE:
+            levels = 1 if area[n] < 120 else 2
+            metres = levels * FLOOR_M[JIANGNAN]
+            archetype = JIANGNAN
+            b["height_source"], b["osm_roof"] = "inferred", True
+            pitched += 1
+        if village[n] and levels > VILLAGE_LEVELS and b["height_source"] not in TRUSTED_SOURCES and not (archetype == TEMPLE and kind == "pagoda"):
+            # a tea farmer's house is two or three storeys; the data set's height for it is not to be trusted
+            levels = VILLAGE_LEVELS
+            b["height_source"], b["village_cap"] = "inferred", True
+            capped += 1
+            if archetype in (WALKUP, TOWER, FARMHOUSE, OFFICE) and historic[n]:
+                archetype = JIANGNAN          # and so it is a house of the village kind, white walls and dark tiles
+            floor = FLOOR_M[archetype]
+            metres = levels * floor
 
         roof, wall, roof_colour, colours = _materials(archetype, levels, area[n], historic[n], modern[n], seed, tags)
+        if osm_roof is not None:
+            roof = osm_roof
+            roof_colour = ROOF_COLOURS.get(str(tags.get("roof:colour", "")).lower(), roof_colour)
         b.update(archetype=archetype, levels=int(levels), height=float(metres), floor=floor, roof=roof, wall=wall,
-                 roof_colour=roof_colour, colours=colours, seed=seed, base=float(ground[n]), historic=bool(historic[n]))
+                 roof_colour=roof_colour, colours=colours, seed=seed, base=float(base[n]), historic=bool(historic[n]))
         counts[archetype] = counts.get(archetype, 0) + 1
-    log("archetypes: " + ", ".join(f"{ARCHETYPE_NAMES[k]} {v}" for k, v in sorted(counts.items())))
+    log("archetypes: " + ", ".join(f"{ARCHETYPE_NAMES[k]} {v}" for k, v in sorted(counts.items())) + f"; {capped} houses in villages brought down to {VILLAGE_LEVELS} storeys; {halls} halls of temples given a hall's height; {pitched} houses under a roof written down on the spot")
     return buildings
 
 
@@ -190,7 +290,7 @@ def _materials(archetype, levels, area, historic, modern, seed, tags):
     if archetype == PUBLIC:
         return (ROOF_HIP if seed % 3 else ROOF_FLAT), pick(PUBLIC_WALLS), pick(ROOFS_GREY + ["roof_flat_grey"]), {"trim": "stone_pale", "glass": "window_dark"}
     if archetype == TEMPLE:
-        return ROOF_HIP, "temple_wall", "tile_dark", {"trim": "temple_red", "door": "temple_red"}
+        return ROOF_GREAT, "temple_wall", "tile_dark", {"trim": "temple_red", "door": "temple_red"}
     if archetype == STATION:
         return ROOF_FLAT, "stone_pale", "roof_silver", {"trim": "metal_dark", "glass": "window_dark"}
     return ROOF_FLAT, pick(["concrete_grey", "metal_pale", "brick_red"]), pick(["roof_flat_grey", "tile_red", "metal_pale"]), {"trim": "concrete_grey"}

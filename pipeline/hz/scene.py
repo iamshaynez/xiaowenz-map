@@ -12,11 +12,18 @@ data/baked/overview.bin: the whole region for the overview tier, small enough to
 data/baked/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it comes into view at the district tier.
   TERR  heights of a 32 x 32 grid over the tile (int16 metres, north row first)
   BASE  the satellite land cover of each terrain cell, as a ground class (one byte), rows from the north
-  BLDB  buildings as coarse meshes (flat roofs, outlines simplified to 1.5 m)
+  BLDB  buildings as coarse meshes (outlines simplified to 1.5 m): flat roofs, or a gable or a hip roof
+        where a building is given one and its outline fills a rectangle
+  ROOF  what is put on flat roofs by rule (stair heads, tanks, solar heaters, air-conditioning units), as
+        boxes: count (u32), then x, y relative to the tile, base, height, half width, half depth, wall
+        colour, roof colour (float each). Inferred, not mapped
   WATR  water surfaces: a mesh whose vertices carry x, y, z, class, seed
   ROAD  carriageways, walkways and railways on the ground: a mesh in the same form
   LAND  parks, woods, farmland, yards and urban ground: a mesh in the same form
   DECK  bridges and viaducts: a mesh in the same form, walls included
+  PATH  the lines things move along (streets, canals, the river, routes across West Lake), each whole and
+        belonging to this tile: count (u32), then per line points (u16), class (u8), spare (u8), width and
+        length (f32), and per point x, y relative to the tile, z, distance from the start (f32)
   TREE  the trees of the tile, sorted into squares of 250 m: cells per side (u32), count (u32), where
         each cell's run starts (u32 per cell, and one more), then 16 bytes per tree: x, y relative to the
         tile and z (float), species, crown radius in half-metres, seed, kind (a byte each)
@@ -39,23 +46,80 @@ import shapely
 
 from . import ground, region
 from . import trees as tree_data
-from .bake import MASS_CELL_M, TERRAIN_CELLS, buildings_section, coarse_grid_section, container, massing_section, terrain_section, tile_origin
-from .classify import classify
-from .ground import (
-    FOREST, FARMLAND, GRASS, PITCH, RAIL, ROCK, SAND, URBAN, WATER_CANAL, WATER_LAKE, WATER_POND, WATER_RIVER, WATERWAY_WIDTH,
-    WETLAND, YARD, LAND_CLASSES, LIFT, ROAD_CLASSES, WATER_CLASSES, GROUND_COLOURS, Ground, deck_mesh, mesh, sample_terrain,
+from .bake import (
+    FLAG_CLEARED,
+    MASS_CELL_M,
+    TERRAIN_CELLS,
+    buildings_section,
+    coarse_grid_extent,
+    coarse_grid_section,
+    container,
+    massing_section,
+    roof_boxes_section,
+    rooftop_props,
+    surface,
+    terrain_section,
+    tile_origin,
 )
-from .landcover import BARE, BUILT, CROPLAND, GRASSLAND, MANGROVE, MOSS, SHRUB, SNOW, TREE, WATER, WETLAND as COVER_WETLAND, class_at, load as load_cover
+from .classify import classify, in_historic_villages, in_tea_zones
+from .ground import (
+    FARMLAND,
+    FOREST,
+    GRASS,
+    GROUND_COLOURS,
+    LAND_CLASSES,
+    LIFT,
+    PITCH,
+    RAIL,
+    ROAD_CLASSES,
+    ROCK,
+    SAND,
+    TEA,
+    URBAN,
+    WATER_CANAL,
+    WATER_CLASSES,
+    WATER_LAKE,
+    WATER_POND,
+    WATER_RIVER,
+    WATERWAY_WIDTH,
+    WETLAND,
+    YARD,
+    Ground,
+    deck_mesh,
+    mesh,
+)
+from .landcover import (
+    BARE,
+    BUILT,
+    CROPLAND,
+    GRASSLAND,
+    MANGROVE,
+    MOSS,
+    SHRUB,
+    SNOW,
+    TREE,
+    WATER,
+    class_at,
+)
+from .landcover import WETLAND as COVER_WETLAND
+from .landcover import load as load_cover
+from .landmarks import cleared_around, cleared_mask
 from .osm_extract import Layers
+from .paths import collect as collect_paths
+from .paths import group_by_tile as group_lines_by_tile
+from .paths import section as paths_section
 from .terrain import load as load_terrain
 
 # what the satellite map's classes mean on the ground
 COVER_TO_GROUND = {TREE: FOREST, SHRUB: FOREST, MANGROVE: FOREST, GRASSLAND: GRASS, CROPLAND: FARMLAND, BUILT: URBAN,
                    BARE: ROCK, SNOW: ROCK, MOSS: ROCK, WATER: WATER_POND, COVER_WETLAND: WETLAND}
 # where mapped ground overlaps, the later ones in this list win
-GROUND_PRIORITY = (URBAN, YARD, ROCK, SAND, WETLAND, PITCH, GRASS, FARMLAND, FOREST,
+GROUND_PRIORITY = (URBAN, YARD, ROCK, SAND, WETLAND, PITCH, GRASS, FARMLAND, TEA, FOREST,
                    *(c for c in ROAD_CLASSES if c != ground.PATH), ground.PATH, RAIL, WATER_POND, WATER_CANAL, WATER_RIVER, WATER_LAKE)
 RIBBON_TOLERANCE_M = 6.0
+LANDCOVER_TEA = 255         # classes the land-cover map does not have: stand for tea in the tea hills, and for
+LANDCOVER_YARD = 254        # the yard of a house in a village of the historic kind
+FLAG_ROOFTOP, FLAG_INFERRED_HEIGHT, FLAG_VILLAGE_CAP, FLAG_DATASET_OUTLINE, FLAG_REPLACED_BLOCK = 1, 2, 4, 8, 16
 RIBBON_ROAD_CLASSES = (ground.ROAD_MAJOR, ground.ROAD_SECONDARY)
 
 
@@ -69,11 +133,9 @@ def base_section(x0, y0, cover):
     step = region.TILE_M / TERRAIN_CELLS
     across = x0 + (numpy.arange(TERRAIN_CELLS) + 0.5) * step
     up = y0 + (numpy.arange(TERRAIN_CELLS) + 0.5) * step
-    classes = class_at(cover, numpy.tile(across, TERRAIN_CELLS), numpy.repeat(up, TERRAIN_CELLS)).reshape(TERRAIN_CELLS, TERRAIN_CELLS)
-    table = numpy.zeros(256, dtype=numpy.uint8)
-    for source, target in COVER_TO_GROUND.items():
-        table[source] = target
-    return table[classes][::-1].tobytes()  # the northern row first
+    xs, ys = numpy.tile(across, TERRAIN_CELLS), numpy.repeat(up, TERRAIN_CELLS)
+    classes = reclassify_cover(xs, ys, class_at(cover, xs, ys), squares=True).reshape(TERRAIN_CELLS, TERRAIN_CELLS)
+    return COVER_TABLE[classes][::-1].tobytes()  # the northern row first
 
 
 def cell_grid(bounds, cell):
@@ -86,17 +148,47 @@ def cell_grid(bounds, cell):
     return x0, y0, nx, ny, xs, ys[::-1]
 
 
+COVER_TABLE = numpy.zeros(256, dtype=numpy.uint8)
+for _source, _target in COVER_TO_GROUND.items():
+    COVER_TABLE[_source] = _target
+COVER_TABLE[LANDCOVER_TEA] = TEA
+COVER_TABLE[LANDCOVER_YARD] = YARD
+
+
+def reclassify_cover(x, y, classes, squares=False):
+    """The satellite map's classes, corrected where the place is known: what it takes for trees, or for bare
+    ground, in the tea hills is tea; what it takes for built-up land in the historic villages is the yard of a
+    house. `squares`: for the base of a tile, which is read cell by cell: its water would come out in squares,
+    so it is left to the water the bake lays on as polygons."""
+    classes = numpy.array(classes, copy=True)
+    tea = in_tea_zones(x, y)
+    classes[tea & numpy.isin(classes, (TREE, SHRUB, MANGROVE, BARE))] = LANDCOVER_TEA
+    classes[in_historic_villages(x, y) & (classes == BUILT)] = LANDCOVER_YARD
+    if squares:
+        classes[classes == WATER] = GRASSLAND
+    return classes
+
+
+def reclassify_ground(x, y, cls):
+    """The same for a polygon of ground: the scenic area's "forest" is tea in the tea hills."""
+    if cls == FOREST and in_tea_zones(numpy.array([x]), numpy.array([y]))[0]:
+        return TEA
+    return cls
+
+
 def overview_rasters(props, areas, ground_data, cover, bounds, height, cell=MASS_CELL_M):
     """LCV and URB: what covers each cell of the overview, and how much of it is built over."""
     x0, y0, nx, ny, xs, ys = cell_grid(bounds, cell)
     cx, cy = numpy.tile(xs, ny), numpy.repeat(ys, nx)
-    table = numpy.zeros(256, dtype=numpy.uint8)
-    for source, target in COVER_TO_GROUND.items():
-        table[source] = target
-    kinds = table[class_at(cover, cx, cy)]
+    kinds = COVER_TABLE[reclassify_cover(cx, cy, class_at(cover, cx, cy))]
+    on_tea = in_tea_zones(cx, cy)
     for cls in GROUND_PRIORITY:
-        if cls in ground_data.layers:
-            kinds[shapely.contains_xy(ground_data.layers[cls], cx, cy)] = cls
+        if cls not in ground_data.layers:
+            continue
+        on_layer = shapely.contains_xy(ground_data.layers[cls], cx, cy)
+        if cls == FOREST:
+            on_layer &= ~on_tea                    # the scenic area's "forest" is tea in the tea hills
+        kinds[on_layer] = cls
     lcv = struct.pack("<HHddd", nx, ny, x0, y0, cell) + kinds.astype("u1").tobytes()
 
     # built-over share and tallest building of a cell, from the buildings whose centre falls in it
@@ -149,6 +241,11 @@ def in_water(geoms, water, share=0.6, log=None):
         over[hits] += (within & wet).sum(axis=1)
         inside[hits] = numpy.maximum(inside[hits], within.sum(axis=1))
     return (inside > 0) & (over > share * inside)
+
+
+def within(x, y, areas):
+    """Whether a point (world metres) lies in any of the areas of landmarks.cleared_around()."""
+    return bool(cleared_mask(numpy.array([x]), numpy.array([y]), areas)[0])
 
 
 def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
@@ -210,14 +307,32 @@ def group_by_tile(x, y, tx0, ty0, nx, ny):
     return order, numpy.searchsorted(key[order], numpy.arange(nx * ny + 1))
 
 
+def flag_cleared(props, clears):
+    """Flag, in the properties the app reads, every building whose centre lies where a landmark is built by
+    hand: the height data set sees a pagoda as a few very tall "buildings", OSM as one great hall, and they
+    would bury the landmark; a bridge's own mapped deck is drawn by the model instead. The app leaves
+    flagged buildings out of the tile, of the overview and
+    of the sun's picture, and nothing is put on their roofs.
+
+    props: rows of nine property floats, then the centre x and y. clears: as landmarks.cleared_around().
+    -> a mask of the rows that were flagged.
+    """
+    flags = props[:, 8].astype(numpy.int64)                 # they are bits, held in floats
+    cleared = cleared_mask(props[:, 9], props[:, 10], clears)
+    flags[cleared] |= FLAG_CLEARED
+    props[:, 8] = flags
+    return cleared
+
+
 def bake(limit=None, log=print):
     t0 = time.time()
     work = region.WORK
+    clears = cleared_around()            # discs around landmarks built by hand: nothing mapped is drawn inside them
     with open(work / "buildings.pkl", "rb") as f:
         buildings = pickle.load(f)
     grid, info = load_terrain(work / "terrain.bin")
     classify(buildings, grid, info, log=log)
-    height = sample_terrain(grid, info)
+    height = surface(grid, info, region.TILE_M / TERRAIN_CELLS)       # the ground as the app draws it: everything laid on it follows the mesh, not the DEM
     ground_data = Ground.load(work / "ground.pkl")
     cover = load_cover(work / "landcover.npz")
     trees = numpy.load(work / "trees.npy")
@@ -242,14 +357,29 @@ def bake(limit=None, log=print):
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
     # per building: the nine property floats, then the centre, for grouping
-    props = numpy.array([[b["base"], b["height"], b["levels"], b["archetype"], b["roof"], colour_index[b["wall"]], colour_index[b["roof_colour"]], b["seed"], 0, x, y]
-                         for b, x, y in zip(buildings, cx, cy, strict=True)], dtype=numpy.float64)
+    # flags (the ninth): what is known about the building and what was inferred; the app can show them
+    flags = numpy.array([FLAG_INFERRED_HEIGHT * (b["height_source"] == "inferred") + FLAG_VILLAGE_CAP * bool(b.get("village_cap"))
+                         + FLAG_DATASET_OUTLINE * (b["origin"] == "globfp") + FLAG_REPLACED_BLOCK * (b["origin"] == "osm-block") for b in buildings])
+    props = numpy.array([[b["base"], b["height"], b["levels"], b["archetype"], b["roof"], colour_index[b["wall"]], colour_index[b["roof_colour"]], b["seed"], f, x, y]
+                         for b, f, x, y in zip(buildings, flags, cx, cy, strict=True)], dtype=numpy.float64)
+    cleared = flag_cleared(props, clears)
+    log(f"{int(cleared.sum())} mapped buildings give way to landmarks built by hand")
+    live = props[~cleared]             # what is drawn, for the overview tier
+    live_areas = areas[~cleared]
 
     tx0, tx1 = int(numpy.floor(west / region.TILE_M)), int(numpy.floor(east / region.TILE_M))
     ty0, ty1 = int(numpy.floor(south / region.TILE_M)), int(numpy.floor(north / region.TILE_M))
     nx_tiles, ny_tiles = tx1 - tx0 + 1, ty1 - ty0 + 1
     by_tile, tile_starts = group_by_tile(cx, cy, tx0, ty0, nx_tiles, ny_tiles)
     tree_tile, tree_starts = group_by_tile(trees["x"].astype(float), trees["y"].astype(float), tx0, ty0, nx_tiles, ny_tiles)
+
+    # the lines things move along, each belonging to the tile that holds its middle
+    lake_routes = json.loads((region.CURATED / "lake_routes.json").read_text(encoding="utf-8"))["routes"]
+    moving = collect_paths(ground_data, osm, height, lake_routes, log=log)
+    # a bridge built by hand carries its own deck: the mapped one, and the lines along it, give way
+    ground_data.set_decks([deck for deck in ground_data.decks if not within(deck[2].interpolate(0.5, normalized=True).x, deck[2].interpolate(0.5, normalized=True).y, clears)])
+    moving = [line for line in moving if not within(line[0].interpolate(0.5, normalized=True).x, line[0].interpolate(0.5, normalized=True).y, clears)]
+    path_tile, path_starts = group_lines_by_tile(moving, tx0, ty0, nx_tiles, ny_tiles)
 
     # named places, by tile
     places = {}
@@ -263,13 +393,20 @@ def bake(limit=None, log=print):
 
     # ---- the overview package ----
     region.BAKED.mkdir(parents=True, exist_ok=True)
-    lcv, urb = overview_rasters(props, areas, ground_data, cover, bounds, height)
+    lcv, urb = overview_rasters(live, live_areas, ground_data, cover, bounds, height)
+
+    # what stands on the flat roofs: not buildings, drawn like them, in a section of their own so that the
+    # app can leave them out until they are more than a pixel
+    roof_geoms, roof_rows = rooftop_props(geoms, props, colour_index)
+    roof_tile, roof_starts = group_by_tile(roof_rows[:, 9], roof_rows[:, 10], tx0, ty0, nx_tiles, ny_tiles)
+    real = len(props)
+    log(f"rooftop props: {len(roof_rows)}")
     (region.BAKED / "overview.bin").write_bytes(container([
         (b"GRID", coarse_grid_section(grid, info)),
-        (b"MASS", massing_section(props, 0.0, 0.0)),
+        (b"MASS", massing_section(live, 0.0, 0.0)),
         (b"LCV", lcv),
         (b"URB", urb),
-        (b"RIBA", ribbon_section(overview_lines(osm, ground_data), height)),
+        (b"RIBA", ribbon_section(overview_lines(osm, ground_data), surface(grid, info, 125.0, coarse_grid_extent()))),
     ]))
     log(f"overview.bin {(region.BAKED / 'overview.bin').stat().st_size / 1048576:.1f} MB")
 
@@ -292,7 +429,8 @@ def bake(limit=None, log=print):
                 section = buildings_section(geoms[sl], props[sl], x0, y0)
                 totals["vertices"] += struct.unpack_from("<I", section, 4)[0]
                 sections.append((b"BLDB", section))
-            ground_parts = [mesh(ground_data, classes, x0, y0, height) for classes in (WATER_CLASSES, ROAD_CLASSES + (RAIL,), LAND_CLASSES)]
+            ground_parts = [mesh(ground_data, classes, x0, y0, height, reclassify=reclassify_ground)
+                            for classes in (WATER_CLASSES, ROAD_CLASSES + (RAIL,), LAND_CLASSES)]
             deck = deck_mesh(ground_data, x0, y0, height)
             for sid, (vertices, indices) in zip((b"WATR", b"ROAD", b"LAND", b"DECK"), (*ground_parts, deck), strict=True):
                 if len(indices):
@@ -303,7 +441,14 @@ def bake(limit=None, log=print):
                 sections.append((b"TREE", tree_data.section(trees_here, x0, y0)))
             if (tx + tx0, ty + ty0) in places:
                 sections.append((b"PLCE", json.dumps(places[(tx + tx0, ty + ty0)], ensure_ascii=False).encode("utf-8")))
-            sections.append((b"META", json.dumps({"x0": x0, "y0": y0, "buildings": int(len(sl)), "trees": int(len(trees_here))}).encode("utf-8")))
+            here = path_tile[path_starts[k]:path_starts[k + 1]]
+            if len(here):
+                sections.append((b"PATH", paths_section([moving[j] for j in here], x0, y0, height)))
+            roof_here = roof_tile[roof_starts[k]:roof_starts[k + 1]]
+            if len(roof_here):
+                sections.append((b"ROOF", roof_boxes_section(roof_geoms[roof_here], roof_rows[roof_here], x0, y0)))
+            sections.append((b"META", json.dumps({"x0": x0, "y0": y0, "buildings": len(sl), "rooftop": len(roof_here),
+                                                  "trees": len(trees_here)}).encode("utf-8")))
             (out_dir / f"{tx}_{ty}.bin").write_bytes(container(sections))
             made += 1
         if limit is not None and made >= limit:
@@ -313,7 +458,11 @@ def bake(limit=None, log=print):
         "tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
         "palette": list(palette), "origin": [region.ORIGIN_E, region.ORIGIN_N], "epsg": region.EPSG, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
-        "buildings": len(buildings), "leftOutOfWater": int(afloat.sum()),
+        "buildings": real, "leftOutOfWater": int(afloat.sum()), "rooftopProps": len(roof_rows),
+        "inferredHeights": int((flags & FLAG_INFERRED_HEIGHT != 0).sum()), "villageCaps": int((flags & FLAG_VILLAGE_CAP != 0).sum()),
+        "datasetOutlines": int((flags & FLAG_DATASET_OUTLINE != 0).sum()), "replacedBlocks": int((flags & FLAG_REPLACED_BLOCK != 0).sum()),
+        "flags": {"rooftop": 1, "inferredHeight": 2, "villageCap": 4, "datasetOutline": 8, "replacedBlock": 16, "cleared": 32},
+        "clearedForLandmarks": int(cleared.sum()),
         "island": region.region_shape(),
         "groundClasses": {str(cls): {"colour": GROUND_COLOURS[cls], "lift": LIFT[cls]} for cls in GROUND_COLOURS},
         "treeCell": tree_data.CELL_M,
@@ -322,7 +471,7 @@ def bake(limit=None, log=print):
     }
     (region.BAKED / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
     size = sum(f.stat().st_size for f in out_dir.glob("*.bin"))
-    log(f"baked {made} tiles: {len(buildings)} buildings, {totals['vertices']} building vertices, {totals['ground_triangles']} ground triangles, "
+    log(f"baked {made} tiles: {real} buildings (+{len(roof_rows)} rooftop props), {totals['vertices']} building vertices, {totals['ground_triangles']} ground triangles, "
         f"{len(trees)} trees, {size / 1048576:.0f} MB, {time.time() - t0:.0f} s")
 
 

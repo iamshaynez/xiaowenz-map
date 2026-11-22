@@ -21,7 +21,17 @@ from shapely.geometry.polygon import orient
 from shapely.strtree import STRtree
 
 from . import ground
-from .ground import (FOREST, GRASS, PATH, ROAD_MAJOR, ROAD_MINOR, ROAD_PEDESTRIAN, ROAD_SECONDARY, ROAD_SERVICE, WATER_LAKE)
+from .ground import (
+    FOREST,
+    GRASS,
+    PATH,
+    ROAD_MAJOR,
+    ROAD_MINOR,
+    ROAD_PEDESTRIAN,
+    ROAD_SECONDARY,
+    ROAD_SERVICE,
+    WATER_LAKE,
+)
 from .landcover import TREE, class_at
 
 CAMPHOR, WILLOW, PLANE, PINE, BAMBOO, BLOSSOM = range(6)
@@ -34,6 +44,7 @@ CROWN_RADIUS_M = {CAMPHOR: (3.8, 5.6), WILLOW: (3.6, 5.0), PLANE: (3.8, 5.8), PI
 WOODS_MIX = (CAMPHOR, CAMPHOR, CAMPHOR, PINE, PINE, BAMBOO, BAMBOO, PLANE)      # what a Hangzhou hill is made of
 LAWN_MIX = (CAMPHOR, CAMPHOR, CAMPHOR, CAMPHOR, PLANE, WILLOW, WILLOW, BLOSSOM, BLOSSOM, PINE)
 COVER_KEEP = 0.55           # the share of the satellite map's tree cells that get a tree of their own
+TEA_TREE_SHARE = 0.12       # ... in the tea hills, where what the map calls trees are mostly tea bushes
 OSM_WOOD_M2 = 110.0         # one tree per this many square metres of OSM wood outside those cells
 LAWN_M2 = 550.0             # ... of lawn
 STREET_TREE_M = 8.5         # one street tree per this many metres of street, on each side
@@ -79,11 +90,12 @@ def _rows_along(line, spacing, jitter, rng):
     return points, direction / (numpy.hypot(direction[:, 0], direction[:, 1])[:, None] + 1e-9)
 
 
-def generate(ground_data, buildings, height, cover, bounds, rng, log=print):
+def generate(ground_data, buildings, height, cover, bounds, rng, log=print, tea=None):
     """-> tree records in world metres.
 
     ground_data: ground.Ground. buildings: building footprints. height: terrain sampler.
     cover: (classes, x0, y0, step) from landcover. bounds: (west, south, east, north) in world metres.
+    tea: classify.in_tea_zones, where the map's trees are tea bushes and few real trees are put among them.
     """
     west, south, east, north = bounds
     building_tree = STRtree(buildings)
@@ -117,10 +129,13 @@ def generate(ground_data, buildings, height, cover, bounds, rng, log=print):
     # ---- woods from the satellite map: one tree in most of the cells it calls tree cover ----
     classes, cx0, cy0, step = cover
     rows, cols = numpy.nonzero(classes == TREE)
-    keep = rng.random(len(rows)) < COVER_KEEP
-    rows, cols = rows[keep], cols[keep]
     x = cx0 + (cols + rng.random(len(cols))) * step
     y = cy0 + (classes.shape[0] - rows - 0.5 + rng.random(len(rows))) * step   # row 0 is the northernmost
+    share = numpy.full(len(rows), COVER_KEEP)
+    if tea is not None:
+        share[tea(x, y)] = TEA_TREE_SHARE      # a few trees stand among the terraces, as a few do
+    keep = rng.random(len(rows)) < share
+    x, y = x[keep], y[keep]
     in_region = (x > west - 2000) & (x < east + 2000) & (y > south - 2000) & (y < north + 2000)
     x, y = x[in_region], y[in_region]
     woods = make(x, y, _pick(WOODS_MIX, len(x), rng), WOODS)
@@ -142,6 +157,11 @@ def generate(ground_data, buildings, height, cover, bounds, rng, log=print):
         if cls == FOREST:
             fresh = class_at(cover, x, y) != TREE      # the other cells already have a tree of their own
             x, y = x[fresh], y[fresh]
+        if cls == FOREST and tea is not None:
+            # the scenic area around the tea villages is one great "nature reserve" in OSM: in the tea hills
+            # that is mostly terraces of tea, with a few trees among them
+            on_tea = tea(x, y)
+            x, y = x[~on_tea], y[~on_tea]
         made = make(x, y, _pick(mix, len(x), rng), kind)
         groups.append(made)
         log(f"trees on OSM {ground.GROUND_COLOURS[cls]}: {len(made)}")
