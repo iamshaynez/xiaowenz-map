@@ -148,6 +148,7 @@ void main() {
     fs: PREFIX + CAMERA + SAMPLE + TABLES + MRT + /* glsl */`
 uniform vec4 uArch;   // ARCH_A, ARCH_C, ARCH_R, ARCH_BASE
 uniform vec4 uDeck;   // DECK_END, DECK_LOW, DECK_TOP
+uniform float uDebug; // 1: paint material, colour and base instead of shading
 in vec3 vS; in vec3 vCoord; flat in vec4 vInfo;
 float deckZ(float x) {
   float a = abs(x);
@@ -173,7 +174,7 @@ void main() {
     else if (b > uArch.w && length(vec2(ax + uArch.y, b - uArch.w)) < uArch.z + 0.62) level = mod(atan(b - uArch.w, ax + uArch.y) * 26.0, 1.0) < 0.16 ? 2.0 : 4.0;
     else level = masonryLevel(a, b, 3.0);
   }
-  outColor = vec4(rampOf(col, level), 1.0);
+  outColor = uDebug > 0.5 ? vec4(vInfo.xyz / 255.0, 1.0) : vec4(rampOf(col, level), 1.0);
   outClass = vec4(0.0, 0.0, 0.0, 1.0);
   gl_FragDepth = depthOf(vS.z);
 }`,

@@ -59,6 +59,14 @@
       window.freezeHook(null);
       return { spheres: rec.spheres, discs: rec.discs, bakeMs: CAM.bakeMs };
     },
+    // The recorded static spheres replayed through the engine's own sphere(), alone on an empty buffer.
+    spheresOnly(list) {
+      zb.fill(-1e9);
+      pix.fill(rgb(255, 255, 255));
+      window.freezeHook(null);
+      for (const s of list) sphere(s.x, s.y, s.z, s.r, s.c, s.mode);
+      return { pix: b64(pix), zb: b64(zb) };
+    },
     // One full frame in a fixed pose: tourists stand at fixed spots on the bridge, the diver waits, wind time is 0.
     frame() {
       tourists.forEach((t, k) => Object.assign(t, { x: -6.5 + k, y: k % 2 ? .35 : -.35, tx: 0, ty: 0, yaw: Math.PI / 2, look: Math.PI / 2, walking: false, phone: k % 3 === 0, gait: 0 }));
@@ -99,6 +107,6 @@
     const data = new ImageData(W, H);
     new Uint32Array(data.data.buffer).set(buf);
     c.getContext('2d').putImageData(data, 0, 0);
-    return c.toDataURL('image/png');
+    return c.toDataURL('image/png').split(',')[1]; // bare base64
   }
 })();

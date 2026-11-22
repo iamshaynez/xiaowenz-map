@@ -60,9 +60,11 @@ function roof(m, x0, y0, x1, y1, z, rise, colour, stone) {
   for (const [ya, yb] of [[y0, yc], [yc, y1]]) {
     m.surface((u, v) => { const x = lerp(x0, x1, u), y = lerp(ya, yb, v); return { p: [x, y, z + rise * (1 - Math.abs(y - yc) / half)], c: [x, y, 0], info: [M.ROOF, colour, half, yc] }; }, 1, 1);
   }
-  // a gable at each end, filled with masonry
+  // a gable at each end, filled with masonry; it is a triangle with its point on the ridge, so it takes two spans
   for (const [x, base] of [[x1, 2], [x0, 1]]) {
-    m.surface((u, v) => { const y = lerp(y0, y1, u), h = v * rise * (1 - Math.abs(y - yc) / half); return { p: [x, y, z + h], c: [y, z + h, 0], info: [M.MASONRY, stone, base, 0] }; }, 1, 1);
+    for (const [ya, yb] of [[y0, yc], [yc, y1]]) {
+      m.surface((u, v) => { const y = lerp(ya, yb, u), h = v * rise * (1 - Math.abs(y - yc) / half); return { p: [x, y, z + h], c: [y, z + h, 0], info: [M.MASONRY, stone, base, 0] }; }, 1, 1);
+    }
   }
 }
 
@@ -160,7 +162,9 @@ export function buildStari(gl, K, data, palette, W, H) {
   house(m, 11, -7, 14.2, -3.8, 3.2, tile, stone, dark);
   house(m, 10.2, 4.4, 13.2, 7, 2.8, slate, stone, dark);
 
-  // tree leaves are drawn twice: at rest with the static scene, and shifted by the wind with the moving things
+  // The reference never bakes leaves: growTree() only records their pixels, and drawLeaves() paints them every
+  // frame, shifted by the wind. So the static scene holds trunks and rocks alone, and the leaves are drawn once,
+  // with the moving things, at their shifted positions.
   const leaves = [], still = [], shift = [];
   let k = 0;
   for (const s of data.static.spheres) {

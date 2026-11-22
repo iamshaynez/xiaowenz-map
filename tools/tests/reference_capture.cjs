@@ -44,6 +44,9 @@ const PRESETS = {
     for (const [name, preset] of Object.entries(PRESETS)) {
       const baked = await page.evaluate(p => window.__freeze.bake(p), preset);
       const stat = await page.evaluate(() => window.__freeze.buffers('static'));
+      const spheres = await page.evaluate(list => window.__freeze.spheresOnly(list), baked.spheres.filter(s => !s.leaf));
+      write(`${name}.spheres.pix`, spheres.pix);
+      write(`${name}.spheres.zb`, spheres.zb);
       const dynamic = await page.evaluate(() => window.__freeze.frame());
       const full = await page.evaluate(() => window.__freeze.buffers('full'));
       save(`${name}.static`, stat);
