@@ -5,16 +5,16 @@
 
 ## 当前这一步
 
-阶段 1b：运行探针。
+阶段 1c：CPU 参照渲染器的冻结姿态导出。
 
 ## 阶段 1：落盘、探针、三道闸门
 
 - [x] 1a 落盘文档、`.gitignore`、`git init`、首次提交
-- [ ] 1b 探针
-  - [ ] WebGL2 能力与吞吐（`tools/probes/webgl2-probe.cjs`）
-  - [ ] 主城区 8×7 网格 OSM 抽样（`tools/probes/osm_grid_sample.py`）
-  - [ ] 各数据源从本机的可达性与速度
-  - [ ] 3D-GloBFP 瓦片定位
+- [x] 1b 探针（结果见 `PROBES.md`；原始数据在 `data/raw/` 下载中）
+  - [x] WebGL2 能力与吞吐（`tools/probes/webgl2-probe.cjs`）
+  - [x] 主城区 8×7 网格 OSM 抽样（`tools/probes/osm_grid_sample.py`）
+  - [x] 各数据源从本机的可达性与速度
+  - [x] 3D-GloBFP 瓦片定位
 - [ ] 1c 相机实验提升为 CPU 参照渲染器，导出冻结姿态的金标帧
 - [ ] 1d WebGL2 样式引擎原型，重画测试场景
 - [ ] 1e 闸门
@@ -75,4 +75,4 @@
 
 ## 阻塞与待办
 
-（无）
+- 主城区 OSM 建筑粗估只有约 4.6 万栋，低于闸门 G3 的 10 万栋。等 3D-GloBFP 的轮廓并进来后再判定；G3 按计划不因此停工。
