@@ -11,7 +11,8 @@
 
   // Every sphere the engine splats: rocks, tree trunks (as chains of spheres), leaves, people.
   sphere = function (x, y, z, r, c, mode) {
-    if (record && record.spheres) record.spheres.push({ x, y, z, r, c: rgbOf(c), mode: mode || 'plain' });
+    // `capture` is the engine's own flag: set only while a leaf's pixels are being recorded.
+    if (record && record.spheres) record.spheres.push({ x, y, z, r, c: rgbOf(c), mode: mode || 'plain', leaf: !!capture });
     return orig.sphere(x, y, z, r, c, mode);
   };
   // Every shadow ellipse, in world space, before it is stamped onto the ground.
@@ -44,7 +45,8 @@
         SHADOW_X, SHADOW_Y, WIND_FPS,
         STONE, SLATE, TILE, DARK, WATER_TONES, BEACH_TONES,
         ARCH_A, ARCH_C, ARCH_R, ARCH_BASE, DECK_END, DECK_LOW, DECK_TOP, DECK_REACH, HALF_W, PARAPET,
-        TOURIST_SCALE, TOURIST_SHIRTS, TOURIST_LEGS, TOURIST_HAIR, TOURIST_SKIN, DIVER,
+        TOURIST_SCALE, TOURIST_SHIRTS, TOURIST_LEGS, TOURIST_HAIR, TOURIST_SKIN, DIVER, originY: SCENE.originY,
+        leaves: leaves.map(l => ({ x: l.x, y: l.y, z: l.z, k: l.k, r: l.r })),
         streaks: STREAKS.map(s => ({ ...s })),
       };
     },
@@ -86,8 +88,17 @@
         W, H, camera: { ...CAM },
         pix: b64(src.pix), zb: b64(src.zb), groundZ: b64(groundZ), ground: b64(ground), kinds: b64(kinds),
         staticShadow: b64(staticShadow), shadowMask: b64(shadowMask), edges: b64(edgeMask(src.zb)),
-        png: stat ? null : document.getElementById('c').toDataURL('image/png'),
+        png: pngOf(src.pix),
       };
     },
   };
+
+  function pngOf(buf) {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const data = new ImageData(W, H);
+    new Uint32Array(data.data.buffer).set(buf);
+    c.getContext('2d').putImageData(data, 0, 0);
+    return c.toDataURL('image/png');
+  }
 })();

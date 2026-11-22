@@ -5,7 +5,7 @@
 
 ## 当前这一步
 
-阶段 1c：CPU 参照渲染器的冻结姿态导出。
+阶段 1d：WebGL2 样式引擎原型。
 
 ## 阶段 1：落盘、探针、三道闸门
 
@@ -15,7 +15,7 @@
   - [x] 主城区 8×7 网格 OSM 抽样（`tools/probes/osm_grid_sample.py`）
   - [x] 各数据源从本机的可达性与速度
   - [x] 3D-GloBFP 瓦片定位
-- [ ] 1c 相机实验提升为 CPU 参照渲染器，导出冻结姿态的金标帧
+- [x] 1c 相机实验提升为 CPU 参照渲染器，导出冻结姿态的金标帧（`tools/reference-cpu/freeze.js`、`tools/tests/reference_capture.cjs`，输出在 `out/fidelity/cpu/`）
 - [ ] 1d WebGL2 样式引擎原型，重画测试场景
 - [ ] 1e 闸门
   - [ ] G1 观感一致（轮廓重合度 ≥ 97%，描边吻合 ≥ 90%，模糊后颜色差 ≤ 10/255，明暗档位分布差 ≤ 2%）

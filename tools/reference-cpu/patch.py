@@ -91,11 +91,14 @@ page = sub(page, "</style>", """  /* EXPERIMENT: the game HUD is hidden; this pa
   #cam-caption b { display: block; font-weight: 400; color: #1c1b19; }
 </style>""")
 
-page, n = re.subn(r'<script src="\.\./shell\.js"></script>.*?<script src="\.\./engine\.js"></script>',
-                  '<!-- Experiment derived from pixel-plays by AmirMushich (MIT); concept by abhi. Not part of the original project. -->\n<script src="engine.js"></script>',
+# drop the menu/credits shell and the game mount, but keep the line that sets window.PP_SCENE
+# (shadow direction and vertical offset): it sits between the two and defines the scene's own look
+page, n = re.subn(r'<script src="\.\./shell\.js"></script>\s*<script>\s*PixelPlays\.mount\(\{.*?\}\);\s*</script>',
+                  '<!-- Experiment derived from pixel-plays by AmirMushich (MIT); concept by abhi. Not part of the original project. -->',
                   page, flags=re.S)
 if n != 1:
-    raise SystemExit(f"shell/engine script block: expected 1 match, found {n}")
+    raise SystemExit(f"shell/mount script block: expected 1 match, found {n}")
+page = sub(page, '<script src="../engine.js"></script>', '<script src="engine.js"></script>')
 
 # ground depth must follow the yawed camera
 page = after_lines(page, "zb[i] = (g.x + g.y) / R2 * COS;",
