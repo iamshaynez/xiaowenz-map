@@ -145,7 +145,7 @@ function squareTower(x0, y0, x1, y1, z1) {
   for (let a = x0; a <= x1; a += step) for (let z = 0; z <= z1; z += step) plot(a, y1, z, masonry(a, z, 3));
   for (let a = x0; a <= x1; a += step) for (let z = 0; z <= z1; z += step) plot(a, y0, z, masonry(a, z, 1)); // EXPERIMENT: far wall
   for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x1, a, z, masonry(a, z, 2));
-  for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 1.5)); // EXPERIMENT: far wall
+  for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 2)); // EXPERIMENT: far wall (masonry needs a whole-number base)
   for (const [wx, wz] of [[.35, .3], [.65, .55], [.35, .78]]) {
     const cx = lerp(x0, x1, wx), cz = z1 * wz;
     for (let a = cx - .22; a <= cx + .22; a += step) for (let z = cz - .4; z <= cz + .4; z += step) plot(a, y1 + .14, z, rampOf(DARK)[1]);
@@ -191,7 +191,7 @@ function house(x0, y0, x1, y1, z1, c) {
   for (let a = x0; a <= x1; a += step) for (let z = 0; z <= z1; z += step) plot(a, y1, z, masonry(a, z, 3));
   for (let a = x0; a <= x1; a += step) for (let z = 0; z <= z1; z += step) plot(a, y0, z, masonry(a, z, 1)); // EXPERIMENT: far wall
   for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x1, a, z, masonry(a, z, 2));
-  for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 1.5)); // EXPERIMENT: far wall
+  for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 2)); // EXPERIMENT: far wall (masonry needs a whole-number base)
   const windows = Math.max(1, Math.floor((x1 - x0) / 1.6));
   for (let k = 0; k < windows; k++) {
     const cx = lerp(x0, x1, (k + .5) / windows);

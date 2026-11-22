@@ -109,7 +109,7 @@ page = after_lines(page, "for (let a = x0; a <= x1; a += step) for (let z = 0; z
                    "for (let a = x0; a <= x1; a += step) for (let z = 0; z <= z1; z += step) plot(a, y0, z, masonry(a, z, 1)); // EXPERIMENT: far wall",
                    count=2)  # squareTower() and house()
 page = after_lines(page, "for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x1, a, z, masonry(a, z, 2));",
-                   "for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 1.5)); // EXPERIMENT: far wall",
+                   "for (let a = y0; a <= y1; a += step) for (let z = 0; z <= z1; z += step) plot(x0, a, z, masonry(a, z, 2)); // EXPERIMENT: far wall (masonry needs a whole-number base)",
                    count=2)
 
 page = after_lines(page, "for (let h = 0; h <= rise * (1 - q); h += step) plot(x1, y, z + h, masonry(y, z + h, 2));",
