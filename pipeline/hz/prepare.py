@@ -7,8 +7,7 @@ import pickle
 import numpy
 
 from . import region
-from .buildings import HEIGHT_SOURCES, unify
-from .globfp import load as load_globfp
+from .buildings import unify
 from .osm_extract import Layers
 
 
