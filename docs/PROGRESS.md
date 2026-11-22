@@ -6,7 +6,7 @@
 ## 需要用户知情
 
 - **闸门 G1 带着一项未达标继续了**（背面机位明暗分布差 2.08%，门槛 2%），偏离了"闸门不过就停"。原因和依据见 `GATES.md` 与 `DECISIONS.md` D013、D014。并排对照图：`REVIEW/g1-sheet.png`。
-- **git 历史被改写过一次**（D023）：把管线中间文件从全部历史里移除了。改写前的备份在 `out/backup/history-before-untracking-work-data.bundle`。仓库只在本地。
+- **git 历史被改写过一次**（D023）：把管线中间文件从全部历史里移除了。改写前的备份在 `out/backup/history-before-untracking-work-data.bundle`。仓库只在本地。改写时管线中间文件被从磁盘上删过一次，已从备份恢复并逐字节核对，经过记在 D023。
 
 ## 怎么跑、怎么验
 
