@@ -24,6 +24,8 @@ HEIGHT_SOURCES = ("landmark", "osm:height", "osm:levels", "globfp", "inferred")
 MIN_FOOTPRINT_M2 = 6.0      # smaller GloBFP polygons are noise at this scale
 FLOOR_M = 3.0               # default storey height when a level count has to become metres
 COINCIDE = 0.5              # an outline "mostly coincides" with a footprint when at least this share of it overlaps
+SAME_M = 1.5                # two outlines are one footprint when their centres are this close and no point of one
+SAME_AREA = 0.05            # ... lies farther than this from the other; and their areas agree to this share
 
 
 def parse_metres(value):
@@ -122,4 +124,62 @@ def unify(osm_layers, globfp, bounds, log=print):
     counts = {origin: sum(1 for b in out if b["origin"] == origin) for origin in ("osm", "osm-block", "globfp")}
     log(f"buildings: {len(out)}  ({counts['osm']} OSM outlines kept, {counts['osm-block']} footprints standing in for {len(parts_of)} OSM blocks, {counts['globfp']} from GloBFP alone) in {time.time() - t0:.0f} s")
     log(f"heights: {source_count}")
+    return out
+
+
+def same_outline_pairs(geoms):
+    """-> (i, j): every pair of these outlines that are one footprint (SAME_M), once each."""
+    geoms = numpy.asarray(geoms, dtype=object)
+    area = shapely.area(geoms)
+    centres = shapely.centroid(geoms)
+    i, j = STRtree(geoms).query(geoms, predicate="intersects")
+    i, j = i[i < j], j[i < j]                                      # every pair once
+    same = (numpy.abs(area[i] - area[j]) <= SAME_AREA * numpy.maximum(area[i], area[j])) & (shapely.distance(centres[i], centres[j]) <= SAME_M)
+    i, j = i[same], j[same]
+    same = shapely.hausdorff_distance(geoms[i], geoms[j]) <= SAME_M
+    return i[same], j[same]
+
+
+def doubles(buildings, pairs=None, log=print):
+    """-> a mask over `buildings`, true for the records that repeat a footprint the data set holds twice.
+
+    `pairs`, a list, is given the place in `buildings` of every record left out and of the one kept over it.
+
+    3D-GloBFP gives about a third of its footprints twice: a record with a type and one without, over the
+    same outline and with two heights. Drawn both, the two lie on top of each other, and which of them a
+    pixel of their shared walls shows comes out of the rounding in the depth buffer: a mix of two colours
+    that changes with every turn of the camera. So of each group of such records the bake keeps the tallest
+    (its top was what could be seen of the group anyway) and leaves the others out.
+
+    Only records that came from the data set are compared: an OSM outline is never left out. `height` must
+    be filled in for every building (classify.py does that).
+    """
+    members = numpy.flatnonzero([b["origin"] in ("globfp", "osm-block") for b in buildings])
+    geoms = numpy.asarray([buildings[k]["geom"] for k in members], dtype=object)
+    heights = numpy.array([buildings[k]["height"] or 0.0 for k in members])
+    i, j = same_outline_pairs(geoms)
+
+    # the pairs joined into groups, and the tallest of each group (the first of equals)
+    parent = numpy.arange(len(geoms))
+
+    def root(k):
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    for a, b in zip(i, j, strict=True):
+        parent[root(a)] = root(b)
+    roots = numpy.fromiter((root(k) for k in range(len(geoms))), dtype=numpy.int64, count=len(geoms))
+    tallest = {}
+    for k, r in enumerate(roots):
+        if r not in tallest or heights[k] > heights[tallest[r]]:
+            tallest[r] = k
+    leave = numpy.array([tallest[r] != k for k, r in enumerate(roots)])
+    if leave.any():
+        log(f"{int(leave.sum())} records left out that repeat another one's footprint (the taller one of each is kept)")
+    if pairs is not None:
+        pairs.extend((int(members[k]), int(members[tallest[r]])) for k, r in enumerate(roots) if leave[k])
+    out = numpy.zeros(len(buildings), dtype=bool)
+    out[members[leave]] = True
     return out

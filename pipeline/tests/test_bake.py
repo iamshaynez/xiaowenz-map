@@ -178,6 +178,16 @@ class PitchedRoofTest(unittest.TestCase):
         self.assertTrue(numpy.isclose(back[:, 0], rows[:, 9], atol=0.021).all())
         self.assertTrue(numpy.isclose(back[:, 2], rows[:, 0], atol=0.013).all())            # the box stands on the roof it was put on
 
+    def test_each_rooftop_box_says_which_building_it_stands_on(self):
+        geoms = numpy.asarray([shapely.box(0, 0, 30, 12), shapely.box(50, 0, 80, 12)], dtype=object)
+        colour = {"tile_red": 8, "roof_flat_dark": 29, "metal_pale": 17, "roof_silver": 30, "metal_dark": 18, "roof_flat_grey": 28, "concrete_grey": 5}
+        props = numpy.array([[3.0, 12.0, 4, 2, bake.ROOF_FLAT, 0, 28, 0, 0, 15, 6], [3.0, 12.0, 4, 2, bake.ROOF_FLAT, 0, 28, 0, 0, 65, 6]], dtype=float)
+        _, rows = bake.rooftop_props(geoms, props, colour)
+        self.assertEqual(rows.shape[1], props.shape[1] + 1)
+        self.assertEqual(set(rows[:, 11].astype(int)), {0, 1})
+        for row in rows:
+            self.assertTrue(geoms[int(row[11])].contains(shapely.Point(row[9], row[10])))
+
     def test_a_halls_roof_climbs_higher_and_takes_a_hall_with_wings(self):
         # an outline that fills two thirds of its rectangle is no house, but a hall with wings will do for a great roof
         wings = numpy.asarray([shapely.geometry.Polygon([(0, 18), (24, 18), (24, 12), (18, 12), (18, 0), (6, 0), (6, 12), (0, 12)])], dtype=object)   # a T: two thirds of its rectangle

@@ -1,18 +1,18 @@
 # 像素杭州 · 主城区活地图
 
-一座可以转、可以放大、可以走进去的像素杭州。整座主城区（东经 120.00–120.40，北纬 30.12–30.44，约 1,430 平方公里）是一个悬浮在白底上的立体模型，边缘化成散点溶进白色。画风来自 [pixel-plays](https://github.com/amirmushichge/pixel-plays)（MIT）：五级色阶、左上来的光、紫灰的影子、深度的描边、抖动。54 万栋建筑、每一片水、每一条路都来自开放数据。
+一座可以转、可以放大、可以走进去的像素杭州。整座主城区（东经 120.00–120.40，北纬 30.12–30.44，约 1,430 平方公里）是一个悬浮在白底上的立体模型，边缘化成散点溶进白色。画风来自 [pixel-plays](https://github.com/amirmushichge/pixel-plays)（MIT）：五级色阶、左上来的光、紫灰的影子、深度的描边、抖动。44 万栋建筑、每一片水、每一条路都来自开放数据。
 
 ![西湖与主城区](docs/REVIEW/over-and-above.png)
 
 ## 运行
 
-需要 Node 18 以上。页面读的烘焙数据（`data/baked/`，约 1.1 GB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
+需要 Node 18 以上。页面读的烘焙数据（`data/baked/`，约 320 MB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
 
 ```
 node serve.mjs
 ```
 
-然后打开 <http://127.0.0.1:5300/app/>。首次打开约 2 秒出现全景（要加载 10 MB 的全景包）。
+然后打开 <http://127.0.0.1:5300/app/>。首次打开约 2 秒出现全景（要加载 5 MB 的全景包）。
 
 没有构建步骤，没有依赖；页面是原生 ES 模块和 WebGL2。只保证 Chrome；手机上可用（单指转动、双指缩放）。
 
@@ -48,6 +48,7 @@ PYTHONPATH=pipeline .venv/bin/python -I -m hz.build_all     # 下载之后的一
 
 ```
 node tools/tests/data-readers.cjs                                                    # 网页端的读取器对着真实烘焙文件核对
+node tools/tests/bake-compare.cjs <上一版烘焙的目录>                                  # 新一版烘焙逐栋、逐棵、逐块对着上一版：位置差不超过半个单位，其余相同
 .venv/bin/python -I -m unittest discover -s pipeline/tests -t pipeline/tests          # 数据管线的单元测试
 NODE_PATH="$(npm root -g)" node tools/tests/shadows.cjs                              # 阴影贴图对着解析答案逐像素比对
 NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs                               # 真实城市的十四个视角
@@ -59,6 +60,8 @@ NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs                          
 NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --ss 2,4 --out 名字        # 吞吐
 NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10                    # 随机漫游十分钟
 NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                             # 与原版参照逐像素比（闸门 G1）
+NODE_PATH="$(npm root -g)" node tools/tests/frames.cjs <目录>                         # 54 张定死的静帧（时间冻结、界面隐藏），改数据或渲染前后各拍一次
+node tools/tests/frames-diff.cjs <改前目录> <改后目录>                                  # 逐像素比这两组静帧
 ```
 
 浏览器测试各自起一个本地服务器（端口 5390–5399），不要同时跑两个。`fidelity.cjs` 的退出码是 1：它停下来报的就是下面那项已知的例外，其余指标全过。
@@ -87,7 +90,9 @@ NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                        
 - **我没有看过这些画面。** 这个环境里截图只能交给视觉模型转述。画质靠客观比对、自动测试和视觉模型的目检保证；最终的样子需要你看验收图。
 - **建筑的颜色直到验收阶段才真正生效**：着色器里读错了一个纹理，之前全城的墙都是同一种灰白。修正之后只复核了 8 张地标图（断桥、保俶塔、雷峰塔、净慈寺、城隍阁、灵隐寺、六和塔、拱宸桥），其余的验收图没有经过看图复核，只过了数字检查。请重点看颜色。经过见 `docs/DECISIONS.md` D048、`docs/PROGRESS.md`。
 - **闸门 G1 带着一项未达标**：与原版逐像素比对，背面机位的明暗分布差 2.08%（门槛 2%）。原因在参照版一方（它从这个角度漏出桥拱的下表面）；其余四项指标五个机位全过。见 `docs/GATES.md` 和 `docs/DECISIONS.md` D013、D014。
-- 楼高 2.9% 是推断的；屋顶上的小件、树的位置、车船行人全是按规矩生成的；地标的坐标来自 OSM，模型尺寸一半是公开数字、一半按形制估。清单在 `docs/DATA-REPORT.md`。
+- 楼高 3.3% 是推断的；屋顶上的小件、树的位置、车船行人全是按规矩生成的；地标的坐标来自 OSM，模型尺寸一半是公开数字、一半按形制估。清单在 `docs/DATA-REPORT.md`。
+- **位置存成了 4 厘米一格的整数**（数据从 1.1 GB 降到 320 MB 的代价）。几何在 2 厘米以内和原来一样，但着色器的颗粒噪声是按位置铺的，所以约 1.5% 的像素会比原来高或低一级明暗，远景多一些、近景少一些；肉眼分不出，逐像素比会看到。见 `docs/DECISIONS.md` D058。
+- 3D-GloBFP 给三分之一的轮廓记了两条高度不同的记录，烘焙时每组只留较高的一条（`docs/DATA-REPORT.md`"重复的轮廓"）。
 - 全景和城区两档之间没有过渡。桥面不投影。街道没有车道线。Safari、Firefox 和真机手机没有测过。
 - 只在这台 Mac Studio（M3 Ultra）的 Chrome 上测过性能：所有图层都开，最差一行 95 分位 7.7 毫秒（4 倍超采样，960 × 540）。其他机器没有数据。
 - 源码在公开仓库 <https://github.com/iamshaynez/xiaowenz-map>；烘焙数据、原始数据和页面本身都没有发布。

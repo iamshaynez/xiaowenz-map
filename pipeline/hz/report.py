@@ -10,6 +10,7 @@ import numpy
 import shapely
 
 from . import region
+from .buildings import doubles, same_outline_pairs
 from .classify import (
     ARCHETYPE_NAMES,
     ROOF_FLAT,
@@ -21,7 +22,9 @@ from .classify import (
     VILLAGE_LEVELS,
     classify,
 )
+from .ground import GROUND_COLOURS, Ground
 from .landmarks import cleared_around, cleared_mask
+from .scene import in_water
 from .terrain import load as load_terrain
 
 HEIGHT_SOURCES = {"osm:height": "OSM 的 height 标签", "osm:levels": "OSM 的层数标签 × 层高", "globfp": "3D-GloBFP 数据集", "inferred": "推断"}
@@ -39,6 +42,14 @@ def build(log=print):
         buildings = pickle.load(f)
     grid, info = load_terrain(region.WORK / "terrain.bin")
     classify(buildings, grid, info, log=lambda *a: None)
+    records = buildings
+    # what the bake draws: not what stands in water, and of a footprint the data set holds twice one record
+    all_geoms = numpy.asarray([b["geom"] for b in records], dtype=object)
+    afloat = in_water(all_geoms, Ground.load(region.WORK / "ground.pkl").water)
+    afloat = numpy.asarray(afloat, dtype=bool)
+    twice = numpy.zeros(len(records), dtype=bool)
+    twice[~afloat] = doubles([b for b, a in zip(records, afloat, strict=True) if not a], log=lambda *a: None)
+    buildings = [b for b, a, t in zip(records, afloat, twice, strict=True) if not a and not t]
     index = json.loads((region.BAKED / "index.json").read_text(encoding="utf-8"))
     geoms = numpy.asarray([b["geom"] for b in buildings], dtype=object)
     areas = shapely.area(geoms)
@@ -60,14 +71,14 @@ def build(log=print):
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
     cleared = cleared_mask(cx, cy, cleared_around())
+    assert len(buildings) == index["buildings"] and int(afloat.sum()) == index["leftOutOfWater"] and int(twice.sum()) == index["repeatedOutlines"], "the report and the bake count differently"
     add(table(["项目", "数量"], [
-        ["合并后的建筑记录", f"{len(buildings):,}"],
-        ["立在水里、不入图", f"{index['leftOutOfWater']:,}"],
-        ["入图的建筑记录", f"{index['buildings']:,}"],
+        ["合并后的建筑记录", f"{len(records):,}"],
+        ["立在水里、不入图", f"{int(afloat.sum()):,}"],
+        ["其中数据集重复给的轮廓，只留一条", f"{int(twice.sum()):,}"],
+        ["入图的建筑记录", f"{len(buildings):,}"],
         ["其中给手工搭的地标让位、不画的", f"{int(cleared.sum()):,}"],
     ]))
-    add("")
-    add("数据集把一栋楼拆成几个部分（院落的外圈和内院、不同高度的主体和裙房），所以\"记录\"多过\"楼\"：外接框相同的记录有 99,064 组，见下面\"外接框相同的记录\"。")
     add("")
     add("### 轮廓从哪来\n")
     origins = Counter(b["origin"] for b in buildings)
@@ -120,23 +131,35 @@ def build(log=print):
     add(table(["", "西", "", "中", "", "东"], [[r + 1] + row for r, row in enumerate(grid_rows)]))
     add("")
 
-    add("## 外接框相同的记录\n")
-    west_b, south_b, east_b, north_b = shapely.bounds(geoms).T
-    keys = numpy.round(numpy.column_stack([west_b, south_b, east_b, north_b]), 2)
-    _, inverse, counts = numpy.unique(keys, axis=0, return_inverse=True, return_counts=True)
-    grouped = numpy.flatnonzero(counts[inverse] > 1)
-    order = grouped[numpy.argsort(inverse[grouped], kind="stable")]
-    groups = inverse[order]
-    pairs = same = 0
-    for k in range(1, len(order)):
-        if groups[k] == groups[k - 1]:
-            pairs += 1
-            same += bool(shapely.equals(geoms[order[k - 1]], geoms[order[k]]))
-    add(f"外接框四角坐标（精确到厘米）完全相同的记录：{int((counts > 1).sum()):,} 组、{len(grouped):,} 条，最大的组 {int(counts.max())} 条。逐对比较几何，{pairs:,} 对里只有 {same:,} 对的轮廓真的完全一样，其余是同一栋楼的不同部分共用一个外接框——院落式建筑的外圈和内院、不同高度的主体和裙房，几乎全部来自 3D-GloBFP。两个部分都画是对的（高的盖住矮的），所以没有去重；那 {same:,} 对真正重复的影响可以忽略。")
+    add("## 重复的轮廓\n")
+    add("3D-GloBFP 把一部分轮廓给了两条记录：一条带 type，一条不带，轮廓相同，楼高不同。两条都画时它们完全重叠，下半截墙谁露出来取决于深度缓冲的舍入，转动视角就在两种颜色之间闪。所以烘焙时每一组只留最高的一条（它的顶部本来也是能看见的那部分），其余不画；只有数据集来的记录相互比较，OSM 的轮廓不会被去掉。\n")
+    from_dataset = numpy.array([b["origin"] in ("globfp", "osm-block") for b in records])
+    dataset = [records[k] for k in numpy.flatnonzero(from_dataset & ~afloat)]      # the records the bake compared
+    ds_geoms = numpy.asarray([b["geom"] for b in dataset], dtype=object)
+    i, j = same_outline_pairs(ds_geoms)
+    tall = numpy.array([dataset[k]["height"] for k in i])
+    low = numpy.array([dataset[k]["height"] for k in j])
+    ratio = numpy.maximum(tall, low) / numpy.maximum(numpy.minimum(tall, low), 0.1)
+    parent = list(range(len(dataset)))
+
+    def root(k):
+        while parent[k] != k:
+            k = parent[k]
+        return k
+
+    for a, b in zip(i, j, strict=True):
+        parent[root(a)] = root(b)
+    add(table(["", ""], [
+        ["至少有两条记录的轮廓", f"{len({root(int(k)) for k in numpy.concatenate([i, j])}):,}"],
+        ["这样的记录一共", f"{len(numpy.unique(numpy.concatenate([i, j]))):,}"],
+        ["不画的记录", f"{int(twice.sum()):,}"],
+        ["同一轮廓两条记录的楼高之比", f"中位 {numpy.median(ratio):.2f}，90 分位 {numpy.percentile(ratio, 90):.2f}"],
+    ]))
     add("")
+    add("留下的那条是较高的，所以每栋楼的高度和原来能看见的天际线一样，变的只是这些楼下半截墙的颜色和屋顶上的小件：原来在两种之间闪，现在固定是较高那条的。\n")
+    add("两条记录哪一条更准无从核对：数据集没有说 type 是什么意思，拿 OSM 自己标了楼高的楼去比，两条都差得远、不分高下（D059）。\n")
 
     add("## 地面与水\n")
-    from .ground import GROUND_COLOURS, Ground
     g = Ground.load(region.WORK / "ground.pkl")
     add(table(["图层", "面积（平方公里）"], [[GROUND_COLOURS.get(c, c), f"{g.layers[c].area / 1e6:.1f}"] for c in sorted(g.layers, key=lambda k: -g.layers[k].area)]))
     add("")

@@ -307,7 +307,12 @@ ROOFTOP_RULES = {   # archetype -> [(kind, chance of having any, the most of the
 def rooftop_props(geoms, props, colour_index, seed=20261123):
     """Boxes on the flat roofs of buildings: stair heads, tanks, solar heaters and the rest.
 
-    -> (outlines, property rows) in the form of the buildings they stand on, each flagged FLAG_ROOFTOP.
+    -> (outlines, property rows) in the form of the buildings they stand on, each flagged FLAG_ROOFTOP, and
+    in a last column the building each stands on (its place in `geoms`).
+
+    The random numbers are drawn in one stream over the buildings in order, so what stands on a roof
+    depends on every building before it: the bake runs this over the list before the repeated outlines are
+    left out, and drops the boxes of those afterwards, so that nothing moves on the roofs that stay.
     """
     rng = numpy.random.default_rng(seed)
     geoms = numpy.asarray(geoms, dtype=object)
@@ -343,10 +348,10 @@ def rooftop_props(geoms, props, colour_index, seed=20261123):
                 mine.append(box)
                 out_geoms.append(box)
                 out_rows.append([top, height, 1, archetype, ROOF_FLAT, wall if kind_wall is None else colour_index[kind_wall],
-                                 colour_index[kind_roof], int(rng.integers(0, 255)), FLAG_ROOFTOP, x, y])
+                                 colour_index[kind_roof], int(rng.integers(0, 255)), FLAG_ROOFTOP, x, y, n])
                 placed += 1
     if not out_rows:
-        return numpy.zeros(0, dtype=object), numpy.zeros((0, props.shape[1]))
+        return numpy.zeros(0, dtype=object), numpy.zeros((0, props.shape[1] + 1))
     return numpy.asarray(out_geoms, dtype=object), numpy.array(out_rows, dtype=numpy.float64)
 
 

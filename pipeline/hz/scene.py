@@ -77,6 +77,7 @@ from .bake import (
     terrain_section,
     tile_origin,
 )
+from .buildings import doubles
 from .classify import classify, in_historic_villages, in_tea_zones
 from .ground import (
     FARMLAND,
@@ -363,6 +364,12 @@ def bake(limit=None, log=print):
         log(f"left out {int(afloat.sum())} buildings standing in water")
         buildings = [b for b, a in zip(buildings, afloat, strict=True) if not a]
         geoms = geoms[~afloat]
+    # the height data set holds about a third of its footprints twice: one record of each is kept, decided
+    # among the buildings that stay (one left out as standing in water must not take its twin with it). The
+    # list stays whole until the roofs have been filled in: their boxes come from one stream of random
+    # numbers over the buildings in order, so one left out would move what stands on every roof after it
+    repeated_pairs = []
+    twice = doubles(buildings, pairs=repeated_pairs, log=log)
     areas = shapely.area(geoms)
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
@@ -374,9 +381,23 @@ def bake(limit=None, log=print):
                          for b, f, x, y in zip(buildings, flags, cx, cy, strict=True)], dtype=numpy.float64)
     cleared = flag_cleared(props, clears)
     log(f"{int(cleared.sum())} mapped buildings give way to landmarks built by hand")
+    # what was left out and what was kept in its place, for the data report and for tools/tests/bake-compare.cjs
+
+    def look(k):
+        """levels, archetype, roof, wall colour, roof colour, seed and flags: what tells a record apart"""
+        return [int(props[k, c]) for c in range(2, 9)]
+
+    (work / "repeated-outlines.json").write_text(json.dumps({"leftOut": [look(a) for a, b in repeated_pairs], "kept": [look(b) for a, b in repeated_pairs]}))
+
     # what stands on the flat roofs: not buildings, drawn like them, in a section of their own so that the
-    # app can leave them out until they are more than a pixel
+    # app can leave them out until they are more than a pixel. Made over every record, kept or not (see above)
     roof_geoms, roof_rows = rooftop_props(geoms, props, colour_index)
+    repeated = int(twice.sum())
+    if repeated:
+        on_kept = ~twice[roof_rows[:, 11].astype(numpy.int64)]
+        roof_geoms, roof_rows = roof_geoms[on_kept], roof_rows[on_kept]
+        buildings = [b for b, t in zip(buildings, twice, strict=True) if not t]
+        geoms, areas, cx, cy, flags, props, cleared = geoms[~twice], areas[~twice], cx[~twice], cy[~twice], flags[~twice], props[~twice], cleared[~twice]
     live = props[~cleared]             # what is drawn, for the overview tier
     live_areas = areas[~cleared]
 
@@ -468,7 +489,7 @@ def bake(limit=None, log=print):
         "tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "format": FORMAT, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
         "palette": list(palette), "origin": [region.ORIGIN_E, region.ORIGIN_N], "epsg": region.EPSG, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
-        "buildings": real, "leftOutOfWater": int(afloat.sum()), "rooftopProps": len(roof_rows),
+        "buildings": real, "leftOutOfWater": int(afloat.sum()), "repeatedOutlines": repeated, "rooftopProps": len(roof_rows),
         "inferredHeights": int((flags & FLAG_INFERRED_HEIGHT != 0).sum()), "villageCaps": int((flags & FLAG_VILLAGE_CAP != 0).sum()),
         "datasetOutlines": int((flags & FLAG_DATASET_OUTLINE != 0).sum()), "replacedBlocks": int((flags & FLAG_REPLACED_BLOCK != 0).sum()),
         "flags": {"rooftop": 1, "inferredHeight": 2, "villageCap": 4, "datasetOutline": 8, "replacedBlock": 16, "cleared": 32},
