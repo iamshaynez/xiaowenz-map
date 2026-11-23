@@ -99,8 +99,8 @@ window.runShadows = async ({ W, H, SS, camera, boxes, trees, shaderPatch = [], t
   const gl = createContext(canvas);
   const renderer = new CityRenderer(gl, W, H, SS);
   const [paletteFile, index] = await Promise.all([
-    fetch('../../data/curated/palette.json').then(r => r.json()),
-    fetch('../../data/baked/index.json').then(r => r.json()),
+    fetch('../../app/palette.json').then(r => r.json()),
+    fetch('../../data/baked/hz/index.json').then(r => r.json()),
   ]);
   const names = index.palette.slice();
   for (const name of Object.keys(paletteFile.colours)) if (!names.includes(name)) names.push(name);

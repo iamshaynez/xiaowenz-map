@@ -30,7 +30,7 @@ async function main() {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }
@@ -42,14 +42,14 @@ async function main() {
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
     page.on('crash', () => errors.push('page crashed'));
-    await page.goto(`http://127.0.0.1:${PORT}/app/`);
+    await page.goto(`http://127.0.0.1:${PORT}/hz`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
-    const ids = await page.evaluate(() => window.__hz.landmarks.map(l => l.id));
-    const bounds = await page.evaluate(() => window.__hz.index.bounds);
-    const seasons = await page.evaluate(() => window.__hz.seasons);
+    const ids = await page.evaluate(() => window.__city.landmarks.map(l => l.id));
+    const bounds = await page.evaluate(() => window.__city.index.bounds);
+    const seasons = await page.evaluate(() => window.__city.seasons);
 
     const sample = () => page.evaluate(() => {
-      const app = window.__hz;
+      const app = window.__city;
       return {
         heap: performance.memory ? performance.memory.usedJSHeapSize : null,
         tiles: app.world.tiles.size, pending: app.world.pending.size,
@@ -66,14 +66,14 @@ async function main() {
     while (Date.now() - start < MINUTES * 60000) {
       const pick = random();
       if (pick < 0.22) {
-        await page.evaluate(id => window.__hz.flyTo(id, 1.2), ids[(random() * ids.length) | 0]);
+        await page.evaluate(id => window.__city.flyTo(id, 1.2), ids[(random() * ids.length) | 0]);
         actions.fly++;
       } else if (pick < 0.40) {
         // a jump to anywhere, at any zoom
         await page.evaluate(({ x, y, scale, pitch, yaw }) => {
-          const c = window.__hz.camera;
+          const c = window.__city.camera;
           Object.assign(c, { x, y, scale: Math.exp(scale), pitch, yaw });
-          window.__hz.touch();
+          window.__city.touch();
         }, { x: bounds[0] + random() * (bounds[2] - bounds[0]), y: bounds[1] + random() * (bounds[3] - bounds[1]), scale: Math.log(0.004) + random() * (Math.log(24) - Math.log(0.004)), pitch: 0.26 + random() * 1.19, yaw: random() * 6.283 });
         actions.jump++;
       } else if (pick < 0.60) {
@@ -94,7 +94,7 @@ async function main() {
         await page.keyboard.up(key);
         actions.keys++;
       } else if (pick < 0.92) {
-        await page.evaluate(name => window.__hz.setSeason(name), seasons[(random() * seasons.length) | 0]);
+        await page.evaluate(name => window.__city.setSeason(name), seasons[(random() * seasons.length) | 0]);
         actions.season++;
       } else {
         await page.keyboard.press(random() < 0.5 ? 'm' : 'r');
@@ -109,10 +109,10 @@ async function main() {
       if (elapsed - lastBench > 30000) {
         lastBench = elapsed;
         // a frame timed where the camera happens to be, at a low resolution so that the GPU is the limit
-        frames.push({ t: Math.round(elapsed / 1000), ...(await page.evaluate(() => { const b = window.__hz.bench(30); return { ms: b.ms, scale: +b.scale.toFixed(3), glError: b.glError }; })) });
+        frames.push({ t: Math.round(elapsed / 1000), ...(await page.evaluate(() => { const b = window.__city.bench(30); return { ms: b.ms, scale: +b.scale.toFixed(3), glError: b.glError }; })) });
       }
     }
-    await page.evaluate(() => window.__hz.setSeason('summer'));
+    await page.evaluate(() => window.__city.setSeason('summer'));
     await page.screenshot({ path: path.join(outDir, 'end.png') });
 
     // ---- the verdict ----------------------------------------------------------------------------------------

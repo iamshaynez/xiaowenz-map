@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '../..');
 const outDir = path.resolve(root, process.argv[2] || 'out/smoke');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 5398;
-// places are in world metres, from hz.region.project(lon, lat)
+// places are in world metres, from pixelcity.city.load("hz").project(lon, lat)
 const SHOTS = [
   ['overview', ''],
   ['boxes', 'c.scale = 0.08;'],                                                   // the overview tier, with its boxes
@@ -39,7 +39,7 @@ const SHOTS = [
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }
@@ -50,11 +50,11 @@ const SHOTS = [
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
     page.on('requestfailed', r => errors.push('requestfailed: ' + r.url()));
-    await page.goto(`http://127.0.0.1:${PORT}/app/`);
+    await page.goto(`http://127.0.0.1:${PORT}/hz`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
     for (const [name, setup, season] of SHOTS) {
       const result = await page.evaluate(async ({ code, season }) => {
-        const app = window.__hz;
+        const app = window.__city;
         app.setSeason(season || 'summer');
         if (code) new Function('c', code)(app.camera);
         app.touch();

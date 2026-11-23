@@ -28,7 +28,7 @@ const same = (a, b) => a.every((v, k) => Math.abs(v - b[k]) < 1e-9);
 
 // what the page shows around a search
 const state = page => page.evaluate(() => {
-  const app = window.__hz, note = document.getElementById('note');
+  const app = window.__city, note = document.getElementById('note');
   const rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
   const overlaps = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
   return {
@@ -56,7 +56,7 @@ const inkPixels = page => page.evaluate(ink => {
 
 // how far the ink lies from the course of the thing found, as the camera sees it
 const onCourse = page => page.evaluate(async limit => {
-  const app = window.__hz, { course } = await import('/app/src/world/names.js');
+  const app = window.__city, { course } = await import('/src/world/names.js');
   const found = app.found(), row = (await app.search(found.title)).find(r => r.name === found.title && r.x === found.x && r.y === found.y);
   const points = row ? course(app.index(), row.k) : null;
   if (!points) return { row: Boolean(row), ink: 0, far: 0, worst: 0 };
@@ -85,7 +85,7 @@ const onCourse = page => page.evaluate(async limit => {
 
 // how far the course of the thing found lies from the streets the map draws traffic on (the tiles' PATH lines)
 const onStreet = page => page.evaluate(async limit => {
-  const app = window.__hz, { course } = await import('/app/src/world/names.js');
+  const app = window.__city, { course } = await import('/src/world/names.js');
   const found = app.found(), row = (await app.search(found.title)).find(r => r.name === found.title && r.x === found.x && r.y === found.y);
   const points = course(app.index(), row.k), world = app.world, size = world.index.tileSize;
   const toSegment = (px, py, a, b) => {
@@ -115,9 +115,9 @@ const onStreet = page => page.evaluate(async limit => {
 
 // fly to the first thing answering a name, at once, and let the tiles come in
 async function find(page, name) {
-  const result = await page.evaluate(name => window.__hz.find(name, 0), name);
-  await page.evaluate(() => window.__hz.settle(30000));
-  await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
+  const result = await page.evaluate(name => window.__city.find(name, 0), name);
+  await page.evaluate(() => window.__city.settle(30000));
+  await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
   await wait(300);
   return result;
 }
@@ -130,7 +130,7 @@ async function opened(browser, url, options = {}) {
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto(url);
   await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
-  await page.waitForFunction(() => window.__hz.index() !== null, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__city.index() !== null, null, { timeout: 60000 });
   return { context, page, errors };
 }
 
@@ -140,7 +140,7 @@ async function opened(browser, url, options = {}) {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }
@@ -150,8 +150,8 @@ async function opened(browser, url, options = {}) {
     fs.mkdirSync(outDir, { recursive: true });
 
     // ---- on a desktop -----------------------------------------------------------------------------------------
-    const { context, page, errors } = await opened(browser, `http://127.0.0.1:${PORT}/app/`, { viewport: { width: 960, height: 540 } });
-    const book = await page.evaluate(() => ({ count: window.__hz.index().count, bytes: window.__hz.index().bytes, sheets: window.__hz.index().sheets.size }));
+    const { context, page, errors } = await opened(browser, `http://127.0.0.1:${PORT}/hz`, { viewport: { width: 960, height: 540 } });
+    const book = await page.evaluate(() => ({ count: window.__city.index().count, bytes: window.__city.index().bytes, sheets: window.__city.index().sheets.size }));
     check(book.count > 20000 && book.bytes > 1e6, `the index is here (${book.count} things, ${book.bytes} bytes)`);
     const start = await state(page);
     check(same(start.boxes.map, start.boxes.mark), `what is drawn over the map covers the map and no more (${start.boxes.map} against ${start.boxes.mark})`);
@@ -190,15 +190,15 @@ async function opened(browser, url, options = {}) {
 
     // the flight, and what is left on the page
     await page.keyboard.press('Enter');
-    await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
-    await page.evaluate(() => window.__hz.settle(30000));
+    await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
+    await page.evaluate(() => window.__city.settle(30000));
     await wait(400);
     now = await state(page);
     check(now.found === '文三路', `the road is what was found (${now.found})`);
     check(now.note && now.note[0] === '文三路' && /^道路 · 次干道 · [\d.]+ 公里$/.test(now.note[1]), `the note names it and says what it is (${now.note})`);
     check(!now.noteOverReadout, 'the note does not cover the readout');
     check(now.answers.length === 0 && now.words === '文三路' && now.focused !== 'find', 'the answers go, the words stay, and the keys go back to the map');
-    const indexRow = await page.evaluate(async () => (await window.__hz.search('文三路'))[0]);
+    const indexRow = await page.evaluate(async () => (await window.__city.search('文三路'))[0]);
     check(Math.hypot(now.camera[0] - indexRow.x, now.camera[1] - indexRow.y) < 5000 && now.camera[2] > 0.05 && now.camera[2] <= 1.6, `the camera is at the road (${now.camera[2].toFixed(2)} pixels a metre)`);
     const drawn = await onCourse(page);
     check(drawn.row && drawn.ink > 300 && drawn.far === 0, `the ink lies along the course of the road (${drawn.ink} pixels, ${drawn.far} of them off it, the farthest ${drawn.worst.toFixed(1)} pixels)`);
@@ -227,7 +227,7 @@ async function opened(browser, url, options = {}) {
     let result = await find(page, '岳庙');
     now = await state(page);
     check(result && result.name === '岳王庙' && now.found === '岳王庙', `岳庙 finds 岳王庙 (${result && result.name})`);
-    const ring = await page.evaluate(() => window.__hz.mark());
+    const ring = await page.evaluate(() => window.__city.mark());
     const ink = await inkPixels(page);
     const cx = Math.round(ring.centre[0]), cy = Math.round(ring.centre[1]);
     const places = pixels => pixels.map(([x, y]) => `${x},${y}`).sort();
@@ -263,12 +263,12 @@ async function opened(browser, url, options = {}) {
     // what was found gives way to a landmark of the list, and the way back to the whole city clears it
     await find(page, '文三路');
     await page.click('#landmarks button[data-id="1-03"]');
-    await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
+    await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
     now = await state(page);
     check(now.found === null && now.note && now.note[0] === '雷峰塔' && (await inkPixels(page)).length === 0, 'choosing a landmark of the list replaces what was found');
     await find(page, '文三路');
     await page.keyboard.press('r');
-    await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
+    await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
     now = await state(page);
     check(now.found === null && now.note === null && (await inkPixels(page)).length === 0, 'R, back to the whole city, clears it');
 
@@ -286,15 +286,15 @@ async function opened(browser, url, options = {}) {
     now = await state(page);
     check(now.answers.length === 0 && now.words === '西湖', 'touching the map puts the answers away');
     // finding is quick enough to answer every letter as it is typed
-    const ms = await page.evaluate(async () => { const { search } = await import('/app/src/world/names.js'); const t = performance.now(); for (let k = 0; k < 50; k++) search(window.__hz.index(), '路'); return (performance.now() - t) / 50; });
+    const ms = await page.evaluate(async () => { const { search } = await import('/src/world/names.js'); const t = performance.now(); for (let k = 0; k < 50; k++) search(window.__city.index(), '路'); return (performance.now() - t) / 50; });
     check(ms < 5, `one search over the whole index takes ${ms.toFixed(2)} ms`);
     check(errors.length === 0, `no page errors (${errors.slice(0, 3).join(' | ')})`);
     await context.close();
 
     // ---- opened at a place ------------------------------------------------------------------------------------
-    const at = await opened(browser, `http://127.0.0.1:${PORT}/app/?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
+    const at = await opened(browser, `http://127.0.0.1:${PORT}/hz?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
     now = await state(at.page);
-    await at.page.evaluate(() => window.__hz.settle(30000));
+    await at.page.evaluate(() => window.__city.settle(30000));
     check(now.found === '文三路' && now.words === '文三路' && now.note && now.note[0] === '文三路', `?find=文三路 opens at the road (${now.found})`);
     check((await onCourse(at.page)).far === 0, '... with it drawn');
     check(at.errors.length === 0, `no page errors on opening at a place (${at.errors.slice(0, 3).join(' | ')})`);
@@ -302,7 +302,7 @@ async function opened(browser, url, options = {}) {
     await at.context.close();
 
     // ---- on a phone -------------------------------------------------------------------------------------------
-    const phone = await opened(browser, `http://127.0.0.1:${PORT}/app/`, devices['iPhone 13']);
+    const phone = await opened(browser, `http://127.0.0.1:${PORT}/hz`, devices['iPhone 13']);
     const p = phone.page;
     now = await state(p);
     const clear = (a, b) => a[2] <= b[0] || b[2] <= a[0] || a[3] <= b[1] || b[3] <= a[1];
@@ -315,8 +315,8 @@ async function opened(browser, url, options = {}) {
     check(whole, 'every answer can be read whole: nothing lies over it');
     await p.screenshot({ path: path.join(outDir, 'phone-answers.png') });
     await p.tap('#results button');
-    await p.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
-    await p.evaluate(() => window.__hz.settle(30000));
+    await p.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
+    await p.evaluate(() => window.__city.settle(30000));
     await wait(500);
     now = await state(p);
     check(now.found === '西湖' && now.note && now.note[0] === '西湖' && !now.noteOverReadout && !now.overflow, `the lake is found and named on the phone (${now.note})`);

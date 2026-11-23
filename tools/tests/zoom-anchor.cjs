@@ -29,7 +29,7 @@ const frames = page => page.evaluate(() => new Promise(resolve => requestAnimati
 // put the cursor on a world point, turn the wheel there, and say how far that point moved on the page
 async function zoomUnder(page, point, deltaY) {
   const at = await page.evaluate(async point => {
-    const app = window.__hz, c = app.camera;
+    const app = window.__city, c = app.camera;
     await app.settle(30000);
     const p = c.project(point.x, point.y, point.z), shown = app.renderer.W / document.getElementById('c').clientWidth;
     return { cssX: p.sx / shown, cssY: p.sy / shown, sx: p.sx, sy: p.sy, scale: c.scale };
@@ -39,7 +39,7 @@ async function zoomUnder(page, point, deltaY) {
   await page.mouse.wheel(0, deltaY);
   await frames(page);
   const after = await page.evaluate(async point => {
-    const app = window.__hz;
+    const app = window.__city;
     await app.settle(30000);
     const p = app.camera.project(point.x, point.y, point.z);
     return { sx: p.sx, sy: p.sy, scale: app.camera.scale, errors: app.gl.getError() };
@@ -52,7 +52,7 @@ async function run(browser, viewport, name, checks) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-  await page.goto(`http://127.0.0.1:${PORT}/app/`);
+  await page.goto(`http://127.0.0.1:${PORT}/hz`);
   await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
   const css = await page.evaluate(() => document.getElementById('c').clientWidth / document.getElementById('c').width);
   check(css === viewport.width / 960, `${name}: each of the frame's pixels is shown as ${css} CSS pixels`);
@@ -72,7 +72,7 @@ async function run(browser, viewport, name, checks) {
 
 // where the camera is put and the point the cursor will be on, for each check
 const TO_LEIFENG_TOP = async () => {
-  const app = window.__hz;
+  const app = window.__city;
   app.camera.yaw = 0;
   app.flyTo('1-03', 0);
   for (let k = 0; k < 400 && app.flying(); k++) await new Promise(resolve => setTimeout(resolve, 50));
@@ -82,7 +82,7 @@ const TO_LEIFENG_TOP = async () => {
 };
 const TO_HILL = async () => {
   // the highest ground of the overview, with nothing drawn on it: neither trees nor buildings
-  const app = window.__hz, r = app.renderer;
+  const app = window.__city, r = app.renderer;
   r.drawTrees = r.drawLife = r.drawRoofs = () => {};
   r.landmarks = [];
   const g = app.world.overview.grid;
@@ -99,7 +99,7 @@ const TO_LAKE = async () => {
   // whatever is drawn at the middle of a view over the lake near the Small Yingzhou island (water, a tree
   // of the island, a boat): the point is read the way the zoom reads it, so this checks that a zoom keeps
   // still, whatever it is holding on to
-  const app = window.__hz;
+  const app = window.__city;
   const island = app.landmarks.find(l => l.id === '1-04');
   app.camera.yaw = 0;
   Object.assign(app.camera, { x: island.x + 150, y: island.y + 150, scale: 1.2, pitch: Math.PI / 6 });
@@ -115,7 +115,7 @@ const TO_LAKE = async () => {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }

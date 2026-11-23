@@ -46,11 +46,11 @@ async function run(browser, device, name) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-  await page.goto(`http://127.0.0.1:${PORT}/app/`);
+  await page.goto(`http://127.0.0.1:${PORT}/hz`);
   await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
   await wait(600);
   const info = await page.evaluate(() => {
-    const app = window.__hz, r = app.renderer, canvas = document.getElementById('c');
+    const app = window.__city, r = app.renderer, canvas = document.getElementById('c');
     return {
       viewport: [innerWidth, innerHeight], coarse: matchMedia('(pointer: coarse)').matches,
       frame: [r.W, r.H], shown: [canvas.clientWidth, canvas.clientHeight], supersampling: r.SS,
@@ -75,20 +75,20 @@ async function run(browser, device, name) {
     await page.waitForFunction(() => document.getElementById('landmarks').checkVisibility(), null, { timeout: 5000 });
   }
   await page.click('#landmarks button[data-id="1-03"]');
-  await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
-  const here = await page.evaluate(async () => { await window.__hz.settle(30000); const c = window.__hz.camera, t = window.__hz.ui.target(); return { away: Math.hypot(c.x - t.x, c.y - t.y), scale: c.scale }; });
+  await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
+  const here = await page.evaluate(async () => { await window.__city.settle(30000); const c = window.__city.camera, t = window.__city.ui.target(); return { away: Math.hypot(c.x - t.x, c.y - t.y), scale: c.scale }; });
   check(here.away < 5, `${name}: the flight from the list arrives (${here.away.toFixed(1)} m away)`);
   await page.screenshot({ path: path.join(outDir, `${name}-leifeng.png`) });
 
   // one finger drags the map along: what was taken hold of stays under it, and the view does not turn
   const client = await context.newCDPSession(page);
-  const before = await page.evaluate(() => ({ yaw: window.__hz.camera.yaw, pitch: window.__hz.camera.pitch, scale: window.__hz.camera.scale }));
+  const before = await page.evaluate(() => ({ yaw: window.__city.camera.yaw, pitch: window.__city.camera.pitch, scale: window.__city.camera.scale }));
   const w = info.viewport[0], h = info.viewport[1];
   const heldAt = { x: w * 0.5, y: h * 0.5 };
   const grabbed = await under(page, heldAt.x, heldAt.y);
   await drag(client, heldAt.x, heldAt.y, w * 0.25, h * 0.08);
-  await page.evaluate(() => window.__hz.settle(30000));
-  const after = await page.evaluate(() => ({ yaw: window.__hz.camera.yaw, pitch: window.__hz.camera.pitch, scale: window.__hz.camera.scale }));
+  await page.evaluate(() => window.__city.settle(30000));
+  const after = await page.evaluate(() => ({ yaw: window.__city.camera.yaw, pitch: window.__city.camera.pitch, scale: window.__city.camera.scale }));
   const followed = await projectedOff(page, grabbed, heldAt.x + w * 0.25, heldAt.y + h * 0.08);
   check(followed < OFF_PX, `${name}: a finger drag pans: what was under the finger follows it (${followed.toFixed(2)} px off)`);
   check(after.yaw === before.yaw && after.pitch === before.pitch, `${name}: a finger drag does not turn the view (yaw ${before.yaw.toFixed(2)} -> ${after.yaw.toFixed(2)}, pitch ${before.pitch.toFixed(2)} -> ${after.pitch.toFixed(2)})`);
@@ -99,9 +99,9 @@ async function run(browser, device, name) {
   const middle = { x: w * 0.5, y: h * 0.5 };
   const held = await under(page, middle.x, middle.y);
   await pinch(client, middle.x, middle.y, 40, 140);
-  const zoomed = await page.evaluate(() => window.__hz.camera.scale);
+  const zoomed = await page.evaluate(() => window.__city.camera.scale);
   check(zoomed > after.scale * 1.5, `${name}: two fingers spread zoom in (${after.scale.toFixed(2)} -> ${zoomed.toFixed(2)})`);
-  await page.evaluate(() => window.__hz.settle(30000));
+  await page.evaluate(() => window.__city.settle(30000));
   // measured by where the held point now lands on the page, not by what the page draws under the middle
   // now: zooming in brings a different slope or wall under the middle, and asking the page what is there
   // would compare two different surfaces
@@ -109,10 +109,10 @@ async function run(browser, device, name) {
   check(slipped < OFF_PX, `${name}: what was under the middle of the fingers stays there (${slipped.toFixed(2)} px off; it was ${held.z.toFixed(0)} m up)`);
   // two fingers moving together turn the city and tilt it, and the map does not move
   const shift = { x: w * 0.12, y: h * 0.1 };
-  const centre = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
+  const centre = await page.evaluate(() => { const c = window.__city.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
   await move2(client, middle.x, middle.y, 60, shift.x, shift.y);
-  await page.evaluate(() => window.__hz.settle(30000));
-  const turned = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
+  await page.evaluate(() => window.__city.settle(30000));
+  const turned = await page.evaluate(() => { const c = window.__city.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
   check(Math.abs(turned.yaw - (centre.yaw - shift.x * 0.006)) < 1e-4, `${name}: two fingers moving together turn the view (${(turned.yaw - centre.yaw).toFixed(3)} rad, expected ${(-shift.x * 0.006).toFixed(3)})`);
   check(Math.abs(turned.pitch - (centre.pitch + shift.y * 0.005)) < 1e-4, `${name}: two fingers moving together tilt the view (${(turned.pitch - centre.pitch).toFixed(3)} rad, expected ${(shift.y * 0.005).toFixed(3)})`);
   check(Math.abs(turned.x - centre.x) < 1e-3 && Math.abs(turned.y - centre.y) < 1e-3 && Math.abs(turned.scale - centre.scale) < 1e-5,
@@ -139,11 +139,11 @@ async function move2(client, x, y, spread, dx, dy, steps = 8) {
 }
 
 // the world point the page draws at a position on the page
-const under = (page, x, y) => page.evaluate(({ x, y }) => window.__hz.under(x, y), { x, y });
+const under = (page, x, y) => page.evaluate(({ x, y }) => window.__city.under(x, y), { x, y });
 // how far a world point lands from a position on the page, in CSS pixels
 const projectedOff = (page, point, x, y) => page.evaluate(({ point, x, y }) => {
-  const c = window.__hz.camera.project(point.x, point.y, point.z), canvas = document.getElementById('c');
-  const css = canvas.clientWidth / window.__hz.renderer.W;          // the CSS pixels one frame pixel makes
+  const c = window.__city.camera.project(point.x, point.y, point.z), canvas = document.getElementById('c');
+  const css = canvas.clientWidth / window.__city.renderer.W;          // the CSS pixels one frame pixel makes
   return Math.hypot(c.sx * css - x, c.sy * css - y);
 }, { point, x, y });
 
@@ -153,7 +153,7 @@ const projectedOff = (page, point, x, y) => page.evaluate(({ point, x, y }) => {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }

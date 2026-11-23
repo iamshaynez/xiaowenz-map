@@ -29,7 +29,7 @@ const FRAMES = Number(flag('--frames', '200'));
 // tier; in world metres, as the pipeline's projection places it.
 const CENTRE = [27572.51, 13097.93];
 // (120.132 E, 30.229 N) and (120.150 E, 30.261 N) in the same metres
-const LONGJING = [23968.08, 7640.83], BEISHAN = [25790.19, 11145.42];   // from hz.region.project, not from memory
+const LONGJING = [23968.08, 7640.83], BEISHAN = [25790.19, 11145.42];   // from pixelcity.city.load("hz").project, not from memory
 const CASES = [
   { name: 'overview', viewport: [1920, 1080], frame: [960, 540], setup: '' },
   { name: 'district-widest', viewport: [1920, 1080], frame: [960, 540], setup: 'c.scale = 0.125;' },
@@ -54,10 +54,10 @@ async function run() {
         const errors = [];
         page.on('pageerror', e => errors.push(e.message));
         page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-        await page.goto(`http://127.0.0.1:${PORT}/app/?ss=${ss}`);
+        await page.goto(`http://127.0.0.1:${PORT}/hz?ss=${ss}`);
         await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
         const result = await page.evaluate(async ({ setup, centre, frames }) => {
-          const app = window.__hz, c = app.camera, gl = app.gl;
+          const app = window.__city, c = app.camera, gl = app.gl;
           [c.x, c.y] = centre;
           new Function('c', setup)(c);
           app.touch();
@@ -98,7 +98,7 @@ async function run() {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }

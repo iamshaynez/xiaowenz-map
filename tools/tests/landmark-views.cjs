@@ -38,7 +38,7 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }
@@ -49,20 +49,20 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
     const errors = [];
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-    await page.goto(`http://127.0.0.1:${PORT}/app/`);
+    await page.goto(`http://127.0.0.1:${PORT}/hz`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
-    const ids = await page.evaluate(() => window.__hz.landmarks.map(l => l.id));
+    const ids = await page.evaluate(() => window.__city.landmarks.map(l => l.id));
 
     // every shade of every colour the models are built from, as the page makes them
     const kitColours = await page.evaluate(async names => {
-      const { rampOf, channels } = await import('/app/src/style/core.js');
-      const colours = (await fetch('../data/curated/palette.json').then(r => r.json())).colours;
+      const { rampOf, channels } = await import('/src/style/core.js');
+      const colours = (await fetch('/palette.json').then(r => r.json())).colours;
       return names.flatMap(name => rampOf(colours[name]).map(packed => channels(packed).join(',')));
     }, KIT_COLOURS);
 
     // the measure in the frame as it stands, made afresh and still (no wind, no traffic moved)
     const measure = id => page.evaluate(async ({ id, kitColours }) => {
-      const app = window.__hz, own = new Set(kitColours);
+      const app = window.__city, own = new Set(kitColours);
       app.freeze(true);
       await app.settle(30000);
       app.renderOnce();
@@ -96,11 +96,11 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
     for (const id of ids) {
       const clicks = [];
       for (const yaw of SIDES) {
-        await page.evaluate(({ id, yaw }) => { window.__hz.camera.yaw = yaw; window.__hz.flyTo(id, 0); }, { id, yaw });
-        await page.waitForFunction(() => !window.__hz.flying(), null, { timeout: 20000 });
+        await page.evaluate(({ id, yaw }) => { window.__city.camera.yaw = yaw; window.__city.flyTo(id, 0); }, { id, yaw });
+        await page.waitForFunction(() => !window.__city.flying(), null, { timeout: 20000 });
         clicks.push(await measure(id));
       }
-      const built = await page.evaluate(id => window.__hz.landmarks.find(l => l.id === id).parts.length, id);
+      const built = await page.evaluate(id => window.__city.landmarks.find(l => l.id === id).parts.length, id);
       rows.push({ id, built, clicks });
     }
 

@@ -53,7 +53,7 @@ async function main() {
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/app/`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
       } catch {
         // not up yet
       }
@@ -65,11 +65,11 @@ async function main() {
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
     page.on('requestfailed', r => errors.push('requestfailed: ' + r.url()));
-    await page.goto(`http://127.0.0.1:${PORT}/app/`);
+    await page.goto(`http://127.0.0.1:${PORT}/hz`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
     const index = await page.evaluate(() => ({
-      size: [innerWidth, innerHeight], frame: [window.__hz.renderer.W, window.__hz.renderer.H],
-      landmarks: window.__hz.landmarks.map(l => ({ id: l.id, title: l.title, group: l.group, view: l.view, x: l.x, y: l.y })),
+      size: [innerWidth, innerHeight], frame: [window.__city.renderer.W, window.__city.renderer.H],
+      landmarks: window.__city.landmarks.map(l => ({ id: l.id, title: l.title, group: l.group, view: l.view, x: l.x, y: l.y })),
     }));
     check(index.size[0] === index.frame[0] && index.size[1] === index.frame[1], `the page shows the frame's own pixels: ${index.size} vs ${index.frame}`);
     const shots = [];
@@ -81,7 +81,7 @@ async function main() {
     };
     // wait for a flight to end and the tiles of the view to be in
     const arrived = () => page.evaluate(async () => {
-      const app = window.__hz;
+      const app = window.__city;
       for (let k = 0; k < 400 && app.flying(); k++) await new Promise(r => setTimeout(r, 50));
       await app.settle(30000);
       return { flying: app.flying(), camera: { x: app.camera.x, y: app.camera.y, scale: app.camera.scale } };
@@ -93,14 +93,14 @@ async function main() {
       await page.click(`#landmarks button[data-id="${landmark.id}"]`);
       const here = await arrived();
       check(!here.flying, `${landmark.id}: the flight ended`);
-      const target = await page.evaluate(() => window.__hz.ui.target());
+      const target = await page.evaluate(() => window.__city.ui.target());
       const near = Math.hypot(here.camera.x - target.x, here.camera.y - target.y);
       check(near < 5, `${landmark.id}: arrives where its flight was bound (${near.toFixed(1)} m off)`);
       check(Math.abs(here.camera.scale - target.scale) < 1e-3, `${landmark.id}: at its zoom (${here.camera.scale} against ${target.scale})`);
       // the landmark is looked at, not merely near: its middle (half-way up what was built for it, on the
       // ground it stands on) is at the centre of the frame, whoever far down the page the camera had to go
       const middle = await page.evaluate(id => {
-        const app = window.__hz, landmark = app.landmarks.find(l => l.id === id), c = app.camera;
+        const app = window.__city, landmark = app.landmarks.find(l => l.id === id), c = app.camera;
         const p = c.project(landmark.x, landmark.y, (landmark.ground ?? 0) - (landmark.bed ?? 2) + (landmark.focus ?? 8));
         const [ex, ey] = app.ui.expected(landmark);            // where the view's table says its middle belongs
         return { dx: p.sx - c.width / 2 - ex, dy: p.sy - c.height / 2 - ey };
@@ -108,9 +108,9 @@ async function main() {
       check(Math.hypot(middle.dx, middle.dy) < 2 && target.scale >= landmark.view.scale,
         `${landmark.id}: its middle is at the centre of the frame (${middle.dx.toFixed(1)}, ${middle.dy.toFixed(1)} px off)`);
       // ... and stays there when the map is turned, as a visitor turns it to see the other sides
-      await page.evaluate(() => window.__hz.ui.turnTo(4 * Math.PI / 3));
+      await page.evaluate(() => window.__city.ui.turnTo(4 * Math.PI / 3));
       const turned = await page.evaluate(id => {
-        const app = window.__hz, landmark = app.landmarks.find(l => l.id === id), c = app.camera;
+        const app = window.__city, landmark = app.landmarks.find(l => l.id === id), c = app.camera;
         const p = c.project(landmark.x, landmark.y, (landmark.ground ?? 0) - (landmark.bed ?? 2) + (landmark.focus ?? 8));
         const [ex, ey] = app.ui.expected(landmark);
         return { dx: p.sx - c.width / 2 - ex, dy: p.sy - c.height / 2 - ey };
@@ -122,7 +122,7 @@ async function main() {
       await quiet(page, true);
       for (const [k, yaw] of ANGLES.entries()) {
         // turned as a visitor turns it: the landmark last flown to stays in the middle of the frame
-        await page.evaluate(yaw => { window.__hz.ui.turnTo(yaw); window.__hz.touch(); }, yaw);
+        await page.evaluate(yaw => { window.__city.ui.turnTo(yaw); window.__city.touch(); }, yaw);
         files.push(await shoot(path.join(outDir, 'landmarks', `${landmark.id}-${k}.png`)));
       }
       await quiet(page, false);
@@ -134,7 +134,7 @@ async function main() {
     // ---- the seasons over the lake --------------------------------------------------------------------------
     await page.click('#landmarks button[data-id="1-04"]');
     await arrived();
-    const seasons = await page.evaluate(() => window.__hz.seasons);
+    const seasons = await page.evaluate(() => window.__city.seasons);
     const seasonFiles = [];
     for (const season of seasons) {
       await page.click(`#seasons button[data-season="${season}"]`);
@@ -150,19 +150,19 @@ async function main() {
     const bridge = index.landmarks.find(l => l.id === '1-01');
     const zooms = [null, 0.06, 0.4, 1.2, 2.4, 8];
     const zoomFiles = [];
-    await page.evaluate(() => window.__hz.setSeason('summer'));
+    await page.evaluate(() => window.__city.setSeason('summer'));
     await quiet(page, true);
     for (const [k, scale] of zooms.entries()) {
       await page.evaluate(scale => {
-        const app = window.__hz;
+        const app = window.__city;
         if (scale === null) { app.overview(); app.touch(); return; }
         const whole = { x: app.camera.x, y: app.camera.y, scale: app.camera.scale };
         // on the way from the middle of the city to the bridge, as the zoom closes in
         const t = Math.min(1, Math.log(scale / whole.scale) / Math.log(2.4 / whole.scale));
-        Object.assign(app.camera, { x: whole.x + (window.__hz.landmarks.find(l => l.id === '1-01').x - whole.x) * t, y: whole.y + (window.__hz.landmarks.find(l => l.id === '1-01').y - whole.y) * t, scale });
+        Object.assign(app.camera, { x: whole.x + (window.__city.landmarks.find(l => l.id === '1-01').x - whole.x) * t, y: whole.y + (window.__city.landmarks.find(l => l.id === '1-01').y - whole.y) * t, scale });
         app.touch();
       }, scale);
-      await page.evaluate(() => window.__hz.settle(30000));
+      await page.evaluate(() => window.__city.settle(30000));
       zoomFiles.push(await shoot(path.join(outDir, `zoom-${k}.png`)));
     }
     fs.writeFileSync(path.join(sheetDir, 'zooms.png'), sheet(zoomFiles, 3, 480, 270));
@@ -174,13 +174,13 @@ async function main() {
     const turnFiles = [];
     await quiet(page, true);
     for (let k = 0; k < 6; k++) {
-      await page.evaluate(k => { window.__hz.ui.turnTo(k * Math.PI / 3); window.__hz.touch(); }, k);
+      await page.evaluate(k => { window.__city.ui.turnTo(k * Math.PI / 3); window.__city.touch(); }, k);
       turnFiles.push(await shoot(path.join(outDir, `turn-${k}.png`)));
     }
     fs.writeFileSync(path.join(sheetDir, 'turn.png'), sheet(turnFiles, 3, 480, 270));
     await page.keyboard.press('m');
     await arrived();
-    const pitch = await page.evaluate(() => window.__hz.camera.pitch);
+    const pitch = await page.evaluate(() => window.__city.camera.pitch);
     check(pitch > 1.4, `M looks straight down (pitch ${pitch.toFixed(2)})`);
     await shoot(path.join(outDir, 'top-down.png'));
     await quiet(page, false);
@@ -190,35 +190,35 @@ async function main() {
     // ---- the tour, the home button, and dragging ------------------------------------------------------------------
     await page.click('#tour');
     await wait(2500);
-    const touring = await page.evaluate(() => window.__hz.ui.touring());
+    const touring = await page.evaluate(() => window.__city.ui.touring());
     check(touring, 'the tour starts');
     // the left button drags the map along; the right one turns the view (D055)
     await page.mouse.move(480, 270);
     await page.mouse.down();
-    check(!(await page.evaluate(() => window.__hz.ui.touring())), 'touching the map stops the tour');
+    check(!(await page.evaluate(() => window.__city.ui.touring())), 'touching the map stops the tour');
     // (read from here on: until the touch, the tour was still turning the view by itself)
-    const before = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
+    const before = await page.evaluate(() => { const c = window.__city.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
     await page.mouse.move(560, 290, { steps: 6 });
     await page.mouse.up();
-    const dragged = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
+    const dragged = await page.evaluate(() => { const c = window.__city.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
     check(Math.hypot(dragged.x - before.x, dragged.y - before.y) > 1 && dragged.yaw === before.yaw,
       `the left button drags the map and does not turn it (moved ${Math.hypot(dragged.x - before.x, dragged.y - before.y).toFixed(0)} m, yaw ${before.yaw.toFixed(3)} -> ${dragged.yaw.toFixed(3)})`);
     await page.mouse.move(480, 270);
     await page.mouse.down({ button: 'right' });
     await page.mouse.move(600, 290, { steps: 6 });
     await page.mouse.up({ button: 'right' });
-    const yaw = await page.evaluate(() => window.__hz.camera.yaw);
+    const yaw = await page.evaluate(() => window.__city.camera.yaw);
     check(Math.abs(yaw - dragged.yaw) > 0.05, 'the right button turns the city');
     await page.click('#home');
     await arrived();
     // the whole city, at the zoom that holds all of it, from whatever zoom the camera had (it once came out
     // divided by that zoom)
-    const whole = await page.evaluate(() => ({ scale: window.__hz.camera.scale, want: window.__hz.overviewTarget().scale, tour: window.__hz.ui.touring() }));
+    const whole = await page.evaluate(() => ({ scale: window.__city.camera.scale, want: window.__city.overviewTarget().scale, tour: window.__city.ui.touring() }));
     check(Math.abs(whole.scale - whole.want) < 1e-9 && !whole.tour, `R and the home button bring the whole city back (scale ${whole.scale.toFixed(5)}, the overview's own ${whole.want.toFixed(5)})`);
-    await page.evaluate(() => { Object.assign(window.__hz.camera, { scale: 12 }); window.__hz.touch(); });
+    await page.evaluate(() => { Object.assign(window.__city.camera, { scale: 12 }); window.__city.touch(); });
     await page.keyboard.press('r');
     await arrived();
-    const again = await page.evaluate(() => ({ scale: window.__hz.camera.scale, want: window.__hz.overviewTarget().scale }));
+    const again = await page.evaluate(() => ({ scale: window.__city.camera.scale, want: window.__city.overviewTarget().scale }));
     check(Math.abs(again.scale - again.want) < 1e-9, `R from up close brings the whole city back too (scale ${again.scale.toFixed(5)}, the overview's own ${again.want.toFixed(5)})`);
     await quiet(page, true);
     await shoot(path.join(outDir, 'overview.png'));

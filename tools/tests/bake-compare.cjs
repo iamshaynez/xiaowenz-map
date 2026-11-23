@@ -7,10 +7,10 @@
 // outline), not by their place in the file: the bake now leaves out the records that repeat another one's
 // footprint (buildings.doubles), so a building may have moved up in the file. Every building of the new bake
 // must be one of the old; the ones of the old bake that are gone must be exactly the records the bake says it
-// left out (data/work/repeated-outlines.json); and what stood on the roofs of those must be gone with them.
+// left out (data/work/<city>/repeated-outlines.json); and what stood on the roofs of those must be gone with them.
 //
 // Usage: node tools/tests/bake-compare.cjs <previous-baked-dir> [old-data-module.mjs]
-//   (the previous bake in data/baked's layout; its reader is taken from git unless a module is given:
+//   (the previous bake of the city, in data/baked/<city>'s layout; its reader is taken from git unless a module is given:
 //    git show <commit>:app/src/world/data.js > old-data.mjs)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -18,7 +18,8 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '../..');
 const oldDir = path.resolve(process.argv[2] || '');
-const nowDir = path.join(root, 'data/baked');
+const CITY = process.env.CITY || 'hz';                 // the city both bakes are of
+const nowDir = path.join(root, 'data/baked', CITY);
 const oldModule = process.argv[3] ? path.resolve(process.argv[3]) : path.join(root, 'out/bake-compare/old-data.mjs');
 if (!process.argv[2] && !process.argv[3]) { console.log('usage: bake-compare.cjs <previous-baked-dir> [old-data-module.mjs]'); process.exit(2); }
 
@@ -36,10 +37,10 @@ const XY = 0.5 / 24 + SLACK, Z = 0.5 / 40 + SLACK, HALF = 0.5 / 10 + SLACK, CM =
   const note = (kind, difference) => { worst[kind] = Math.max(worst[kind] || 0, difference); };
   let tiles = 0, buildings = 0, corners = 0, triangles = 0, trees = 0, boxes = 0, leftOut = 0;
   const goneAll = [];                                      // the records left out: where their roofs are, and where
-  // what the bake says it left out, and what it kept in place of each (data/work/repeated-outlines.json,
+  // what the bake says it left out, and what it kept in place of each (data/work/<city>/repeated-outlines.json,
   // written by a bake that leaves repeated outlines out; the same seven numbers as a building's properties
   // 2 to 8: levels, archetype, roof, wall colour, roof colour, seed, flags)
-  const repeatedPath = path.join(root, 'data/work/repeated-outlines.json');
+  const repeatedPath = path.join(root, 'data/work', CITY, 'repeated-outlines.json');
   const repeated = fs.existsSync(repeatedPath) ? JSON.parse(fs.readFileSync(repeatedPath, 'utf8')) : { leftOut: [], kept: [] };
   const key = row => row.map(Number).join(','), add = (map, k) => map.set(k, (map.get(k) || 0) + 1);
   const leftOutCount = new Map(), keptKeys = new Set(), leftSeen = new Map(), nowSeen = new Map();

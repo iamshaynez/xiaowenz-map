@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '../..');
-const baked = path.join(root, 'data/baked');
+const baked = path.join(root, 'data/baked', 'hz');          // the tests are written against Hangzhou's bake
 const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8'));
 
 (async () => {
@@ -178,7 +178,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   }
   for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
 
-  // names.bin: the index the page searches by (pipeline/hz/names.py), column by column, and then finding things by name
+  // names.bin: the index the page searches by (pipeline/pixelcity/names.py), column by column, and then finding things by name
   const file = read('names.bin');
   assert.ok(file.NAME && file.LINE, 'names.bin has a NAME and a LINE section');
   const { openNames, search, said, course, KINDS, LANDMARK, ROAD, BUILDING, WATER } = await import(path.join(root, 'app/src/world/names.js'));
@@ -249,7 +249,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   expect('文三', '文三路', ROAD);                                   // by the beginning of its name
   expect('西湖', '西湖', WATER, '湖');
   expect('钱塘江', '钱塘江', WATER, '江');
-  expect('大莲花', '奥体中心', LANDMARK);                           // an alias from data/curated/aliases.json
+  expect('大莲花', '奥体中心', LANDMARK);                           // an alias from cities/hz/aliases.json
   expect('岳庙', '岳王庙', 4, '景点');
   expect('断桥', '断桥残雪', LANDMARK);                             // of equal answers a landmark comes first
   expect('东站', '杭州东站', LANDMARK);
