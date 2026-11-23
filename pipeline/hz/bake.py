@@ -10,9 +10,10 @@ import numpy
 import shapely
 from shapely.geometry.polygon import orient
 
-from . import region
+from . import compact, region
 
 MAGIC = b"HZT1"                  # the first four bytes of every baked file
+FORMAT = 2                      # the version that follows the magic: 2 is the compact forms of compact.py (the page refuses 1)
 COARSE_TOLERANCE_M = 1.5   # outlines are simplified to this at the district tier
 MIN_PART_M2 = 3.0          # polygon pieces smaller than this are dropped
 MIN_COURTYARD_M2 = 400.0   # courtyards smaller than this are roofed over at the district tier
@@ -39,7 +40,7 @@ def container(sections):
         table += struct.pack("<4sII", sid, offset, len(payload))
         body += payload
         offset += len(payload)
-    return struct.pack("<4sHH", MAGIC, 1, len(sections)) + table + body
+    return struct.pack("<4sHH", MAGIC, FORMAT, len(sections)) + table + body
 
 
 def tile_origin(ix, iy):
@@ -47,10 +48,14 @@ def tile_origin(ix, iy):
 
 
 def terrain_section(x0, y0, grid, info):
-    """Heights at the grid corners of the tile: the nearest DEM cell to each corner."""
+    """Heights at the grid corners of the tile: the nearest DEM cell to each corner. The grid reaches
+    compact.TERRAIN_RINGS rings beyond the tile on every side (62.5 m), so that the page can read off it the
+    height of the ground it draws up to 60 m beyond the tile (compact.py)."""
     gx0, gy0, cell, tnx, tny = info
-    count = TERRAIN_CELLS + 1
+    rings = compact.TERRAIN_RINGS
+    count = TERRAIN_CELLS + 1 + 2 * rings
     step = region.TILE_M / TERRAIN_CELLS
+    x0, y0 = x0 - rings * step, y0 - rings * step
     xs = x0 + numpy.arange(count) * step
     ys = y0 + numpy.arange(count) * step
     col = numpy.clip(numpy.rint((xs - gx0) / cell - 0.5).astype(int), 0, tnx - 1)
@@ -109,7 +114,9 @@ def coarse_grid_extent(cell_m=125.0):
 
 
 def massing_section(props, ox, oy):
-    """One box per cell that holds a building: the tallest building's height, the most common look."""
+    """One box per cell that holds a building: the tallest building's height, the most common look. A cell is
+    12 bytes (compact.py): its column and row, and that building's base, height, archetype, wall colour, roof
+    colour and seed."""
     cx, cy = props[:, 9], props[:, 10]
     ix = numpy.floor((cx - ox) / MASS_CELL_M).astype(int)
     iy = numpy.floor((cy - oy) / MASS_CELL_M).astype(int)
@@ -117,14 +124,10 @@ def massing_section(props, ox, oy):
     order = numpy.argsort(key, kind="stable")
     key = key[order]
     uniq, starts = numpy.unique(key, return_index=True)
-    out = bytearray(struct.pack("<I", len(uniq)))
-    for n, start in enumerate(starts):
-        sl = order[start:starts[n + 1] if n + 1 < len(starts) else len(order)]
-        rep = sl[numpy.argmax(props[sl, 1])]  # the tallest building in the cell gives the cell its height and its look
-        cell_x, cell_y = (ix[sl[0]] + 0.5) * MASS_CELL_M, (iy[sl[0]] + 0.5) * MASS_CELL_M
-        out += struct.pack("<4fBBBB", cell_x, cell_y, float(props[rep, 0]), float(props[rep, 1]), int(props[rep, 3]),
-                           int(props[rep, 5]), int(props[rep, 6]), int(props[rep, 7] % 255))
-    return bytes(out)
+    ends = numpy.append(starts[1:], len(order))
+    tallest = numpy.array([sl[numpy.argmax(props[sl, 1])] for sl in (order[s:e] for s, e in zip(starts, ends, strict=True))], dtype=numpy.int64)
+    first = order[starts]
+    return struct.pack("<I", len(uniq)) + compact.massing_cells(ix[first], iy[first], props[tallest]).tobytes()
 
 
 def pitched_roof(corners, eave, hip, building, ox, oy, rise_max=ROOF_RISE_MAX_M):
@@ -257,10 +260,13 @@ def coarse_outlines(geoms):
 
 
 def buildings_section(geoms, props, ox, oy):
+    """The buildings of a tile in compact.py's forms: u32 buildings, corners, indices; u8 bytes per index; then
+    the properties (11 bytes a building), the corners (12 bytes each) and the triangle indices."""
     polys, owner = coarse_outlines(geoms)
     verts, index = coarse_mesh(polys, owner, props[:, 0], props[:, 0] + props[:, 1], ox, oy, roofs=props[:, 4])
-    head = struct.pack("<III", len(geoms), len(verts), len(index))
-    return head + props[:, :PROP_FLOATS].astype("<f4").tobytes() + verts.tobytes() + index.tobytes()
+    body, width = compact.indices(index, len(verts))
+    head = struct.pack("<IIIB", len(geoms), len(verts), len(index), width)
+    return head + compact.building_properties(props[:, :PROP_FLOATS]) + compact.building_vertices(verts) + body
 
 
 def coarse_grid_section(grid, info, cell_m=125.0):
@@ -321,7 +327,7 @@ def rooftop_props(geoms, props, colour_index, seed=20261123):
         if not len(spots):
             continue
         spots = spots[rng.permutation(len(spots))]
-        archetype, top, wall = int(props[n, 3]), float(props[n, 0] + props[n, 1]), int(props[n, 5])
+        archetype, top, wall = int(props[n, 3]), float(numpy.float32(props[n, 0] + props[n, 1])), int(props[n, 5])   # the roof as the mesh carries it: single precision
         mine = []                                    # what has been put on this roof so far
         for kind, chance, most in ROOFTOP_RULES[archetype]:
             if rng.random() > chance:
@@ -345,11 +351,11 @@ def rooftop_props(geoms, props, colour_index, seed=20261123):
 
 
 def roof_boxes_section(geoms, props, ox, oy):
-    """The boxes put on flat roofs, as instances: u32 count, then 8 floats each: x, y relative to the tile's
-    corner, base, height, half width, half depth, wall colour, roof colour."""
+    """The boxes put on flat roofs, as instances: u32 count, then 11 bytes each (compact.py) for x, y relative
+    to the tile's corner, base, height, half width, half depth, wall colour, roof colour."""
     if not len(geoms):
         return struct.pack("<I", 0)
     west, south, east, north = shapely.bounds(geoms).T
     records = numpy.column_stack([(west + east) / 2 - ox, (south + north) / 2 - oy, props[:, 0], props[:, 1], (east - west) / 2, (north - south) / 2,
-                                  props[:, 5], props[:, 6]]).astype("<f4")
-    return struct.pack("<I", len(records)) + records.tobytes()
+                                  props[:, 5], props[:, 6]])
+    return struct.pack("<I", len(records)) + compact.roof_boxes(records)

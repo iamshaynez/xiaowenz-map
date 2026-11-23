@@ -1,5 +1,6 @@
 // Checks the app's readers against real baked files, without a browser: every section must be consumed
-// to its last byte, and what is read must be in range.
+// to its last byte, and what is read must be in range. (That the compact forms carry the same map as the
+// floats they replaced is bake-compare.cjs's check, against the previous bake.)
 //
 // Usage: node tools/tests/data-readers.cjs
 const assert = require('node:assert/strict');
@@ -12,7 +13,10 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
 
 (async () => {
   const data = await import(path.join(root, 'app/src/world/data.js'));
-  const read = name => data.parseContainer(fs.readFileSync(path.join(baked, name)).buffer.slice(0));
+  const bytes = file => { const buffer = fs.readFileSync(file); return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength); };
+  const read = name => data.parseContainer(bytes(path.join(baked, name)));
+  const lifts = Object.fromEntries(Object.entries(index.groundClasses).map(([id, info]) => [Number(id), info.lift]));
+  const RINGS = data.TERRAIN_RINGS, STEP = index.tileSize / 32;
 
   const overview = read('overview.bin');
   for (const id of ['GRID', 'MASS', 'LCV', 'URB', 'RIBA']) assert.ok(overview[id], `overview.bin has no ${id}`);
@@ -23,7 +27,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
 
   const mass = data.readMassing(overview.MASS);
   const cells = mass.length / 8;
-  assert.equal(overview.MASS.bytes.length, 4 + cells * 20);
+  assert.equal(overview.MASS.bytes.length, 4 + cells * 12);
   for (let k = 0; k < cells; k++) {
     const [x, y, base, height] = mass.slice(k * 8, k * 8 + 4);
     // buildings are kept when they touch the region, so a centre may lie a little outside it
@@ -55,10 +59,18 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   assert.ok(area(lakes) > 5 && area(lakes) < 40, `lake cells cover ${area(lakes).toFixed(1)} km²`);
   assert.ok(area(wet) > 40 && area(wet) < 400, `water cells cover ${area(wet).toFixed(1)} km²`);
 
-  const ribbons = data.readRibbons(overview.RIBA);
-  assert.equal(overview.RIBA.bytes.length, 8 + ribbons.vertices.length * 4 + ribbons.indices.length * 4);
-  assert.equal(ribbons.vertices.length, ribbons.vertices.length);
+  // the parts, walked as the reader does, must add up to the section's length
+  {
+    const view = overview.RIBA.view, at0 = overview.RIBA.offset;
+    let at = at0 + 4, parts = 0;
+    for (let k = view.getUint32(at0, true); k > 0; k--, parts++) at += 2 + 10 * view.getUint16(at, true);
+    assert.equal(at, at0 + overview.RIBA.bytes.length, 'ribbon parts end where the section does');
+  }
+  const ribbons = data.readRibbons(overview.RIBA, (x, y) => data.surfaceOn(grid, x, y), lifts);
+  assert.equal(ribbons.indices.length % 6, 0);
+  assert.equal(ribbons.vertices.length / 8, ribbons.indices.length / 6 * 4, 'four ribbon vertices to two triangles');
   assert.ok(ribbons.indices.every(i => i < ribbons.vertices.length / 8), 'ribbon indices in range');
+  assert.ok(ribbons.vertices.every(Number.isFinite), 'ribbon vertices finite');
 
   // every kind of tile section, from a few tiles spread over the region
   const files = fs.readdirSync(path.join(baked, 'tiles/b'));
@@ -71,14 +83,22 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     const t = read(`tiles/b/${name}`);
     const [tx, ty] = name.replace('.bin', '').split('_').map(Number);
     for (const id of Object.keys(t)) seen.add(id);
+    let lattice = null;
+    const x0 = (index.ix0 + tx) * index.tileSize, y0 = (index.iy0 + ty) * index.tileSize;
     if (t.TERR) {
-      const g = data.readGrid(t.TERR);
-      assert.equal(g.nx, 33); assert.equal(g.ny, 33);
-      assert.equal(t.TERR.bytes.length, 28 + 33 * 33 * 2);
-      assert.equal(g.x0, (index.ix0 + tx) * index.tileSize);
-      assert.equal(g.y0, (index.iy0 + ty) * index.tileSize);
-      assert.ok(g.heights.every(h => h >= -50 && h < 1800), 'tile heights in range');
+      lattice = data.readGrid(t.TERR);
+      const side = 33 + 2 * RINGS;
+      assert.equal(lattice.nx, side); assert.equal(lattice.ny, side);
+      assert.equal(t.TERR.bytes.length, 28 + side * side * 2);
+      assert.equal(lattice.x0, x0 - RINGS * STEP);                   // the rings lie beyond the tile's west and south
+      assert.equal(lattice.y0, y0 - RINGS * STEP);
+      assert.equal(lattice.cell, STEP);
+      assert.ok(lattice.heights.every(h => h >= -50 && h < 1800), 'tile heights in range');
+      const g = data.innerGrid(lattice, RINGS);
+      assert.deepEqual([g.nx, g.ny, g.x0, g.y0], [33, 33, x0, y0]);
     }
+    const surface = (x, y) => data.surfaceOn(lattice, x + x0, y + y0);
+    const onGround = (x, y, cls) => Math.fround(surface(x, y) + (lifts[cls] ?? 0.02));
     if (t.BASE) {
       const base = data.readBase(t.BASE);
       assert.equal(base.length, 1024);
@@ -86,8 +106,10 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
     if (t.BLDB) {
       const b = data.readBuildings(t.BLDB);
-      assert.equal(t.BLDB.bytes.length, 12 + b.buildings * 36 + b.vertices.length * 4 + b.indices.length * 4);
+      const wide = t.BLDB.view.getUint8(t.BLDB.offset + 12, true) === 4 ? 4 : 2;
+      assert.equal(t.BLDB.bytes.length, 13 + b.buildings * 11 + b.vertices.length * 2 + b.indices.length * wide);
       assert.equal(b.props.length, b.buildings * 9);
+      assert.ok(b.vertices.every(Number.isFinite) && b.vertices.filter((_, k) => k % 6 < 2).every(v => Math.abs(v) < 1366), 'building corners in range');
       assert.equal(b.vertices.length % 6, 0);
       assert.ok(b.indices.every(i => i < b.vertices.length / 6), 'building index in range');
       assert.ok(b.vertices.filter((_, k) => k % 6 === 5).every(i => i >= 0 && i < b.buildings), 'vertex building index in range');
@@ -96,11 +118,11 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
     if (t.ROOF) {
       const boxes = data.readBoxes(t.ROOF);
-      assert.equal(t.ROOF.bytes.length, 4 + boxes.length * 4);
+      assert.equal(t.ROOF.bytes.length, 4 + boxes.length / 8 * 11);
       assert.equal(boxes.length % 8, 0);
       for (let k = 0; k < boxes.length; k += 8) {
         const [x, y, base, height, halfW, halfD] = boxes.subarray(k, k + 6);
-        assert.ok(x >= 0 && x < index.tileSize && y >= 0 && y < index.tileSize, 'rooftop box inside its tile');
+        assert.ok(x >= 0 && x <= index.tileSize && y >= 0 && y <= index.tileSize, 'rooftop box inside its tile');
         assert.ok(height > 0 && height < 20 && halfW > 0 && halfW < 10 && halfD > 0 && halfD < 10 && base > -50 && base < 1800, 'rooftop box in range');
         assert.ok(Number.isInteger(boxes[k + 6]) && boxes[k + 7] < 255, 'rooftop box colours');
       }
@@ -108,23 +130,28 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
     for (const id of ['WATR', 'ROAD', 'LAND', 'DECK']) {
       if (!t[id]) continue;
-      const m = data.readMesh(t[id]);
-      assert.equal(t[id].bytes.length, 8 + m.vertices.length * 4 + m.indices.length * 4);
+      const deck = id === 'DECK';
+      const m = data.readMesh(t[id], deck ? null : onGround);
+      const width = t[id].view.getUint8(t[id].offset + 8, true) === 4 ? 4 : 2;
+      assert.equal(t[id].bytes.length, 9 + m.vertices.length / 5 * (deck ? 8 : 5) + m.indices.length * width);
       assert.equal(m.vertices.length % 5, 0);
+      assert.ok(m.vertices.every(Number.isFinite), `${id} vertices finite`);
       assert.ok(m.indices.every(i => i < m.vertices.length / 5), `${id} index in range`);
       const classes = m.vertices.filter((_, k) => k % 5 === 3);
       assert.ok(classes.every(c => c >= 1 && c <= 24 && Number.isInteger(c)), `${id} class in range`);
     }
     if (t.TREE) {
-      const tr = data.readTrees(t.TREE);
-      assert.equal(t.TREE.bytes.length, 8 + (tr.cells * tr.cells + 1) * 4 + tr.count * 16);
+      assert.ok(lattice, 'a tile with trees has a height grid to read their height from');
+      const tr = data.readTrees(t.TREE, (x, y) => Math.fround(surface(x, y)));
+      assert.equal(t.TREE.bytes.length, 8 + (tr.cells * tr.cells + 1) * 4 + tr.count * 7);
       assert.equal(tr.cells, index.tileSize / index.treeCell);
       assert.equal(tr.starts[tr.cells * tr.cells], tr.count);
       for (let k = 1; k < tr.starts.length; k++) assert.ok(tr.starts[k] >= tr.starts[k - 1], 'tree runs in order');
       const f = new Float32Array(tr.records.buffer, tr.records.byteOffset, tr.count * 4);
       for (let k = 0; k < tr.count; k++) {
         const x = f[k * 4], y = f[k * 4 + 1], z = f[k * 4 + 2];
-        assert.ok(x >= 0 && x < index.tileSize && y >= 0 && y < index.tileSize, 'tree inside its tile');
+        // a tree at the tile's last centimetre rounds to the tile's edge, 1000 m
+        assert.ok(x >= 0 && x <= index.tileSize && y >= 0 && y <= index.tileSize, 'tree inside its tile');
         assert.ok(z > -50 && z < 1800 && Number.isFinite(z), 'tree height in range');
         assert.ok(tr.records[k * 16 + 12] < 6, 'tree species');
       }
@@ -150,7 +177,7 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
   }
   for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
-  console.log(`overview: grid ${grid.nx}x${grid.ny}, ${cells} massing cells, cover ${cover.nx}x${cover.ny} (${area(wet).toFixed(1)} km² of water), ${ribbons.indices.length / 3} ribbon triangles`);
+  console.log(`overview: grid ${grid.nx}x${grid.ny}, ${cells} massing cells, cover ${cover.nx}x${cover.ny} (${area(wet).toFixed(1)} km² of water), ${ribbons.indices.length / 3} ribbon triangles; ${overview.GRID.bytes.length + overview.MASS.bytes.length + overview.LCV.bytes.length + overview.URB.bytes.length + overview.RIBA.bytes.length} bytes`);
   console.log(`tiles: ${sample.length} sampled of ${files.length}, sections ${[...seen].sort().join(' ')}, ${buildings} buildings, ${rooftop} rooftop boxes, ${routes} routes, ${trees} trees`);
 })().catch(error => {
   console.error('DATA READERS FAILED:', error.message);

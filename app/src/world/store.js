@@ -1,7 +1,7 @@
 // What the app draws: the overview package, plus the 1 km tiles that are in view.
 // Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
 // longest ago are let go.
-import { loadContainer, readBase, readBoxes, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees } from './data.js';
+import { TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
 
 export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
 export const BOX_SCALE = 0.04;          // from this zoom up the overview draws its boxes (1 pixel under 25 m)
@@ -136,6 +136,8 @@ export class World {
   constructor(gl, index, urlBase) {
     this.gl = gl;
     this.index = index;
+    // how far each class of ground lies above the terrain it is drawn on (the bake's LIFT)
+    this.lifts = Object.fromEntries(Object.entries(index.groundClasses).map(([id, info]) => [Number(id), info.lift]));
     this.urlBase = urlBase;
     this.overview = null;
     this.tiles = new Map();        // "x_y" -> tile
@@ -176,7 +178,7 @@ export class World {
     const cells = readMassing(sections.MASS);
     const cover = readCells(sections.LCV, 1);
     const built = readCells(sections.URB, 2);
-    const ribbons = sections.RIBA ? readRibbons(sections.RIBA) : null;
+    const ribbons = sections.RIBA ? readRibbons(sections.RIBA, (x, y) => surfaceOn(grid, x, y), this.lifts) : null;
     this.overview = {
       grid,
       mesh: gridMesh(gl, grid.nx, grid.ny),
@@ -255,8 +257,12 @@ export class World {
     const size = this.index.tileSize;
     const tile = { key, x0: (this.index.ix0 + tx) * size, y0: (this.index.iy0 + ty) * size, used: ++this.clock };
     if (sections.TERR) {
-      tile.grid = readGrid(sections.TERR);
+      // the tile's grid, and the wider lattice around it that the height of the ground beyond the tile is read from
+      tile.lattice = readGrid(sections.TERR);
+      tile.grid = innerGrid(tile.lattice, TERRAIN_RINGS);
       tile.heights = floatTexture(gl, tile.grid.nx, tile.grid.ny, Float32Array.from(tile.grid.heights));
+      // the height of the ground at a point of the world, as the bake read it (the same lattice, read the same way)
+      tile.surfaceAt = (x, y) => surfaceOn(tile.lattice, x, y);
       if (!this.tileMesh || this.tileMesh.nx !== tile.grid.nx || this.tileMesh.ny !== tile.grid.ny) {
         release(gl, this.tileMesh);
         this.tileMesh = { ...gridMesh(gl, tile.grid.nx, tile.grid.ny), nx: tile.grid.nx, ny: tile.grid.ny };
@@ -280,11 +286,12 @@ export class World {
     tile.ground = {};
     for (const [name, id] of [['water', 'WATR'], ['road', 'ROAD'], ['land', 'LAND'], ['deck', 'DECK']]) {
       if (!sections[id]) continue;
-      const mesh = readMesh(sections[id]);
+      // water, roads and land lie on the ground, a lift above it by their class; a deck keeps the height it was given
+      const mesh = readMesh(sections[id], id === 'DECK' ? null : (x, y, cls) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y) + (this.lifts[cls] ?? 0.02)));
       if (mesh.indices.length) tile.ground[name] = assemble(gl, [{ data: mesh.vertices, layout: [[0, 3], [1, 1], [2, 1]] }], mesh.indices);
     }
     if (sections.TREE) {
-      const trees = readTrees(sections.TREE);
+      const trees = readTrees(sections.TREE, (x, y) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y)));
       if (trees.count) {
         tile.trees = trees;
         tile.treeMesh = assemble(gl, [

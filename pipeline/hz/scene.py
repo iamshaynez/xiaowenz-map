@@ -1,32 +1,48 @@
 """Bake everything the app loads.
 
+Every file starts with the magic HZT1, a version (u16: 2) and the number of sections. The forms are
+compact.py's: numbers in the smallest integers that hold them, and what the page can work out for itself
+left out. The page reads them in app/src/world/data.js, which this module's docstrings mirror.
+
 data/baked/overview.bin: the whole region for the overview tier, small enough to load at start-up.
   GRID  heights on a 125 m grid over the region (int16 metres, north row first)
-  MASS  one box per 50 m cell that holds a building: centre, base, height, look
+  MASS  one box per 50 m cell that holds a building: count (u32), then 12 bytes a cell: column, row (i16,
+        from the world origin),
+        the tallest building's base (i16, 2.5 cm) and height (u16, a centimetre), archetype, wall colour,
+        roof colour, seed
   LCV   cells across and up (u16), west and south edge (f64), cell size (f64); then the ground
         class of every 50 m cell (one byte), rows from the north
   URB   the same header; then for every 50 m cell how much of it is built over and how tall (two bytes)
-  RIBA  main roads, railways and canals as strips, for drawing as thin lines from far away:
-        vertex count, index count, vertices (x, y, z, lateral, half width, class, dir x, dir y), indices
+  RIBA  main roads, railways and canals as strips, for drawing as thin lines from far away: parts (u32);
+        per part points (u16), class (u8), half width (u8, quarter-metres), the points (x, y: i32 metres
+        from the world origin) and a direction per segment (u16, the turn in 65536ths of a circle). The
+        page takes each strip's height off GRID, and which side a vertex is on from its place in the quad
 
 data/baked/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it comes into view at the district tier.
-  TERR  heights of a 32 x 32 grid over the tile (int16 metres, north row first)
+  TERR  heights on a 37 x 37 grid over the tile and two rings (62.5 m) beyond it on every side (int16
+        metres, north row first): the page draws the inner 33 x 33 and reads ground heights off the whole
   BASE  the satellite land cover of each terrain cell, as a ground class (one byte), rows from the north
   BLDB  buildings as coarse meshes (outlines simplified to 1.5 m): flat roofs, or a gable or a hip roof
-        where a building is given one and its outline fills a rectangle
+        where a building is given one and its outline fills a rectangle. buildings, corners, indices
+        (u32 each), bytes per index (u8); 11 bytes of properties a building (base, height, levels,
+        archetype, roof, wall colour, roof colour, seed, flags); 12 bytes a corner (x, y in 4 cm, z in
+        2.5 cm, the level part of the normal in two i16, the building it belongs to); the indices
   ROOF  what is put on flat roofs by rule (stair heads, tanks, solar heaters, air-conditioning units), as
-        boxes: count (u32), then x, y relative to the tile, base, height, half width, half depth, wall
-        colour, roof colour (float each). Inferred, not mapped
-  WATR  water surfaces: a mesh whose vertices carry x, y, z, class, seed
+        boxes: count (u32), then 11 bytes each: x, y relative to the tile, base, height, half width, half
+        depth, wall colour, roof colour. Inferred, not mapped
+  WATR  water surfaces: corners once each (x, y in 4 cm, class; the height is the ground's under the
+        corner plus the lift of its class, read off TERR), then the triangle indices
   ROAD  carriageways, walkways and railways on the ground: a mesh in the same form
   LAND  parks, woods, farmland, yards and urban ground: a mesh in the same form
-  DECK  bridges and viaducts: a mesh in the same form, walls included
+  DECK  bridges and viaducts: a mesh in the same form with each corner's height (a deck is not at the
+        ground's own height), walls included
   PATH  the lines things move along (streets, canals, the river, routes across West Lake), each whole and
         belonging to this tile: count (u32), then per line points (u16), class (u8), spare (u8), width and
         length (f32), and per point x, y relative to the tile, z, distance from the start (f32)
   TREE  the trees of the tile, sorted into squares of 250 m: cells per side (u32), count (u32), where
-        each cell's run starts (u32 per cell, and one more), then 16 bytes per tree: x, y relative to the
-        tile and z (float), species, crown radius in half-metres, seed, kind (a byte each)
+        each cell's run starts (u32 per cell, and one more), then 7 bytes a tree: x, y relative to the
+        tile (i16, 4 cm), species and kind (a byte: 3 bits each), crown radius in half-metres, seed (a
+        byte each). The height is the ground's under it, read off TERR
   PLCE  JSON: the named places of the tile: [name, kind key, kind, x, y]
   META  JSON
 
@@ -44,14 +60,14 @@ import time
 import numpy
 import shapely
 
-from . import ground, region
+from . import compact, ground, region
 from . import trees as tree_data
 from .bake import (
     FLAG_CLEARED,
+    FORMAT,
     MASS_CELL_M,
     TERRAIN_CELLS,
     buildings_section,
-    coarse_grid_extent,
     coarse_grid_section,
     container,
     massing_section,
@@ -123,9 +139,13 @@ FLAG_ROOFTOP, FLAG_INFERRED_HEIGHT, FLAG_VILLAGE_CAP, FLAG_DATASET_OUTLINE, FLAG
 RIBBON_ROAD_CLASSES = (ground.ROAD_MAJOR, ground.ROAD_SECONDARY)
 
 
-def mesh_section(vertices, indices):
-    """A mesh: vertex count, index count, vertices (x, y, z, class, seed as floats), indices."""
-    return struct.pack("<II", len(vertices), len(indices)) + vertices.astype("<f4").tobytes() + indices.astype("<u4").tobytes()
+def mesh_section(vertices, indices, height_stored):
+    """A mesh of the ground (compact.ground_corners): corner count, index count (u32), bytes per index (u8),
+    the corners, then the triangle indices."""
+    indices = numpy.asarray(indices, dtype=numpy.int64)
+    records, ids, count = compact.ground_corners(vertices, height_stored)
+    body, width = compact.indices(ids[indices], count)
+    return struct.pack("<IIB", count, len(indices), width) + records + body
 
 
 def base_section(x0, y0, cover):
@@ -248,13 +268,15 @@ def within(x, y, areas):
     return bool(cleared_mask(numpy.array([x]), numpy.array([y]), areas)[0])
 
 
-def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
-    """Strips along lines, for the overview: a vertex is x, y, z, lateral (-1 or 1), half width, class, dir x, dir y.
+def ribbon_section(lines, tolerance=RIBBON_TOLERANCE_M):
+    """Strips along lines, for the overview, in compact.py's form: parts (u32); per part its points (u16), class
+    (u8) and half width (u8, quarter-metres), its points (x, y: i32 metres from the world origin), and the
+    direction of each of its segments (u16, the turn from the map's x axis in 65536ths of a circle).
 
-    The direction lets the app widen a strip on the screen to at least one pixel however far out it is viewed from.
+    The direction lets the app widen a strip on the screen to at least one pixel however far out it is viewed from;
+    the strip's height it takes off the overview's grid, as the bake did.
     """
-    verts, index = [], []
-    count = 0
+    parts = []
     for line, cls, half in lines:
         for part in shapely.get_parts(shapely.simplify(line, tolerance)):
             pts = numpy.asarray(part.coords)
@@ -267,26 +289,14 @@ def ribbon_section(lines, height, tolerance=RIBBON_TOLERANCE_M):
             if not ok.any():
                 continue
             a, b, dx, dy = a[ok], b[ok], dx[ok] / length[ok], dy[ok] / length[ok]
-            n = len(a)
-            quad = numpy.zeros((n, 4, 8), dtype=numpy.float32)
-            quad[:, 0, :2], quad[:, 1, :2], quad[:, 2, :2], quad[:, 3, :2] = a, a, b, b
-            quad[:, 0, :2] -= numpy.column_stack([dy, -dx]) * half
-            quad[:, 1, :2] += numpy.column_stack([dy, -dx]) * half
-            quad[:, 2, :2] += numpy.column_stack([dy, -dx]) * half
-            quad[:, 3, :2] -= numpy.column_stack([dy, -dx]) * half
-            quad[:, :, 2] = height(quad[:, :, 0].ravel(), quad[:, :, 1].ravel()).reshape(n, 4) + LIFT.get(int(cls), 0.02)
-            quad[:, :, 3] = (-1, 1, 1, -1)
-            quad[:, :, 4] = half
-            quad[:, :, 5] = cls
-            quad[:, :, 6], quad[:, :, 7] = dx[:, None], dy[:, None]
-            v = quad.reshape(-1, 8)
-            verts.append(v)
-            t = numpy.arange(n) * 4 + count
-            index.append(numpy.column_stack([t, t + 1, t + 2, t, t + 2, t + 3]).reshape(-1).astype("<u4"))
-            count += len(v)
-    if not verts:
-        return struct.pack("<II", 0, 0)
-    return struct.pack("<II", count, sum(len(i) for i in index)) + numpy.concatenate(verts).astype("<f4").tobytes() + numpy.concatenate(index).astype("<u4").tobytes()
+            # the points of the part: where each segment starts, and where the last one ends
+            points = numpy.vstack([a, b[-1]])
+            points = numpy.column_stack([compact.i32(points[:, 0], compact.RIBBON_UNIT, "a ribbon point's x"), compact.i32(points[:, 1], compact.RIBBON_UNIT, "a ribbon point's y")])
+            parts.append(struct.pack("<HBB", len(points), int(cls), int(compact.u8(half, compact.RIBBON_HALF_PER_M, "a ribbon's half width")[0]))
+                         + points.astype("<i4").tobytes() + compact.ribbon_turns(dx, dy).tobytes())
+    if not parts:
+        return struct.pack("<I", 0)
+    return struct.pack("<I", len(parts)) + b"".join(parts)
 
 
 def overview_lines(osm, ground_data):
@@ -364,6 +374,9 @@ def bake(limit=None, log=print):
                          for b, f, x, y in zip(buildings, flags, cx, cy, strict=True)], dtype=numpy.float64)
     cleared = flag_cleared(props, clears)
     log(f"{int(cleared.sum())} mapped buildings give way to landmarks built by hand")
+    # what stands on the flat roofs: not buildings, drawn like them, in a section of their own so that the
+    # app can leave them out until they are more than a pixel
+    roof_geoms, roof_rows = rooftop_props(geoms, props, colour_index)
     live = props[~cleared]             # what is drawn, for the overview tier
     live_areas = areas[~cleared]
 
@@ -395,9 +408,6 @@ def bake(limit=None, log=print):
     region.BAKED.mkdir(parents=True, exist_ok=True)
     lcv, urb = overview_rasters(live, live_areas, ground_data, cover, bounds, height)
 
-    # what stands on the flat roofs: not buildings, drawn like them, in a section of their own so that the
-    # app can leave them out until they are more than a pixel
-    roof_geoms, roof_rows = rooftop_props(geoms, props, colour_index)
     roof_tile, roof_starts = group_by_tile(roof_rows[:, 9], roof_rows[:, 10], tx0, ty0, nx_tiles, ny_tiles)
     real = len(props)
     log(f"rooftop props: {len(roof_rows)}")
@@ -406,7 +416,7 @@ def bake(limit=None, log=print):
         (b"MASS", massing_section(live, 0.0, 0.0)),
         (b"LCV", lcv),
         (b"URB", urb),
-        (b"RIBA", ribbon_section(overview_lines(osm, ground_data), surface(grid, info, 125.0, coarse_grid_extent()))),
+        (b"RIBA", ribbon_section(overview_lines(osm, ground_data))),
     ]))
     log(f"overview.bin {(region.BAKED / 'overview.bin').stat().st_size / 1048576:.1f} MB")
 
@@ -434,7 +444,7 @@ def bake(limit=None, log=print):
             deck = deck_mesh(ground_data, x0, y0, height)
             for sid, (vertices, indices) in zip((b"WATR", b"ROAD", b"LAND", b"DECK"), (*ground_parts, deck), strict=True):
                 if len(indices):
-                    sections.append((sid, mesh_section(vertices, indices)))
+                    sections.append((sid, mesh_section(vertices, indices, sid == b"DECK")))
                     totals["ground_triangles"] += len(indices) // 3
             trees_here = trees[tree_tile[tree_starts[k]:tree_starts[k + 1]]]
             if len(trees_here):
@@ -455,7 +465,7 @@ def bake(limit=None, log=print):
             break
 
     index = {
-        "tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
+        "tileSize": region.TILE_M, "ix0": tx0, "iy0": ty0, "format": FORMAT, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
         "palette": list(palette), "origin": [region.ORIGIN_E, region.ORIGIN_N], "epsg": region.EPSG, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
         "buildings": real, "leftOutOfWater": int(afloat.sum()), "rooftopProps": len(roof_rows),

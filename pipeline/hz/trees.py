@@ -20,7 +20,7 @@ import shapely
 from shapely.geometry.polygon import orient
 from shapely.strtree import STRtree
 
-from . import ground
+from . import compact, ground
 from .ground import (
     FOREST,
     GRASS,
@@ -208,7 +208,9 @@ def generate(ground_data, buildings, height, cover, bounds, rng, log=print, tea=
 
 def section(records, x0, y0, size=1000.0):
     """-> bytes: the trees of one tile. They are sorted into squares of CELL_M, a cell's trees in one run:
-    cells per side (u32), count (u32), where each cell's run starts (u32 per cell, and one more), then the trees."""
+    cells per side (u32), count (u32), where each cell's run starts (u32 per cell, and one more), then the trees,
+    7 bytes each (compact.py): x, y relative to the tile's corner, species and kind, crown radius, seed. Their
+    height is the ground's under them, which the page reads off the tile."""
     cells = int(size // CELL_M)
     cx = numpy.clip((records["x"] - x0) // CELL_M, 0, cells - 1).astype(int)
     cy = numpy.clip((records["y"] - y0) // CELL_M, 0, cells - 1).astype(int)
@@ -218,4 +220,4 @@ def section(records, x0, y0, size=1000.0):
     local["x"] -= x0
     local["y"] -= y0
     starts = numpy.searchsorted(keys[order], numpy.arange(cells * cells + 1))
-    return struct.pack("<II", cells, len(local)) + starts.astype("<u4").tobytes() + local.tobytes()
+    return struct.pack("<II", cells, len(local)) + starts.astype("<u4").tobytes() + compact.tree_records(local)
