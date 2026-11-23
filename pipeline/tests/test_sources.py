@@ -140,15 +140,16 @@ class Ensuring(unittest.TestCase):
         self.server.close()
         self.tmp.cleanup()
 
-    def city(self, with_buildings=True):
+    def city(self, with_buildings=True, sources_said=None):
         """A city whose three single-file sources are this test's server and whose building tile is (or is not) in place."""
         tmp = Path(self.tmp.name)
         buildings = self.raw / "buildings" / "2434"
         buildings.mkdir(parents=True, exist_ok=True)
         for name in () if not with_buildings else ("t.shp", "t.dbf"):
             (buildings / name).write_bytes(b"shapefile part")
-        said = {"id": "x", "name": "X", "bounds": [0, 0, 1, 1], "epsg": 32651, "origin": [0, 0],
-                "sources": {"osm": f"{self.url}/zhejiang-latest.osm.pbf", "buildings": {"tile": "2434", "url": "https://example.org/2434"}, "dem": "N30_00_E120_00", "landcover": "N30E120"}}
+        said = {"id": "x", "name": "X", "bounds": [120.1, 30.2, 120.5, 30.6], "epsg": 32651, "origin": [0, 0],
+                "sources": sources_said or {"osm": f"{self.url}/zhejiang-latest.osm.pbf", "buildings": {"tile": "2434", "url": "https://example.org/2434"},
+                                            "dem": "N30_00_E120_00", "landcover": "N30E120"}}
         (tmp / "cities" / "x" / "city.json").write_text(json.dumps(said), encoding="utf-8")
         with mock.patch.object(city, "CITIES", tmp / "cities"), mock.patch.object(sources, "RAW", self.raw):
             return city.load("x")

@@ -3,26 +3,33 @@ when it is not there. Raw files are shared: two cities of one province read the 
 degree tile the same terrain.
 
   data/raw/osm/<file>.pbf          the OpenStreetMap extract
-  data/raw/buildings/<tile>/       3D-GloBFP: a shapefile with its companions
-  data/raw/dem/<tile>.tif          Copernicus GLO-30
-  data/raw/landcover/<tile>.tif    ESA WorldCover 2021
+  data/raw/buildings/<tile>/       3D-GloBFP: a shapefile with its companions, one folder per 1.25 degree tile
+  data/raw/dem/<tile>.tif          Copernicus GLO-30, one file per degree tile
+  data/raw/landcover/<tile>.tif    ESA WorldCover 2021, one file per degree tile
 
-Beside each lies a note (<file>.json) saying where it came from, when it was fetched, and its size and SHA-256;
-the stamp of a bake (build_all.py) carries them on. A file that is there is left alone.
+city.json may name one tile of a source or several (a list where one name stood): a city that reaches across
+a degree boundary names every tile it and its margin touch, and `covering` stops when the named tiles do not
+reach as far as the region. A file that is there is left alone.
 
-The terrain and the land cover are read one degree tile at a time (terrain.py, landcover.py): a city is built from
-one tile of each, and city.json naming more is an error until those readers take several.
+Beside each file lies a note (<file>.json) saying where it came from, when it was fetched, and its size and
+SHA-256; a folder of files that belong together has one note (source.json). The stamp of a bake (build_all.py)
+carries the notes on: one note as it is, several as a list in the order of the tiles. A file that is there is
+left alone.
 
 Usage: python -m pixelcity.sources <city>      says what is there, and fetches what is not
 """
 import hashlib
 import json
+import math
 import sys
 import time
 import urllib.request
+import zipfile
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import numpy
 
 from . import city
 from .city import RAW
@@ -34,33 +41,103 @@ CHUNK = 1 << 20
 SIDECARS = (".shp", ".shx", ".dbf", ".prj", ".cpg")
 
 
-def one(tiles, what):
-    """The one tile a city is built from, of a source that is read a tile at a time."""
-    if isinstance(tiles, (list, tuple)):
-        raise SystemExit(f"{what} is read one degree tile at a time so far, and city.json names {len(tiles)}: {', '.join(map(str, tiles))}")
-    return str(tiles)
+def tiles(said, what):
+    """The tiles a city is built from: city.json holds one name there, or a list of names."""
+    if isinstance(said, (list, tuple)):
+        if not said or not all(isinstance(tile, (str, int)) for tile in said):
+            raise SystemExit(f"{what} in city.json must be one tile or a list of tiles")
+        return [str(tile) for tile in said]
+    return [str(said)]
 
 
 def osm_file(c):
     return RAW / "osm" / Path(urlsplit(c.sources["osm"]).path).name
 
 
-def building_folder(c):
-    return RAW / "buildings" / str(c.sources["buildings"]["tile"])
+def building_tiles(c):
+    return tiles(c.sources["buildings"]["tile"], "buildings")
 
 
-def footprints_file(c):
-    """The one shapefile holding the building footprints of the city's tile, or None when the tile is not here."""
-    found = sorted(building_folder(c).glob("*.shp"))
-    return found[0] if found else None
+def building_folders(c):
+    return [(tile, RAW / "buildings" / tile) for tile in building_tiles(c)]
 
 
-def dem_file(c):
-    return RAW / "dem" / f"{one(c.sources['dem'], 'the terrain')}.tif"
+def footprints_files(c):
+    """The shapefile of each tile the city is built from, in the order of the tiles; None when any is not here."""
+    found = []
+    for _, folder in building_folders(c):
+        in_folder = sorted(folder.glob("*.shp"))
+        if not in_folder:
+            return None
+        found.append(in_folder[0])
+    return found
 
 
-def landcover_file(c):
-    return RAW / "landcover" / f"{one(c.sources['landcover'], 'the land cover')}.tif"
+def footprints_urls(c):
+    """Where each tile of footprints can be fetched from, as city.json tells of it: the "files" map by tile.
+    A city without it is fetched by hand, as before; "url" is only said to the reader as where to look."""
+    return dict(c.sources["buildings"].get("files") or {})
+
+
+def dem_tiles(c):
+    return tiles(c.sources["dem"], "the terrain")
+
+
+def landcover_tiles(c):
+    return tiles(c.sources["landcover"], "the land cover")
+
+
+def dem_files(c):
+    return [RAW / "dem" / f"{tile}.tif" for tile in dem_tiles(c)]
+
+
+def landcover_files(c):
+    return [RAW / "landcover" / f"{tile}.tif" for tile in landcover_tiles(c)]
+
+
+def dem_cell(lon, lat):
+    """The GLO-30 tile covering a point: 'N30_00_E120_00' is the degree cell of 30-31 north, 120-121 east."""
+    return f"N{math.floor(lat):02d}_00_E{math.floor(lon):02d}_00"
+
+
+def cover_cell(lon, lat):
+    """The WorldCover tile covering a point: 'N30E120'."""
+    return f"N{math.floor(lat):02d}E{math.floor(lon):02d}"
+
+
+def cells(west, south, east, north, cell):
+    """Every degree tile a window in lon/lat reaches into, named as `cell` names them, in order. A tenth of a
+    degree-arcsecond of slop is allowed on every side, so that a region that only just touches a boundary from
+    the inside does not ask for the tile next door."""
+    cols = range(math.floor(west + 1e-9), math.floor(east - 1e-9) + 1)
+    rows = range(math.floor(south + 1e-9), math.floor(north - 1e-9) + 1)
+    return sorted(cell(x, y) for x in cols for y in rows)
+
+
+def reached(c):
+    """The lon/lat window the region itself reaches into: west, south, east, north. The region's four edges are
+    sampled rather than its bounding box taken, for the region stands turned to the grid: its lon/lat box is
+    wider than the region, by some hundreds of metres a side, enough to reach over a degree boundary."""
+    corners = c.corners()
+    points = []
+    for one, other in zip(corners, corners[1:] + corners[:1], strict=True):
+        steps = max(2, int((abs(other[0] - one[0]) + abs(other[1] - one[1])) / 100) + 1)   # a sample every 100 m or so
+        t = numpy.linspace(0.0, 1.0, steps)
+        points.append(numpy.column_stack([one[0] + (other[0] - one[0]) * t, one[1] + (other[1] - one[1]) * t]))
+    lon, lat = c.unproject(numpy.concatenate(points)[:, 0], numpy.concatenate(points)[:, 1])
+    return float(min(lon)), float(min(lat)), float(max(lon)), float(max(lat))
+
+
+def covering(c, what, named, cell):
+    """The tiles the region itself reaches into must all be named; stops and says which are missing. The margin
+    outside the region is not asked for: it is the dissolving edge of the island, and the readers sample it from
+    the tile edge where the tiles named do not reach."""
+    needed = cells(*reached(c), cell)
+    missing = [tile for tile in needed if tile not in named]
+    if missing:
+        raise SystemExit(f"the {what} tiles the region reaches into are {', '.join(needed)}; city.json names "
+                         f"{', '.join(named) or 'none'}, so {', '.join(missing)} must be added")
+    return needed
 
 
 def described(path):
@@ -90,14 +167,26 @@ def read(note):
 
 
 def notes(c):
-    """{osm, buildings, dem, landcover}: the note beside each of the city's sources, as it is."""
-    return {"osm": read(osm_file(c).with_name(osm_file(c).name + ".json")), "buildings": read(building_folder(c) / "source.json"),
-            "dem": read(dem_file(c).with_name(dem_file(c).name + ".json")), "landcover": read(landcover_file(c).with_name(landcover_file(c).name + ".json"))}
+    """{osm, buildings, dem, landcover}: the note beside each of the city's sources, as it is. A source of several
+    tiles gives the notes of its files as a list, in the order of the tiles."""
+    out = {"osm": read(osm_file(c).with_name(osm_file(c).name + ".json")),
+           "buildings": _notes_of_folders(c), "dem": _notes_of_files(dem_files(c)), "landcover": _notes_of_files(landcover_files(c))}
+    return out
 
 
 def digests(folder):
     """{file: SHA-256} of the JSON files directly in a folder: for the stamp of a bake, which says what definition made it."""
     return {p.name: sha256(p) for p in sorted(folder.glob("*.json"))}
+
+
+def _notes_of_files(files):
+    said = [read(file.with_name(file.name + ".json")) for file in files]
+    return said[0] if len(said) == 1 else said
+
+
+def _notes_of_folders(c):
+    said = [read(folder / "source.json") for _, folder in building_folders(c)]
+    return said[0] if len(said) == 1 else said
 
 
 def noted(path, url, fetched=None, log=print):
@@ -164,6 +253,74 @@ def fetch(url, target, log=print, tries=3):
             time.sleep(5 * attempt)
 
 
+def unpack(archive, folder):
+    """A zip of a shapefile and its companions, unpacked into `folder`: what the archive holds under one folder
+    comes up, so the shapefile lies in the tile folder itself, as a tile put here by hand would lie. The names
+    are all checked before anything is written, so a bad archive leaves nothing behind."""
+    with zipfile.ZipFile(archive) as z:
+        members = [name for name in z.namelist() if not name.endswith("/")]
+        split = []
+        for name in members:
+            parts = [part for part in name.split("/") if part not in ("", ".")]
+            if any(part == ".." for part in parts):
+                raise ValueError(f"{archive} would unpack outside {folder}")
+            split.append(parts)
+        tops = {parts[0] for parts in split if len(parts) > 1}
+        shared = tops.pop() if len(tops) == 1 and all(len(parts) > 1 for parts in split) else None
+        for name, parts in zip(members, split, strict=True):
+            if shared is not None:
+                parts = parts[1:]
+            target = folder / Path(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(z.read(name))
+
+
+def _unpack_buildings(c, tile, url, log):
+    """One tile of footprints, fetched and unpacked when city.json says where it comes from; -> whether it worked."""
+    folder = RAW / "buildings" / tile
+    archive = folder / f"{tile}.zip"
+    log(f"fetching the building footprints of tile {tile}, {url}")
+    try:
+        fetched = fetch(url, archive, log=log)
+    except SystemExit as error:
+        log(f"  {error}")
+        return False
+    unpack(archive, folder)
+    noted_folder(folder, url, fetched=fetched, log=log)
+    return True
+
+
+def _noted_footprints(c, log):
+    """The notes of the folders of footprints, one per tile: made when they are not there or do not say what is
+    there. The note says where the tile came from: its own address in "files", or the one "url" of a city built
+    from a single tile."""
+    said_map = c.sources["buildings"]
+    files = said_map.get("files") or {}
+    only = said_map.get("url") if len(building_tiles(c)) == 1 else None
+    said = [noted_folder(folder, files.get(tile) or only, log=log) for tile, folder in building_folders(c)]
+    return said[0] if len(said) == 1 else said
+
+
+def _missing_footprints(c, log, fetch_missing):
+    """The tiles of footprints that are not here, fetched first where city.json says where they come from."""
+    said = footprints_urls(c)
+    missing = [tile for tile, folder in building_folders(c) if not sorted(folder.glob("*.shp"))]
+    if missing and fetch_missing:
+        for tile in missing:
+            if said.get(tile):
+                _unpack_buildings(c, tile, said[tile], log=log)
+    missing = [tile for tile, folder in building_folders(c) if not sorted(folder.glob("*.shp"))]
+    if missing:
+        folders = ", ".join(str(RAW / "buildings" / tile) for tile in missing)
+        where = ", ".join(f"{tile}: {said[tile]}" for tile in missing if said.get(tile))
+        raise SystemExit(f"the building footprints are not in {folders}: 3D-GloBFP comes by tile from figshare"
+                         + (f" ({where})" if where else "")
+                         + ", which has answered a script with a page to wait for and not the file before, so a tile "
+                           "that will not come is fetched by hand. Open its address (see docs/DATA-SOURCES.md) in a "
+                           "browser, put the zip in the tile's folder and unpack it there: the shapefile and its "
+                           "companions beside it.")
+
+
 KINDS = ("osm", "buildings", "dem", "landcover")
 
 
@@ -174,28 +331,30 @@ def ensure(c, log=print, fetch_missing=True):
     missing = [kind for kind in KINDS if kind not in c.sources]
     if missing:
         raise SystemExit(f"{path} does not say where {', '.join(missing)} come from")
-    folder = building_folder(c)
-    if footprints_file(c) is None:
-        raise SystemExit(f"the building footprints are not in {folder}: 3D-GloBFP is served by figshare, which answers a script with a page to wait for "
-                         f"and not the file, so this one is fetched by hand. Open {c.sources['buildings'].get('url') or 'the dataset record (docs/DATA-SOURCES.md)'} "
-                         "in a browser, put the zip in that folder and unpack it there: the shapefile and its companions beside it.")
-    out = {}
-    for kind, file, template, what in (("osm", osm_file(c), None, "the OpenStreetMap extract"), ("dem", dem_file(c), DEM_URL, "the terrain"),
-                                       ("landcover", landcover_file(c), COVER_URL, "the land cover")):
-        url = template.format(tile=file.stem) if template else c.sources["osm"]
-        fetched = None
-        if not file.exists():
-            if not fetch_missing:
-                raise SystemExit(f"{file} is not here: run the sources step to fetch it")
-            log(f"fetching {what}, {url}")
-            fetched = fetch(url, file, log=log)
-        out[kind] = noted(file, url, fetched, log=log)
-    out["buildings"] = noted_folder(folder, c.sources["buildings"].get("url"), log=log)
+    covering(c, "terrain", dem_tiles(c), dem_cell)
+    covering(c, "land cover", landcover_tiles(c), cover_cell)
+    _missing_footprints(c, log, fetch_missing)
+    out = {"buildings": _noted_footprints(c, log)}
+    for kind, files, template, what in (("osm", [osm_file(c)], None, "the OpenStreetMap extract"),
+                                        ("dem", dem_files(c), DEM_URL, "the terrain"),
+                                        ("landcover", landcover_files(c), COVER_URL, "the land cover")):
+        said = []
+        for file in files:
+            url = template.format(tile=file.stem) if template else c.sources["osm"]
+            fetched = None
+            if not file.exists():
+                if not fetch_missing:
+                    raise SystemExit(f"{file} is not here: run the sources step to fetch it")
+                log(f"fetching {what}, {url}")
+                fetched = fetch(url, file, log=log)
+            said.append(noted(file, url, fetched, log=log))
+        out[kind] = said[0] if len(said) == 1 else said
     return out
 
 
 if __name__ == "__main__":
     c = city.of(sys.argv)
     for kind, said in ensure(c).items():
-        files = said.get("files") or [said]
-        print(f"{kind:<10} {sum(f['bytes'] for f in files):>13,} bytes in {len(files)} file{'s' if len(files) > 1 else ''}, fetched {said.get('fetched') or 'by hand'}")
+        for one in said if isinstance(said, list) else [said]:
+            files = one.get("files") or [one]
+            print(f"{kind:<10} {sum(f['bytes'] for f in files):>13,} bytes in {len(files)} file{'s' if len(files) > 1 else ''}, fetched {one.get('fetched') or 'by hand'}")

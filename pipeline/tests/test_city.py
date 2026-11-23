@@ -127,16 +127,39 @@ class WhatTheCityCarries(unittest.TestCase):
 class WhereTheRawDataLies(unittest.TestCase):
     def test_each_source_has_its_place_under_data_raw(self):
         self.assertEqual(sources.osm_file(CITY), sources.RAW / "osm" / "zhejiang-latest.osm.pbf")
-        self.assertEqual(sources.dem_file(CITY), sources.RAW / "dem" / "N30_00_E120_00.tif")
-        self.assertEqual(sources.landcover_file(CITY), sources.RAW / "landcover" / "N30E120.tif")
-        self.assertEqual(sources.building_folder(CITY), sources.RAW / "buildings" / "2434")
+        self.assertEqual(sources.dem_files(CITY), [sources.RAW / "dem" / "N30_00_E120_00.tif"])
+        self.assertEqual(sources.landcover_files(CITY), [sources.RAW / "landcover" / "N30E120.tif"])
+        self.assertEqual(sources.building_folders(CITY), [("2434", sources.RAW / "buildings" / "2434")])
 
-    def test_more_than_one_tile_of_terrain_or_land_cover_is_refused_for_now(self):
-        for kind in ("dem", "landcover"):
-            said = {**CITY.definition, "sources": {**CITY.sources, kind: [CITY.sources[kind], "N30_00_E121_00"]}}
-            with mock.patch.object(CITY, "definition", said), self.assertRaises(SystemExit) as stopped:
-                (sources.dem_file if kind == "dem" else sources.landcover_file)(CITY)
-            self.assertIn("one degree tile", stopped.exception.code)
+    def test_one_tile_or_several_are_said_alike(self):
+        for kind, tile, other in (("dem", "N30_00_E120_00", "N30_00_E121_00"), ("landcover", "N30E120", "N30E121")):
+            said = {**CITY.definition, "sources": {**CITY.sources, kind: [tile, other]}}
+            with mock.patch.object(CITY, "definition", said):
+                files = sources.dem_files(CITY) if kind == "dem" else sources.landcover_files(CITY)
+            self.assertEqual(files, [sources.RAW / f"{'dem' if kind == 'dem' else 'landcover'}" / f"{name}.tif" for name in (tile, other)])
+
+    def test_the_tiles_named_must_reach_as_far_as_the_region(self):
+        # Hangzhou's own tiles cover it; a region pushed east across the 121st meridian needs the tile next door
+        self.assertEqual(sources.covering(CITY, "terrain", sources.dem_tiles(CITY), sources.dem_cell), ["N30_00_E120_00"])
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "hz"
+            folder.mkdir()
+            (folder / "city.json").write_text(json.dumps({**CITY.definition, "bounds": [120.0, 30.12, 121.4, 30.44]}), encoding="utf-8")
+            wider = city.City(folder)
+            with self.assertRaises(SystemExit) as stopped:
+                sources.covering(wider, "terrain", sources.dem_tiles(wider), sources.dem_cell)
+        self.assertIn("N30_00_E121_00", stopped.exception.code)
+        self.assertIn("N30_00_E120_00", stopped.exception.code)
+
+    def test_the_land_cover_is_covered_by_its_tiles_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "hz"
+            folder.mkdir()
+            (folder / "city.json").write_text(json.dumps({**CITY.definition, "bounds": [120.0, 29.8, 121.4, 30.44]}), encoding="utf-8")
+            wider = city.City(folder)
+            with self.assertRaises(SystemExit) as stopped:
+                sources.covering(wider, "land cover", sources.landcover_tiles(wider), sources.cover_cell)
+        self.assertIn("N29E120", stopped.exception.code)
 
 
 if __name__ == "__main__":

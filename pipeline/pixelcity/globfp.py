@@ -1,7 +1,7 @@
 """3D-GloBFP (building footprints with heights, 2020) -> the region, as (polygon in world metres, tags).
 
-The dataset is one shapefile per 1.25 x 1.25 degree tile. This reads the tile that covers the region and
-keeps the footprints that reach into it. Each keeps its estimated height in metres.
+The dataset is one shapefile per 1.25 x 1.25 degree tile. This reads every tile named in city.json and
+keeps the footprints that reach into the region from any of them. Each keeps its estimated height in metres.
 
 Usage: python -m pixelcity.globfp <city>
 """
@@ -14,33 +14,37 @@ import shapefile
 import shapely
 from shapely.geometry import shape
 
-from .city import MARGIN_M, of
-from .sources import building_folder, ensure, footprints_file
+from .city import MARGIN_M, RAW, of
+from .sources import ensure, footprints_files
 
 
-def load(city, path=None, log=print):
-    """The footprints of the tile the city is built from (its city.json, "sources": "buildings") that reach into the region."""
+def load(city, paths=None, log=print):
+    """The footprints of the tiles the city is built from (its city.json, "sources": "buildings") that reach into the region."""
     t0 = time.time()
-    path = path or footprints_file(city)
-    if path is None:
-        raise SystemExit(f"the building footprints are not in {building_folder(city)}: see sources.py")
-    reader = shapefile.Reader(path, encoding="latin-1")
+    paths = list(paths or footprints_files(city))
+    if not paths:
+        raise SystemExit(f"the building footprints are not complete under {RAW / 'buildings'}: see sources.py")
     pad = MARGIN_M / 100000.0  # about 3 km in degrees
     west, south, east, north = city.west - pad, city.south - pad, city.east + pad, city.north + pad
-    items, broken = [], 0
-    for sr in reader.iterShapeRecords():
-        x0, y0, x1, y1 = sr.shape.bbox
-        if x1 < west - pad or x0 > east + pad or y1 < south - pad or y0 > north + pad:
-            continue
-        geom = shapely.transform(shape(sr.shape.__geo_interface__), lambda xy: numpy.column_stack(city.project(xy[:, 0], xy[:, 1])), include_z=False)
-        if not geom.is_valid:
-            geom = geom.make_valid()
-        if geom.is_empty or geom.geom_type not in ("Polygon", "MultiPolygon"):
-            broken += 1
-            continue
-        rec = sr.record.as_dict()
-        items.append((geom, {"height": rec.get("Height") or None, "type": rec.get("type")}))
-    log(f"3D-GloBFP: {len(items)} footprints in the region (+{broken} unusable) in {time.time() - t0:.0f} s")
+    items, broken, per_tile = [], 0, []
+    for path in paths:
+        reader = shapefile.Reader(path, encoding="latin-1")
+        came = 0
+        for sr in reader.iterShapeRecords():
+            x0, y0, x1, y1 = sr.shape.bbox
+            if x1 < west - pad or x0 > east + pad or y1 < south - pad or y0 > north + pad:
+                continue
+            came += 1
+            geom = shapely.transform(shape(sr.shape.__geo_interface__), lambda xy: numpy.column_stack(city.project(xy[:, 0], xy[:, 1])), include_z=False)
+            if not geom.is_valid:
+                geom = geom.make_valid()
+            if geom.is_empty or geom.geom_type not in ("Polygon", "MultiPolygon"):
+                broken += 1
+                continue
+            rec = sr.record.as_dict()
+            items.append((geom, {"height": rec.get("Height") or None, "type": rec.get("type")}))
+        per_tile.append(f"{path.stem.split('_')[0]} {came:,}")
+    log(f"3D-GloBFP: {len(items)} footprints in the region (+{broken} unusable) from {len(paths)} tile{'s' if len(paths) != 1 else ''} ({', '.join(per_tile)}) in {time.time() - t0:.0f} s")
     return items
 
 
