@@ -13,6 +13,19 @@
 | ESA WorldCover 2021 | 土地覆盖（林地、耕地） | https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30E120_Map.tif | CC BY 4.0 | 可达，约 330 KB/s | 2026-11-22 | 93.4 MB | 可选，尚未使用 |
 | pixel-plays | 上色规则的移植来源 | https://github.com/amirmushichge/pixel-plays | 代码 MIT；音乐不在 MIT 内 | 已克隆到 `reference/pixel-plays` | 2026-11-22 | | 只读参照，不参与构建 |
 
+## 放在哪、怎么来
+
+原始数据按来源放在 `data/raw/` 下，多座城共用：
+
+| 数据 | 放在 | 怎么来 |
+|---|---|---|
+| OpenStreetMap 提取包 | `data/raw/osm/zhejiang-latest.osm.pbf` | 管线自己下载，地址写在 `cities/hz/city.json` |
+| 3D-GloBFP | `data/raw/buildings/2434/` | **手工**：figshare 只应答浏览器，脚本拿不到。下载压缩包，解压到这个目录（压缩包留着也行） |
+| Copernicus GLO-30 | `data/raw/dem/N30_00_E120_00.tif` | 管线自己下载 |
+| ESA WorldCover | `data/raw/landcover/N30E120.tif` | 管线自己下载 |
+
+管线的第一步（`sources`）检查这四样在不在，缺的下载，并在每个文件旁边留一份记录（`<文件>.json`：地址、取到的那天、字节数、SHA-256）。烘焙戳 `data/baked/<城市>/bake.json` 把这些记录带上，发布时写进清单。`-latest` 的提取包每天都会变，所以记录里的校验值是"这一次用的是哪一份"的唯一凭据。
+
 ## 必须的引用
 
 - 地图数据 © OpenStreetMap 贡献者，依 Open Database License (ODbL) 提供：https://www.openstreetmap.org/copyright

@@ -13,20 +13,23 @@ import shapely
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from hz import region
-from hz.bake import FLAG_CLEARED, FLAG_ROOFTOP, rooftop_props
-from hz.classify import FLOOR_M, JIANGNAN, ROOF_GABLE, ROOF_GREAT, ROOF_HIP, TEMPLE
-from hz.ground import WATER_CANAL, WATER_LAKE, WATER_POND, WATER_RIVER, water_class
-from hz.landmarks import cleared_around, cleared_mask
-from hz.scene import FLAG_DATASET_OUTLINE, flag_cleared, in_water
+from pixelcity import city
+from pixelcity.bake import FLAG_CLEARED, FLAG_ROOFTOP, rooftop_props
+from pixelcity.classify import FLOOR_M, JIANGNAN, ROOF_GABLE, ROOF_GREAT, ROOF_HIP, TEMPLE
+from pixelcity.ground import WATER_CANAL, WATER_LAKE, WATER_POND, WATER_RIVER, water_class
+from pixelcity.landmarks import cleared_around, cleared_mask
+from pixelcity.scene import FLAG_DATASET_OUTLINE, flag_cleared, in_water
+
+CITY = city.load("hz")          # these tests are written against Hangzhou: its places, its names
+RIVERS = CITY.look["rivers"]
 
 
 class RegionShapeTest(unittest.TestCase):
     def test_the_corners_are_the_corners_of_the_shape(self):
         """In the shape's own frame the region must be the rectangle it is on the globe."""
-        shape = region.region_shape()
+        shape = CITY.shape()
         half_w, half_h = shape["halfWidth"], shape["halfHeight"]
-        for x, y in region.region_corners():
+        for x, y in CITY.corners():
             dx, dy = x - shape["cx"], y - shape["cy"]
             local_x = dx * shape["cos"] + dy * shape["sin"]
             local_y = -dx * shape["sin"] + dy * shape["cos"]
@@ -36,14 +39,14 @@ class RegionShapeTest(unittest.TestCase):
 
     def test_the_shape_is_turned_from_the_grid(self):
         """The bounding box is wider than the region by what the turn adds; the app used to take the box for the outline."""
-        shape = region.region_shape()
-        west, south, east, north = region.region_bounds()
+        shape = CITY.shape()
+        west, south, east, north = CITY.bounds()
         self.assertLess(abs(shape["cos"] - 1.0), 0.001)           # the east axis points east, to within a degree or so
         self.assertGreater((east - west) / 2 - shape["halfWidth"], 200)
         self.assertGreater((north - south) / 2 - shape["halfHeight"], 200)
 
     def test_the_axes_are_unit_vectors_and_orthogonal(self):
-        shape = region.region_shape()
+        shape = CITY.shape()
         self.assertAlmostEqual(shape["cos"] ** 2 + shape["sin"] ** 2, 1.0, places=12)
         self.assertGreater(shape["halfWidth"], 38000 / 2 - 100)
         self.assertGreater(shape["halfHeight"], 35000 / 2 - 100)
@@ -132,12 +135,12 @@ class TempleHallTest(unittest.TestCase):
 
     def classify(self, tags, height_source="globfp", levels=6, height=25.0, at=(120.09667, 30.24308)):
         """A building with these tags at Lingyin's Great Hall (inside the villages of the historic kind), or elsewhere."""
-        from hz import classify as module
-        x, y = region.project(*at)
+        from pixelcity import classify as module
+        x, y = CITY.project(*at)
         building = {"geom": shapely.box(x - 15, y - 10, x + 15, y + 10), "tags": tags, "height_source": height_source, "levels": levels, "height": height}
         terrain = numpy.zeros((10, 10))
         info = (x - 200.0, y - 200.0, 40.0, 10, 10)
-        return module.classify([building], terrain, info, log=lambda *a: None)[0]
+        return module.classify(CITY, [building], terrain, info, log=lambda *a: None)[0]
 
     def test_a_hall_called_by_its_name_is_a_temple_one_tall_storey_high(self):
         b = self.classify({"building": "yes", "name": "济公殿"})
@@ -178,11 +181,11 @@ class MappedRoofTest(unittest.TestCase):
     """A roof shape written down on the spot beats the height data set: a gabled house is not fourteen storeys."""
 
     def classify(self, tags, height_source="globfp", levels=15, height=44.2, width=25):
-        from hz import classify as module
-        x, y = region.project(120.1520, 30.2400)          # on the lake's south shore road, among old houses
+        from pixelcity import classify as module
+        x, y = CITY.project(120.1520, 30.2400)          # on the lake's south shore road, among old houses
         building = {"geom": shapely.box(x - width / 2, y - width / 2, x + width / 2, y + width / 2), "tags": tags, "height_source": height_source,
                     "levels": levels, "height": height}
-        return module.classify([building], numpy.zeros((10, 10)), (x - 200.0, y - 200.0, 40.0, 10, 10), log=lambda *a: None)[0]
+        return module.classify(CITY, [building], numpy.zeros((10, 10)), (x - 200.0, y - 200.0, 40.0, 10, 10), log=lambda *a: None)[0]
 
     def test_a_gabled_house_keeps_its_roof_and_loses_the_storeys(self):
         house = self.classify({"building": "yes", "roof:shape": "gabled", "roof:colour": "black"})
@@ -205,7 +208,7 @@ class CorridorTest(unittest.TestCase):
         import json
         import tempfile
         # a bridge 100 m long running east from the middle of the world, 9 m clear to each side; and a pagoda
-        lon, lat = region.unproject(500.0, 0.0)
+        lon, lat = CITY.unproject(500.0, 0.0)
         rows = {"landmarks": [
             {"title": "the bridge", "group": "g", "lon": lon, "lat": lat, "angle": 0.0, "clear": 9, "clearSpan": 52.0, "kit": {"model": "archBridge"}},
             {"title": "the pagoda", "group": "g", "lon": lon, "lat": lat, "clear": 40.0, "kit": {"model": "pagoda"}},
@@ -214,7 +217,7 @@ class CorridorTest(unittest.TestCase):
         file = Path(self.folder.name) / "landmarks.json"
         file.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
         self.addCleanup(self.folder.cleanup)
-        self.areas = cleared_around(file)
+        self.areas = cleared_around(CITY, file)
 
     def test_a_bridge_is_a_corridor_and_a_tower_a_disc(self):
         self.assertEqual([len(a) for a in self.areas], [5, 3])
@@ -236,11 +239,11 @@ class WaterClassTest(unittest.TestCase):
     """What colour of water a mapped body gets."""
 
     def test_only_the_great_river_is_brown(self):
-        self.assertEqual(water_class({"water": "river", "name": "钱塘江"}, 5e6), WATER_RIVER)
-        self.assertEqual(water_class({"natural": "water", "water": "river", "name": "京杭大运河"}, 2e6), WATER_CANAL)
-        self.assertEqual(water_class({"water": "river"}, 9e5), WATER_CANAL)             # a stream with no name is no great river
+        self.assertEqual(water_class({"water": "river", "name": "钱塘江"}, 5e6, RIVERS), WATER_RIVER)
+        self.assertEqual(water_class({"natural": "water", "water": "river", "name": "京杭大运河"}, 2e6, RIVERS), WATER_CANAL)
+        self.assertEqual(water_class({"water": "river"}, 9e5, RIVERS), WATER_CANAL)             # a stream with no name is no great river
 
     def test_lakes_canals_and_ponds(self):
-        self.assertEqual(water_class({"natural": "water", "water": "lake", "name": "西湖"}, 6e6), WATER_LAKE)
-        self.assertEqual(water_class({"waterway": "canal"}, 0), WATER_CANAL)
-        self.assertEqual(water_class({"natural": "water", "water": "pond"}, 3000), WATER_POND)
+        self.assertEqual(water_class({"natural": "water", "water": "lake", "name": "西湖"}, 6e6, RIVERS), WATER_LAKE)
+        self.assertEqual(water_class({"waterway": "canal"}, 0, RIVERS), WATER_CANAL)
+        self.assertEqual(water_class({"natural": "water", "water": "pond"}, 3000, RIVERS), WATER_POND)

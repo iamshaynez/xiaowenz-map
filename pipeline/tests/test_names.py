@@ -16,12 +16,14 @@ from shapely.geometry import LineString, Point, box
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from hz import ground, names, region
-from hz.bake import container
-from hz.osm_extract import Layers
+from pixelcity import city, ground, names
+from pixelcity.bake import container
+from pixelcity.osm_extract import Layers
+
+CITY = city.load("hz")          # these tests are written against Hangzhou: its places, its names
 
 BUILDING, PLACE, WATER, ROAD, LANDMARK = names.BUILDING, names.PLACE, names.WATER, names.ROAD, names.LANDMARK
-OX, OY = (float(v) for v in region.project(120.20, 30.30))          # a point well inside the region
+OX, OY = (float(v) for v in CITY.project(120.20, 30.30))          # a point well inside the region
 FLAT = lambda x, y: 10.0 + numpy.zeros(numpy.shape(x))              # the ground at ten metres everywhere
 SLOPE = lambda x, y: (numpy.asarray(x, dtype=float) - OX) / 100.0   # rising a metre every hundred metres eastwards
 QUIET = {"log": lambda *a: None}
@@ -61,7 +63,7 @@ class RoadTest(unittest.TestCase):
         self.osm.places += [village(100, 100, "甲村"), village(3000, 300, "乙村")]    # for saying where a name borne twice is
 
     def collect(self):
-        return names.collect(self.osm, [], FLAT, **QUIET)
+        return names.collect(CITY, self.osm, [], FLAT, **QUIET)
 
     def test_ways_that_meet_are_one_road_and_a_piece_far_away_is_another(self):
         self.osm.roads += [way(0, 0, 200, 0, "文三路"), way(200, 0, 450, 0, "文三路", highway="tertiary"), way(3000, 0, 3200, 0, "文三路")]
@@ -93,7 +95,7 @@ class RoadTest(unittest.TestCase):
 
     def test_a_bridge_floats_above_the_ground_and_a_tunnel_is_drawn_on_the_ground_over_it(self):
         self.osm.roads += [way(0, 0, 200, 0, "钱塘江大桥", bridge="yes"), way(0, 1000, 200, 1000, "紫之隧道", tunnel="yes")]
-        rows, points = names.collect(self.osm, [], SLOPE, **QUIET)
+        rows, points = names.collect(CITY, self.osm, [], SLOPE, **QUIET)
         bridge, tunnel = at(rows, "钱塘江大桥")[0], at(rows, "紫之隧道")[0]
         first, count = rows["line"][bridge]
         self.assertEqual(set(points["z"][first:first + count].tolist()), {round((2.0 + ground.CLEARANCE) * 8)}, "the deck: six metres over the highest ground under it")
@@ -108,7 +110,7 @@ class RoadTest(unittest.TestCase):
         rows, points = self.collect()
         self.assertEqual(rows["line"][at(rows, "直路")[0]][1], 2)                    # a line that wanders less than POINT_M is straight
         first, count = rows["line"][at(rows, "长路")[0]]
-        east = region.region_bounds()[2] + names.EDGE_M
+        east = CITY.bounds()[2] + names.EDGE_M
         self.assertLessEqual(points["x"][first + count - 1], east + 1)
         self.assertGreater(points["x"][first + count - 1], east - 100)
 
@@ -136,13 +138,13 @@ class LeftOutTest(unittest.TestCase):
         osm.buildings += [piece(0, 0, 20, 20, "A", building="transportation"), piece(0, 0, 20, 20, "垂梯", building="transportation")]
         osm.places += [(Point(OX, OY), {"name": "B", "kind_key": "railway", "kind": "subway_entrance"}),
                        (Point(OX, OY), {"name": "龙翔桥", "kind_key": "railway", "kind": "subway_entrance"})]
-        self.assertEqual(names.collect(osm, [], FLAT, **QUIET)[0]["names"], [])
+        self.assertEqual(names.collect(CITY, osm, [], FLAT, **QUIET)[0]["names"], [])
 
     def test_nothing_outside_the_region_and_its_edge_is_kept(self):
         osm = Layers()
-        far = region.region_bounds()[2] + names.EDGE_M + 500
+        far = CITY.bounds()[2] + names.EDGE_M + 500
         osm.buildings += [piece(0, 0, 10, 10, "城里的楼", building="yes"), piece(far - OX, 0, far - OX + 10, 10, "城外的楼", building="yes")]
-        self.assertEqual(names.collect(osm, [], FLAT, **QUIET)[0]["names"], ["城里的楼"])
+        self.assertEqual(names.collect(CITY, osm, [], FLAT, **QUIET)[0]["names"], ["城里的楼"])
 
 
 class OneThingTest(unittest.TestCase):
@@ -150,7 +152,7 @@ class OneThingTest(unittest.TestCase):
         self.osm = Layers()
 
     def collect(self):
-        return names.collect(self.osm, [], FLAT, **QUIET)[0]
+        return names.collect(CITY, self.osm, [], FLAT, **QUIET)[0]
 
     def test_a_school_is_one_thing_and_its_outline_says_where(self):
         self.osm.places += [(Point(OX + 5, OY + 5), {"name": "小营小学", "kind_key": "amenity", "kind": "school"})]
@@ -205,7 +207,7 @@ class SheetTest(unittest.TestCase):
         self.osm.water.append((box(OX, OY, OX + 3000, OY + 300), {"natural": "water", "water": "river"}))     # three kilometres long, three hundred metres wide
 
     def collect(self):
-        return names.collect(self.osm, [], FLAT, **QUIET)
+        return names.collect(CITY, self.osm, [], FLAT, **QUIET)
 
     def assertOnBank(self, rows, points, k):
         """Everything drawn for the thing in row `k` lies on the bank of the sheet, to the metre; and it comes in pieces."""
@@ -251,7 +253,7 @@ class LandmarkTest(unittest.TestCase):
                  {"id": "2-03", "title": "六和塔·钱塘江大桥", "group": "山水", "x": OX + 5000, "y": OY, "ground": 30.0, "parts": []}]
 
     def test_the_landmarks_are_there_under_their_titles_and_the_parts_of_them(self):
-        rows = names.collect(Layers(), self.LANDMARKS, FLAT, **QUIET)[0]
+        rows = names.collect(CITY, Layers(), self.LANDMARKS, FLAT, **QUIET)[0]
         bridge, pagoda = at(rows, "断桥残雪")[0], at(rows, "六和塔·钱塘江大桥")[0]
         self.assertEqual([rows["kinds"][bridge], rows["landmark"][bridge], rows["z"][bridge]], [LANDMARK, "1-01", 12.0])
         self.assertEqual((rows["x"][pagoda], rows["landmark"][pagoda]), (round(OX + 5000, 1), "2-03"))
@@ -262,14 +264,14 @@ class LandmarkTest(unittest.TestCase):
         osm = Layers()
         osm.buildings += [piece(-20, -20, 20, 20, "断桥残雪", building="yes"), piece(400, 0, 440, 40, "断桥残雪", building="yes")]
         osm.places += [(Point(OX + 20, OY + 20), {"name": "六和塔", "kind_key": "man_made", "kind": "tower"})]
-        rows = names.collect(osm, self.LANDMARKS, FLAT, **QUIET)[0]
+        rows = names.collect(CITY, osm, self.LANDMARKS, FLAT, **QUIET)[0]
         self.assertEqual([rows["kinds"][k] for k in at(rows, "断桥残雪")], [LANDMARK, BUILDING])   # the one under it gives way; the other is kept
         self.assertEqual([rows["kinds"][k] for k in at(rows, "六和塔")], [PLACE])       # five kilometres from the pagoda, a tower of that name is not it
 
     def test_a_road_named_as_the_landmark_keeps_its_whole_course(self):
         osm = Layers()
         osm.roads += [way(0, -200, 0, 200, "断桥残雪", highway="steps", bridge="yes")]
-        rows = names.collect(osm, self.LANDMARKS, FLAT, **QUIET)[0]
+        rows = names.collect(CITY, osm, self.LANDMARKS, FLAT, **QUIET)[0]
         self.assertEqual([rows["kinds"][k] for k in at(rows, "断桥残雪")], [LANDMARK, ROAD])   # the list's view of the bridge, and its course to draw
 
     def test_a_yard_s_track_is_left_out_and_a_line_is_kept(self):
@@ -278,16 +280,16 @@ class LandmarkTest(unittest.TestCase):
             tags = {"railway": "rail", "name": name, **({"service": service} if service else {})}
             osm.rail.append((LineString([(OX, OY + 3000), (OX + 400, OY + 3000)]), tags))
         osm.rail.append((LineString([(OX, OY + 4000), (OX + 400, OY + 4000)]), {"railway": "subway", "name": "杭州地铁1号线"}))
-        rows = names.collect(osm, [], FLAT, **QUIET)[0]
+        rows = names.collect(CITY, osm, [], FLAT, **QUIET)[0]
         self.assertEqual(sorted(rows["names"]), sorted(["沪昆线", "杭州地铁1号线"]))
         self.assertEqual([said(rows, k) for k in at(rows, "沪昆线")], ["铁路"])
 
     def test_an_alias_is_found_by_and_has_to_point_at_something(self):
-        rows = names.collect(Layers(), self.LANDMARKS, FLAT, {"断桥": "断桥残雪", "之江大桥": "六和塔·钱塘江大桥"}, **QUIET)[0]
+        rows = names.collect(CITY, Layers(), self.LANDMARKS, FLAT, {"断桥": "断桥残雪", "之江大桥": "六和塔·钱塘江大桥"}, **QUIET)[0]
         self.assertEqual(rows["also"][str(at(rows, "断桥残雪")[0])], "断桥")
         self.assertEqual(rows["also"][str(at(rows, "六和塔·钱塘江大桥")[0])], "六和塔;钱塘江大桥;之江大桥")
         with self.assertRaises(SystemExit):
-            names.collect(Layers(), self.LANDMARKS, FLAT, {"小莲花": "网球中心"}, **QUIET)
+            names.collect(CITY, Layers(), self.LANDMARKS, FLAT, {"小莲花": "网球中心"}, **QUIET)
 
 
 class FileTest(unittest.TestCase):
@@ -295,7 +297,7 @@ class FileTest(unittest.TestCase):
         osm = Layers()
         osm.roads += [way(0, 0, 400, 0, "文三路", highway="secondary"), way(0, 0, 400, 0, "文三路", highway="secondary", **{"name:en": "Wensan Road", "alt_name": "文三街"})]
         osm.buildings += [piece(0, 1000, 60, 1040, "市民中心", building="yes")]
-        columns, points = names.collect(osm, LandmarkTest.LANDMARKS, FLAT, **QUIET)
+        columns, points = names.collect(CITY, osm, LandmarkTest.LANDMARKS, FLAT, **QUIET)
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder) / "names.bin"
             out.write_bytes(container([(b"NAME", json.dumps(columns, ensure_ascii=False, separators=(",", ":")).encode("utf-8")), (b"LINE", points.tobytes())]))

@@ -1,0 +1,535 @@
+{
+ "_comment": "杭州的地标。每一处：在 OSM 的哪一层里按名字找哪个要素（tag 用来在同名的要素里挑，可省），用哪个模型、多大（kit，可省：那里不搭东西，只飞过去看），模型周围多少米内画的楼让位（clear），飞到那里时的像素比例（view.scale；offset 是取景时画面中心离它的位置，米，向右、向上），一句话（note）。parts 是跟着它一起搭的，写法相同。place 说站在要素的哪一侧：西溪取公园东侧四成的代表点。坐标由管线从 OSM 查出来，这里不写。要加一处，在这里添一行，重跑 `python -m pixelcity.build_all --city hz --only landmarks`。",
+ "groups": [
+  "西湖",
+  "山水",
+  "运河",
+  "现代"
+ ],
+ "landmarks": [
+  {
+   "title": "断桥残雪",
+   "group": "西湖",
+   "layer": "roads",
+   "name": "断桥",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "kit": {
+    "model": "archBridge",
+    "length": 105,
+    "width": 8,
+    "rise": 3.6
+   },
+   "clear": 9,
+   "view": {
+    "scale": 2.4
+   },
+   "note": "白堤东端的单孔石拱桥，西湖十景“断桥残雪”。"
+  },
+  {
+   "title": "保俶塔",
+   "group": "西湖",
+   "layer": "places",
+   "name": "保俶塔",
+   "tag": [
+    "man_made",
+    "tower"
+   ],
+   "kit": {
+    "model": "pagoda",
+    "storeys": 7,
+    "width": 10,
+    "storeyHeight": 4.8,
+    "eave": 0.3,
+    "taper": 0.07
+   },
+   "clear": 40,
+   "view": {
+    "scale": 2.6
+   },
+   "note": "宝石山上的七层砖塔，高约 45 米，西湖北岸的标志。"
+  },
+  {
+   "title": "雷峰塔",
+   "group": "西湖",
+   "layer": "buildings",
+   "name": "雷峰塔",
+   "tag": [
+    "building",
+    "pagoda"
+   ],
+   "kit": {
+    "model": "pagoda",
+    "storeys": 5,
+    "width": 46,
+    "storeyHeight": 7.6,
+    "platform": 5
+   },
+   "clear": 80,
+   "view": {
+    "scale": 1.8
+   },
+   "note": "夕照山上的五层八面塔，高 71.7 米，“雷峰夕照”。"
+  },
+  {
+   "title": "三潭印月·湖心亭",
+   "group": "西湖",
+   "layer": "places",
+   "name": "三潭印月",
+   "tag": [
+    "tourism",
+    "attraction"
+   ],
+   "view": {
+    "scale": 0.9
+   },
+   "note": "湖中小岛，与北面的湖心亭隔水相望；三座石塔立于岛南。"
+  },
+  {
+   "title": "苏堤六桥",
+   "group": "西湖",
+   "layer": "roads",
+   "name": "苏堤",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "view": {
+    "scale": 0.32
+   },
+   "note": "贯穿西湖南北的长堤，2.8 公里，六座石拱桥。",
+   "parts": [
+    {
+     "title": "映波桥",
+     "layer": "roads",
+     "name": "映波桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    },
+    {
+     "title": "锁澜桥",
+     "layer": "roads",
+     "name": "锁澜桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    },
+    {
+     "title": "望山桥",
+     "layer": "roads",
+     "name": "望山桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    },
+    {
+     "title": "压堤桥",
+     "layer": "roads",
+     "name": "压堤桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    },
+    {
+     "title": "东浦桥",
+     "layer": "roads",
+     "name": "东浦桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    },
+    {
+     "title": "跨虹桥",
+     "layer": "roads",
+     "name": "跨虹桥",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 40,
+      "width": 6,
+      "rise": 2.6
+     },
+     "clear": 9
+    }
+   ]
+  },
+  {
+   "title": "孤山",
+   "group": "西湖",
+   "layer": "places",
+   "name": "孤山",
+   "tag": [
+    "place",
+    "island"
+   ],
+   "view": {
+    "scale": 1.3
+   },
+   "note": "湖中唯一的岛，平湖秋月、西泠印社、浙江省博物馆都在上面。"
+  },
+  {
+   "title": "曲院风荷",
+   "group": "西湖",
+   "layer": "places",
+   "name": "曲院风荷",
+   "tag": [
+    "tourism",
+    "viewpoint"
+   ],
+   "view": {
+    "scale": 1.3
+   },
+   "note": "西湖西北的荷塘，“曲院风荷”。"
+  },
+  {
+   "title": "花港观鱼",
+   "group": "西湖",
+   "layer": "places",
+   "name": "花港观鱼",
+   "tag": [
+    "tourism",
+    "viewpoint"
+   ],
+   "view": {
+    "scale": 1.3
+   },
+   "note": "苏堤南口西侧的园林，“花港观鱼”。"
+  },
+  {
+   "title": "柳浪闻莺",
+   "group": "西湖",
+   "layer": "places",
+   "name": "柳浪闻莺",
+   "tag": [
+    "tourism",
+    "viewpoint"
+   ],
+   "view": {
+    "scale": 1.3
+   },
+   "note": "东南岸的柳林，“柳浪闻莺”。"
+  },
+  {
+   "title": "净慈寺",
+   "group": "西湖",
+   "layer": "places",
+   "name": "净慈寺",
+   "tag": [
+    "amenity",
+    "place_of_worship"
+   ],
+   "view": {
+    "scale": 1.6
+   },
+   "note": "南屏山下的古寺，雷峰塔对面，“南屏晚钟”。"
+  },
+  {
+   "title": "吴山城隍阁",
+   "group": "西湖",
+   "layer": "buildings",
+   "name": "城隍阁",
+   "tag": [
+    "building",
+    "yes"
+   ],
+   "kit": {
+    "model": "pavilionTower",
+    "storeys": 3,
+    "width": 40,
+    "storeyHeight": 8.5
+   },
+   "clear": 95,
+   "view": {
+    "scale": 2.4
+   },
+   "note": "吴山之巅的三层楼阁，高 41.6 米，俯瞰西湖和老城。"
+  },
+  {
+   "title": "湖滨",
+   "group": "西湖",
+   "layer": "places",
+   "name": "三公园",
+   "tag": [
+    "leisure",
+    "park"
+   ],
+   "view": {
+    "scale": 1.6
+   },
+   "note": "湖滨的湖岸步道，音乐喷泉所在。"
+  },
+  {
+   "title": "灵隐寺·飞来峰",
+   "group": "山水",
+   "layer": "buildings",
+   "name": "大雄宝殿",
+   "tag": [
+    "building",
+    "yes"
+   ],
+   "view": {
+    "scale": 1.3
+   },
+   "note": "灵隐寺的主殿，飞来峰下。"
+  },
+  {
+   "title": "龙井茶园",
+   "group": "山水",
+   "layer": "places",
+   "name": "茶博物馆",
+   "tag": [
+    "tourism",
+    "museum"
+   ],
+   "view": {
+    "scale": 0.7
+   },
+   "note": "龙井茶园：狮峰、龙井村一带的茶山。"
+  },
+  {
+   "title": "六和塔·钱塘江大桥",
+   "group": "山水",
+   "layer": "buildings",
+   "name": "六和塔",
+   "tag": [
+    "building",
+    "pagoda"
+   ],
+   "kit": {
+    "model": "pagoda",
+    "storeys": 13,
+    "width": 32,
+    "storeyHeight": 3.0,
+    "eave": 0.5,
+    "platform": 1
+   },
+   "clear": 60,
+   "view": {
+    "scale": 1.0,
+    "offset": [
+     60,
+     -230
+    ]
+   },
+   "note": "钱塘江边的十三层八面塔，高 59.9 米；脚下的钱塘江大桥建于 1937 年。",
+   "parts": [
+    {
+     "title": "钱塘江大桥",
+     "layer": "roads",
+     "name": "钱塘江大桥",
+     "tag": [
+      "bridge",
+      "yes"
+     ],
+     "kit": {
+      "model": "trussBridge",
+      "length": 1453,
+      "width": 11,
+      "deckHeight": 9,
+      "truss": 10
+     },
+     "clear": 9
+    }
+   ]
+  },
+  {
+   "title": "西溪湿地东区",
+   "group": "山水",
+   "layer": "places",
+   "name": "西溪国家湿地公园",
+   "tag": [
+    "boundary",
+    "national_park"
+   ],
+   "view": {
+    "scale": 0.6
+   },
+   "note": "西溪湿地东区，水道与池塘交错。",
+   "place": {
+    "side": "east",
+    "share": 0.6
+   }
+  },
+  {
+   "title": "拱宸桥·桥西直街",
+   "group": "运河",
+   "layer": "roads",
+   "name": "拱宸桥",
+   "tag": [
+    "highway",
+    "steps"
+   ],
+   "kit": {
+    "model": "archBridge",
+    "length": 92,
+    "width": 7,
+    "rise": 6.5,
+    "arches": [
+     [
+      0.08,
+      0.3
+     ],
+     [
+      0.36,
+      0.64
+     ],
+     [
+      0.7,
+      0.92
+     ]
+    ]
+   },
+   "clear": 9,
+   "view": {
+    "scale": 2.2
+   },
+   "note": "京杭大运河最南端的三孔石拱桥，桥西是桥西直街。"
+  },
+  {
+   "title": "大兜路·小河直街",
+   "group": "运河",
+   "layer": "roads",
+   "name": "小河直街",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "view": {
+    "scale": 1.5
+   },
+   "note": "运河边的历史街区，小河直街与大兜路。"
+  },
+  {
+   "title": "武林门码头·西湖文化广场",
+   "group": "运河",
+   "layer": "places",
+   "name": "水上巴士-武林门站",
+   "tag": [
+    "amenity",
+    "ferry_terminal"
+   ],
+   "view": {
+    "scale": 1.2
+   },
+   "note": "武林门码头与西湖文化广场。"
+  },
+  {
+   "title": "钱江新城",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "市民中心",
+   "tag": [
+    "building",
+    "yes"
+   ],
+   "view": {
+    "scale": 0.6
+   },
+   "note": "钱江新城：市民中心、来福士双塔、大剧院与国际会议中心。"
+  },
+  {
+   "title": "奥体中心",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "奥体中心",
+   "kit": {
+    "model": "lotus",
+    "a": 150,
+    "b": 160
+   },
+   "clear": 290,
+   "view": {
+    "scale": 0.6
+   },
+   "note": "“大莲花”，2022 年亚运会主场馆。"
+  },
+  {
+   "title": "河坊街·南宋御街",
+   "group": "现代",
+   "layer": "roads",
+   "name": "河坊街",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "view": {
+    "scale": 1.7
+   },
+   "note": "吴山脚下的老街，与南宋御街（中山中路）相交。"
+  },
+  {
+   "title": "杭州东站",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "杭州东",
+   "tag": [
+    "building",
+    "train_station"
+   ],
+   "view": {
+    "scale": 0.5
+   },
+   "note": "杭州东站，亚洲最大的铁路枢纽之一。"
+  },
+  {
+   "title": "阿里巴巴西溪园区",
+   "group": "现代",
+   "layer": "land",
+   "name": "阿里巴巴西溪A区",
+   "tag": [
+    "landuse",
+    "commercial"
+   ],
+   "view": {
+    "scale": 0.8
+   },
+   "note": "阿里巴巴西溪园区。"
+  }
+ ]
+}

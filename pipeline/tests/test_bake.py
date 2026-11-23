@@ -14,7 +14,9 @@ import shapely
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from hz import bake, compact, region, scene
+from pixelcity import bake, city, compact, scene
+
+CITY = city.load("hz")          # these tests are written against Hangzhou: its places, its names
 
 
 def triangle_area(points):
@@ -25,7 +27,7 @@ def triangle_area(points):
 class CoarseMeshTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        with open(region.WORK / "buildings.pkl", "rb") as f:
+        with open(CITY.work / "buildings.pkl", "rb") as f:
             buildings = pickle.load(f)
         # a spread of ordinary buildings, plus the largest outlines and those with several parts
         order = sorted(range(len(buildings)), key=lambda k: -buildings[k]["geom"].area)
@@ -263,7 +265,7 @@ class SurfaceTest(unittest.TestCase):
         for a, b, u, v in [(2, 3, 0.2, 0.3), (4, 1, 0.8, 0.6), (6, 6, 0.5, 0.5)]:
             expected = self.cell(corner(a, b), corner(a + 1, b), corner(a, b + 1), corner(a + 1, b + 1), u, v)
             self.assertAlmostEqual(float(read([1000 + (a + u) * 125.0], [1000 + (b + v) * 125.0])[0]), float(expected), places=6, msg=(a, b, u, v))
-        west, south, across, up = bake.coarse_grid_extent()
+        west, south, across, up = bake.coarse_grid_extent(CITY)
         self.assertEqual((west % 125.0, south % 125.0), (0.0, 0.0))
         self.assertGreater(across * up, 100)
 
@@ -341,6 +343,17 @@ class CompactFormsTest(unittest.TestCase):
         self.assertEqual(back.tolist(), indices.tolist())
         self.assertTrue(numpy.isclose(corners[:, 2], deck[:, 2], atol=0.063).all())
         self.assertEqual(corners[:, 3].tolist(), deck[:, 3].tolist())
+
+    def test_a_deck_corner_s_spare_byte_is_nought(self):
+        # a deck's record is eight bytes for seven. The spare one was once left as whatever was in the memory, so
+        # that the same bake was not the same bytes every time it was run (D069). The page never reads it, but a
+        # file is named by its bytes when it is published.
+        deck = numpy.array([[0, 0, 11.25, 5, 0], [10, 0, 11.25, 5, 0], [10, 10, 11.3, 12, 1], [0, 10, 11.25, 5, 0]], dtype="<f4")
+        mesh = scene.mesh_section(deck, numpy.arange(4, dtype=numpy.uint32), True)
+        records = numpy.frombuffer(mesh, dtype="u1", offset=9, count=4 * 8).reshape(4, 8)
+        self.assertEqual(records[:, 6].tolist(), [0, 0, 0, 0])
+        self.assertEqual(records[:, 7].tolist(), [5, 5, 12, 5])                # and the class is where the page reads it
+        self.assertEqual(mesh, scene.mesh_section(deck, numpy.arange(4, dtype=numpy.uint32), True))
 
     def test_trees(self):
         records = numpy.zeros(3, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("species", "u1"), ("size", "u1"), ("seed", "u1"), ("kind", "u1")])

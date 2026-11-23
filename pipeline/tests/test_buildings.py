@@ -12,7 +12,7 @@ from shapely.geometry import box
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from hz.buildings import doubles
+from pixelcity.buildings import doubles
 
 
 def record(geom, height, origin="globfp"):

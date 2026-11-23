@@ -1,0 +1,53 @@
+{
+ "_comment": "一座城一份：范围、投影、要哪些原始数据，以及这座城自己的规矩（look）。管线和发布脚本都读它。再加一座城，就再建一个 cities/<id>/。",
+ "id": "hz",
+ "name": "杭州",
+ "subtitle": "主城区",
+ "bounds": [120.0, 30.12, 120.4, 30.44],
+ "epsg": 32651,
+ "origin": [200000.0, 3340000.0],
+ "sources": {
+  "_comment": "bounds 是主城区的经纬度：西、南、东、北。epsg 是投影（这里用的是 UTM 51N，单位米，北朝上），origin 是这个世界坐标的原点：页面里的米是从它量起的。sources 是四样原始数据：OSM 提取包的地址；楼高数据集 3D-GloBFP 的一块瓦片和它当时的下载地址（figshare 不让脚本下载，要手工放进 data/raw/buildings/<瓦片号>/）；地形 Copernicus GLO-30 和土地覆盖 ESA WorldCover 各一块的编号（各覆盖一个经纬度的方格）。后两样目前只支持一块。来源与许可见 docs/DATA-SOURCES.md。",
+  "osm": "https://download.geofabrik.de/asia/china/zhejiang/zhejiang-latest.osm.pbf",
+  "buildings": {
+   "tile": "2434",
+   "url": "https://figshare.com/ndownloader/files/54116888"
+  },
+  "dem": "N30_00_E120_00",
+  "landcover": "N30E120"
+ },
+ "look": {
+  "_comment": "这座城自己的规矩，画法上和别的城不一样的地方。historic：白墙黑瓦的老街区，一圈一处（at 是圆心，radius 是半径，公里）；village 为 true 的圈里房子一律矮（数据集给的楼高在那儿不可信）。tea：茶山，卫星图把茶树当成树，圈内的“树”画成茶。modern：玻璃幕墙的商务区，圈内的高楼多按写字楼画。templeGrounds：寺庙用地，OSM 只标了寺庙、没标殿堂，圈内没有名字的轮廓按殿堂画。rivers：名字里带这些词的水道用江水的土黄色，其余标成“河”的按运河的青绿画。water：报告里量面积的那片水。这些圈是按知名地名画的，不是官方边界。",
+  "rivers": ["钱塘", "之江"],
+  "water": {"name": "西湖", "at": [120.145, 30.245]},
+  "historic": [
+   {"at": [120.1465, 30.246], "radius": 1.1, "village": false, "note": "西湖北岸：孤山、北山街"},
+   {"at": [120.148, 30.234], "radius": 0.95, "village": false, "note": "雷峰、南屏，湖南岸"},
+   {"at": [120.1443, 30.2313], "radius": 0.2, "village": true, "note": "净慈寺和湖路与山之间的邻居：不出高楼"},
+   {"at": [120.16, 30.241], "radius": 0.7, "village": false, "note": "河坊街、南宋御街、吴山"},
+   {"at": [120.1, 30.242], "radius": 1.1, "village": true, "note": "灵隐、永福、天竺：寺庙和其间的村子"},
+   {"at": [120.122, 30.217], "radius": 1.3, "village": true, "note": "龙井、梅家坞、满觉陇：茶村"},
+   {"at": [120.149, 30.316], "radius": 0.55, "village": false, "note": "拱宸桥和桥西"},
+   {"at": [120.144, 30.308], "radius": 0.35, "village": false, "note": "小河直街"},
+   {"at": [120.14, 30.325], "radius": 0.35, "village": false, "note": "大兜路"},
+   {"at": [120.185, 30.322], "radius": 0.8, "village": true, "note": "西溪的村子，塘栖一带"},
+   {"at": [120.074, 30.272], "radius": 1.4, "village": true, "note": "西溪湿地"}
+  ],
+  "tea": [
+   {"at": [120.1156, 30.2266], "radius": 1.6, "note": "与 OSM 景区“虎跑龙井景区”（8.4 平方公里）面积相等的圆：龙井、梅家坞、满觉陇"}
+  ],
+  "modern": [
+   {"at": [120.212, 30.249], "radius": 1.7, "note": "钱江新城"},
+   {"at": [120.22, 30.228], "radius": 2.2, "note": "奥体中心、滨江"},
+   {"at": [120.167, 30.276], "radius": 1.1, "note": "武林"},
+   {"at": [120.03, 30.282], "radius": 2.4, "note": "未来科技城"}
+  ],
+  "templeGrounds": [
+   {"at": [120.14434, 30.23132], "radius": 0.1, "note": "净慈寺"}
+  ]
+ },
+ "tour": {
+  "_comment": "导览：沿着地标表第一组的地标依次飞过去。label 是按钮上的字。没有这一项就不出导览按钮。",
+  "label": "西湖导览"
+ }
+}
