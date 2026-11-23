@@ -15,7 +15,7 @@ import time
 
 import numpy
 
-from . import classify, globfp, ground, landcover, landmarks, region, scene, terrain
+from . import classify, globfp, ground, landcover, landmarks, names, region, scene, terrain
 from . import trees as tree_data
 from .buildings import unify
 from .osm_extract import Layers
@@ -85,12 +85,17 @@ def step_landmarks(log):
     landmarks.place(grid, info, log=log)
 
 
+def step_names(log):
+    # looked up in the map and placed on the ground: the page searches by it and flies to what it finds
+    names.build(log=log)
+
+
 def step_bake(log):
     scene.bake(log=log)
 
 
 STEPS = {"osm": step_osm, "globfp": step_globfp, "buildings": step_buildings, "terrain": step_terrain, "landcover": step_landcover,
-         "ground": step_ground, "trees": step_trees, "landmarks": step_landmarks, "bake": step_bake}
+         "ground": step_ground, "trees": step_trees, "landmarks": step_landmarks, "names": step_names, "bake": step_bake}
 
 
 def run(first="osm", last="bake", log=print):

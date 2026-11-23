@@ -1,16 +1,25 @@
-// The page around the map: the list of landmarks, the seasons, the tour, the compass, the readout, and the
-// flights between places. Quiet, as the pages of pixel-plays are: white paper, small monospace type, words
-// that darken when pointed at, nothing framed.
+// The page around the map: the list of landmarks, the search by name, the seasons, the tour, the compass, the
+// readout, and the flights between places. Quiet, as the pages of pixel-plays are: white paper, small monospace
+// type, words that darken when pointed at, nothing framed.
+
+import { course, said, search } from './world/names.js';
+import { Mark } from './render/mark.js';
 
 const SEASON_LABELS = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
 const PIXEL_SIZES = ['细', '中', '粗'];       // how big a pixel is on the page: the frame is cut into that many more or fewer
 const TOP_DOWN = 1.483;                      // pitch of the top-down view, 85 degrees
+// how close the flight to a thing found by name comes when the thing is a point: by what it is. A line and what
+// covers ground are held whole instead, as far out as they are long
+const CLOSE = { 车站: 1.6, 公交枢纽站: 1.6, 码头: 1.6, 游艇码头: 1.6, 船台: 1.6, 洞口: 1.6, 喷泉: 1.6, 雕塑: 1.6, 纪念碑: 1.6, 界碑: 1.6, 界标: 1.6, 泉: 1.2, 观景点: 1.2,
+                山峰: 0.6, 山: 0.6, 鞍部: 0.6, 岛: 0.3, 国家公园: 0.3, 保护区: 0.3, '村庄、社区': 0.4, 片区: 0.4, 街区: 0.4, 街道: 0.35, 镇: 0.25, 城市: 0.12 };
+const STREET = 1.2;                          // anything else: a street's view
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = t => t * t * (3 - 2 * t);
 const lerpAngle = (a, b, t) => a + ((((b - a) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI) * t;
 
-// app: { camera, renderer, world, landmarks, seasons, season(), setSeason(name), overview(), frame: {W, H} }
+// app: { camera, renderer, world, canvas, landmarks, seasons, season(), setSeason(name), overview(), overviewTarget(),
+//        names: { load() }, quiet }
 export function createInterface(app) {
   const { camera, landmarks } = app;
   const $ = id => document.getElementById(id);
@@ -22,6 +31,7 @@ export function createInterface(app) {
   let tour = null;              // { list, index, holdUntil } the tour in progress
   let here = null;              // the landmark the camera is at, if any
   let anchor = null;            // the landmark last flown to: the camera turns around its middle until the map is panned
+  let found = null;             // the thing last found by name that is not one of the list's landmarks: drawn over the map, and named, until it is cleared
   let pitchBeforeTop = Math.PI / 6;
   const hooks = { dirty: () => {}, stop: () => {} };
 
@@ -74,6 +84,7 @@ export function createInterface(app) {
   // From where the camera is to a place: the position and the angle ease in and out, and the zoom dips
   // out a little on the way when the road is long, so that the city is seen to pass underneath.
   function goTo(pose, seconds = 1.8, then = null) {
+    if (found && pose.landmark !== found) clearFound();     // one thing is drawn over the map at a time
     const from = { x: camera.x, y: camera.y, scale: camera.scale, pitch: camera.pitch, yaw: camera.yaw };
     const to = { ...from, ...pose };
     const distance = Math.hypot(to.x - from.x, to.y - from.y);
@@ -175,6 +186,7 @@ export function createInterface(app) {
     here = null;
     anchor = null;
     hideNote();
+    clearFound();
     // back to the whole city, by a flight like any other
     goTo({ ...app.overviewTarget(), landmark: null }, 1.6);
   });
@@ -190,26 +202,170 @@ export function createInterface(app) {
     location.replace(url);
   });
 
-  // whatever the user does to the map ends a flight and the tour, and puts the note away
+  // whatever the user does to the map ends a flight and the tour, and puts the note away -- except for a thing found
+  // by name, which stays drawn and stays named until it is cleared: it is what the map is being looked at around
   function interrupted() {
     stopTour();
     flight = null;
-    if (here) {
+    if (here && !found) {
       here = null;
       hideNote();
     }
   }
   for (const type of ['pointerdown', 'wheel']) app.canvas.addEventListener(type, interrupted, { passive: true });
+  app.canvas.addEventListener('pointerdown', closeSearch, { passive: true });
+  // keys typed into the box are the box's own
+  const typing = e => e.target instanceof Element && e.target.closest('input, textarea');
   window.addEventListener('keydown', e => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && e.target !== findBox) { e.preventDefault(); findBox.focus(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
     const key = e.key.toLowerCase();
+    if (key === '/') { e.preventDefault(); findBox.focus(); return; }           // a line to write a name in
     const digit = '1234'.indexOf(key);
     if (digit >= 0 && app.seasons[digit]) { setSeason(app.seasons[digit]); return; }
     if (key === 'm') { topDown(camera.pitch < 1.2); return; }
     if (key === 't') { if (tour) stopTour(); else startTour(); return; }
     if (key === 'r') { $('home').click(); return; }
-    if (key === 'escape') { stopTour(); menu.classList.remove('open'); return; }
+    if (key === 'escape') { stopTour(); menu.classList.remove('open'); closeSearch(); clearFound(); return; }
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) interrupted();
+  });
+
+  // ---- finding a place by name ----------------------------------------------------------------------------
+  // The words in the box are answered from the index of names the pipeline baked (app/src/world/names.js), fetched
+  // the first time it is wanted. What is chosen is flown to and held in the middle of the frame, drawn over the map,
+  // and named in the note until it is cleared.
+  const findBox = $('find'), answers = $('results');
+  const hex = text => text.trim().match(/\w\w/g).map(digit => parseInt(digit, 16));
+  const mark = new Mark($('mark'), camera.width, camera.height, { ink: hex(getComputedStyle(document.documentElement).getPropertyValue('--ink')), paper: [255, 255, 255] });
+  let names = null;            // the index, once it is here
+  let trouble = null;          // why it never came
+  let waiting = null;          // its fetching, once begun
+  let results = [];            // what answers the words in the box
+  let current = 0;             // which of them the arrow keys are on
+
+  // the index, fetched once: when the box is first used, or before then once the page has had a moment to itself
+  function index() {
+    if (!waiting) {
+      waiting = app.names.load().then(book => { names = book; }, error => { trouble = error.message; }).then(answer);
+    }
+    return waiting;
+  }
+  if (!app.quiet) setTimeout(index, 3000);
+
+  function waitingRow(text) {
+    const li = document.createElement('li');
+    li.className = 'waiting';
+    li.textContent = text;
+    answers.append(li);
+  }
+
+  // the box's words, answered
+  function answer() {
+    const words = findBox.value.trim();
+    results = words && names ? search(names, words) : [];
+    current = 0;
+    answers.replaceChildren();
+    if (!words) return;
+    if (!names) { waitingRow(trouble ? `名字索引读不到：${trouble}` : '载入中'); return; }
+    if (!results.length) { waitingRow('地图数据里没有这个名字'); return; }
+    // where more than one thing in the list bears one name, each says where it is
+    const twice = new Set(results.filter((r, k) => results.some((o, j) => j !== k && o.name === r.name)).map(r => r.name));
+    for (const [k, result] of results.entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = k === current ? 'current' : '';
+      const title = document.createElement('span'), what = document.createElement('span');
+      title.textContent = result.name + (twice.has(result.name) && result.near ? `（${result.near}）` : '');
+      what.className = 'what';
+      what.textContent = said(names, result.k);
+      button.append(title, what);
+      button.addEventListener('pointerenter', () => choose(k));
+      button.addEventListener('click', () => { pick(k); findBox.blur(); });
+      const li = document.createElement('li');
+      li.append(button);
+      answers.append(li);
+    }
+  }
+
+  function choose(k) {
+    current = (k + results.length) % results.length;
+    Array.from(answers.children).forEach((li, j) => li.firstElementChild?.classList.toggle('current', j === current));
+    answers.children[current]?.firstElementChild?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function closeSearch() {
+    results = [];
+    current = 0;
+    answers.replaceChildren();
+  }
+
+  // the pose that holds a thing found by name: itself at the middle of the frame, and with it as much of the frame
+  // taken up as it has extent
+  function hold(target, result) {
+    const centre = place(target, camera.pitch);           // the thing's own point at the middle of the frame (see place)
+    const points = result.line ? course(names, result.k) : result.box ? [result.box[0], result.box[1], target.ground, result.box[2], result.box[1], target.ground,
+      result.box[2], result.box[3], target.ground, result.box[0], result.box[3], target.ground] : null;
+    if (!points) return { ...centre, scale: CLOSE[result.label] ?? STREET };
+    // its extent on the page at one pixel a metre, seen from there
+    let u0 = Infinity, u1 = -Infinity, s0 = Infinity, s1 = -Infinity;
+    for (let k = 0; k < points.length; k += 3) {
+      if (!Number.isFinite(points[k])) continue;                         // a break between two pieces of a course
+      const { u, v } = camera.about(centre.x, centre.y, points[k], points[k + 1]);
+      const s = v * camera.sinPitch - points[k + 2] * camera.cosPitch;   // where it comes on the page, before the zoom
+      u0 = Math.min(u0, u); u1 = Math.max(u1, u); s0 = Math.min(s0, s); s1 = Math.max(s1, s);
+    }
+    const [least, most] = result.line ? [0.004, 1.6] : [0.25, 3];
+    const scale = Math.min(most, Math.max(least, Math.min(0.86 * camera.width / (u1 - u0), 0.8 * camera.height / (s1 - s0))));
+    // the middle of its extent, not of its own point, at the middle of the frame: the camera moves by that on the page's two axes
+    const du = (u0 + u1) / 2, dv = (s0 + s1) / 2 / camera.sinPitch;
+    const rx = (du + dv) * Math.SQRT1_2, ry = (dv - du) * Math.SQRT1_2;
+    return { x: centre.x + rx * camera.cos + ry * camera.sin, y: centre.y - rx * camera.sin + ry * camera.cos, scale };
+  }
+
+  function clearFound() {
+    if (!found) return;
+    const was = found;
+    found = null;
+    mark.hide();
+    if (here === was) {
+      here = null;
+      hideNote();
+    }
+  }
+
+  // fly to one of the answers. A landmark of the list goes the way its name in the list goes; anything else is a
+  // landmark of a moment, to be turned about and named like one
+  function pick(k, seconds = 1.8) {
+    const result = results[k];
+    closeSearch();
+    if (!result) return null;
+    stopTour();
+    if (result.landmark) {
+      const landmark = landmarks.find(l => l.id === result.landmark);
+      goTo({ ...place(landmark), landmark }, seconds);
+      return result;
+    }
+    found = { title: result.name, note: [said(names, result.k), result.near].filter(Boolean).join(' · '), x: result.x, y: result.y, ground: result.z, bed: 0, focus: 0, view: {} };
+    mark.show({ x: found.x, y: found.y, z: found.ground }, result.line ? course(names, result.k) : null);
+    mark.paint(camera);
+    goTo({ ...hold(found, result), landmark: found }, seconds);
+    return result;
+  }
+
+  // answered at once with what is here, and again once the index is
+  const asked = () => { answer(); index(); };
+  // the answers to what is already written come back, and the words are chosen whole: writing replaces them
+  findBox.addEventListener('focus', () => { findBox.select(); if (findBox.value.trim()) asked(); });
+  findBox.addEventListener('input', asked);
+  findBox.addEventListener('keydown', e => {
+    if (e.isComposing) return;                                           // an input method's own keys, while a Chinese name is being chosen
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (results.length) choose(current + (e.key === 'ArrowDown' ? 1 : -1)); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(current); findBox.blur(); }
+    else if (e.key === 'Escape') {
+      // the words go first, then the box lets go of the keys
+      e.stopPropagation();
+      if (findBox.value || results.length) { findBox.value = ''; closeSearch(); } else findBox.blur();
+    }
   });
 
   // ---- the note, the readout and the compass -------------------------------------------------------------
@@ -242,6 +398,7 @@ export function createInterface(app) {
     compass.textAlign = 'center';
     compass.textBaseline = 'middle';
     compass.fillText('N', 22 + dx / length * 16, 22 + dy / length * 16);
+    if (found) mark.paint(camera);         // what was found by name, over the frame just made
   }
 
   return {
@@ -264,5 +421,11 @@ export function createInterface(app) {
     startTour, stopTour,
     topDown: on => topDown(on),
     groups,
+    // for tests and the console: the answers to a name, and the flight to the first of them
+    search: async query => { await index(); return search(names, query); },
+    find: async (query, seconds = 1.8) => { findBox.value = query; await index(); answer(); return results.length ? pick(0, seconds) : null; },   // nothing to pick: the box says so
+    found: () => found,
+    mark: () => ({ ...mark.measure(), centre: mark.centre(camera) }),
+    index: () => names,           // the index of names, once it is here (count, bytes, rows, points)
   };
 }

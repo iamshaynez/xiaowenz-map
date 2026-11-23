@@ -24,6 +24,8 @@ from .classify import (
 )
 from .ground import GROUND_COLOURS, Ground
 from .landmarks import cleared_around, cleared_mask
+from . import names
+from .osm_extract import Layers
 from .scene import in_water
 from .terrain import load as load_terrain
 
@@ -186,6 +188,42 @@ def build(log=print):
     add("")
     add("## 可以走线的路和水道\n")
     add("车、船、行人沿烘焙时存下的线走：机动车道（主路、次路、小路、支路）和人行道、小径的中心线，运河与钱塘江的水道中心线，以及西湖上手工画的游船航线。每条线整条属于它中点所在的那块瓦片。\n")
+
+    add("## 名字\n")
+    add("页面搜索用的就是这一份：`data/baked/names.bin`，由 `hz/names.py` 从 OpenStreetMap 的名字生成（含边距的原始数字见下）。楼高数据集不带名字，所以由它补出来的轮廓搜不到。\n")
+    columns, course = names.read()
+    kind_names = {names.LANDMARK: "地标（名录里的 24 处）", names.ROAD: "道路", names.RAIL: "铁路", names.BUILDING: "建筑", names.PLACE: "地点", names.WATER: "水域"}
+    kinds = Counter(columns["kinds"])
+    add(table(["类别", "数量"], [[kind_names[k], f"{v:,}"] for k, v in sorted(kinds.items())]))
+    add("")
+    borne = Counter(columns["names"])
+    aliases = json.loads((region.CURATED / names.ALIASES).read_text(encoding="utf-8"))["aliases"]
+    add(f"- 不同的名字 {len(borne):,} 个；其中 {len({columns['names'][int(k)] for k in columns['near']}):,} 个被相隔 1 公里以上的几样东西共用（两个镇各有一条“人民路”），候选里用最近的村、社区或街道区分。")
+    add(f"- 别名 {len(aliases)} 条（`data/curated/aliases.json`），烘焙时逐条核对，指不到东西就停下。")
+    add(f"- 水面 {len(columns['sheets'])} 处：一条有名字的水道整个躺在一块没有名字的水面里时，这块水面认这条水道的名字，高亮画它的岸（钱塘江、杭甬运河等）。")
+    add(f"- 文件 {(region.BAKED / 'names.bin').stat().st_size / 1e6:.1f} MB，线路共 {len(course):,} 个点；页面打开三秒后取一次，搜索框先用上时就立刻取，不挡第一次出图。")
+    add("")
+
+    osm = Layers.load(region.WORK / "osm.pkl")
+    add("### OpenStreetMap 里有多少东西有名字\n")
+    def named(rows):
+        return sum(1 for _, tags in rows if tags.get("name"))
+    add(table(["", "总数", "有名字", "不同的名字"], [[label, f"{len(rows):,}", f"{named(rows):,}", f"{len({t['name'] for _, t in rows if t.get('name')}):,}"]
+                                                   for label, rows in (("道路（段）", osm.roads), ("建筑轮廓", osm.buildings), ("地点（点和平面上的地名）", osm.places), ("土地利用多边形", osm.land),
+                                                                       ("铁路（段）", osm.rail), ("水面多边形", osm.water), ("水道中心线（段）", osm.water_lines))]))
+    add("")
+    add("路名看等级：\n")
+    length, named_length = Counter(), Counter()
+    for geom, tags in osm.roads:
+        kind = tags.get("highway")
+        length[kind] += geom.length
+        if tags.get("name"):
+            named_length[kind] += geom.length
+    class_names = {"motorway": "高速", "trunk": "快速路", "primary": "主干道", "secondary": "次干道", "tertiary": "支路", "unclassified": "未分级的路", "residential": "住宅区道路",
+                   "service": "服务路", "footway": "人行道", "path": "小径", "pedestrian": "步行街", "cycleway": "自行车道", "steps": "台阶", "living_street": "生活道路", "track": "土路"}
+    add(table(["等级", "有名字的（按长度）"], [[class_names.get(k, k), f"{100 * named_length[k] / length[k]:.0f}%"] for k, _ in length.most_common() if k in class_names and not k.endswith("_link")]))
+    add("")
+    add("所以主路搜得到，小区里的小路和人行道大多搜不到。地铁站的出入口在 OSM 里只有编号（A、B），站名记在站体的轮廓上，索引收站体。\n")
 
     add("## 地标\n")
     landmarks = json.loads((region.CURATED / "landmarks.json").read_text(encoding="utf-8"))["landmarks"]

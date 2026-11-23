@@ -11,8 +11,10 @@
   html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink); }
   body { font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace; overflow: hidden; }
   #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  #stage canvas { grid-area: 1 / 1; }   /* the map, and over it what was found by name: one cell, one over the other */
   canvas#c { display: block; image-rendering: pixelated; touch-action: none; cursor: grab; outline: none; }
   canvas#c:active { cursor: grabbing; }
+  canvas#mark { pointer-events: none; image-rendering: pixelated; }
 
   .panel { position: fixed; pointer-events: none; max-width: min(46vw, 520px); padding: 4px 9px 5px; border-radius: 4px;
           background: rgba(255, 255, 255, 0.84); }   /* the map runs under the words: a sheet of paper behind them */
@@ -27,14 +29,31 @@
   #menu h1 span { color: var(--muted); font-weight: 400; margin-left: 8px; }
   #menu .group { margin: 0 0 2px; }
   #menu .group > span { color: var(--muted); display: inline-block; min-width: 3.2em; }
+  /* finding a place by name: a line to write in, and under it what answers */
+  #search { position: relative; margin: 0 0 6px; pointer-events: auto; }
+  #find { font: inherit; color: var(--ink); background: none; border: 0; border-bottom: 1px dotted var(--muted); border-radius: 0; margin: 0; padding: 2px 0 3px;
+          width: 100%; outline: none; -webkit-appearance: none; appearance: none; }
+  #find::placeholder { color: var(--muted); }
+  #find:focus { border-bottom-color: var(--ink); }
+  #find::-webkit-search-cancel-button, #find::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }   /* the browser's own cross is not the page's */
+  #results { list-style: none; margin: 5px 0 0; padding: 0; max-height: 62vh; overflow-y: auto; }
+  #results button { display: block; width: 100%; padding: 2px 6px; text-align: left; white-space: normal; line-height: 1.35; }
+  #results button.current { background: rgba(28, 27, 25, 0.07); text-decoration: none; }
+  #results .what { color: var(--muted); margin-left: 8px; }
+  #results .waiting { color: var(--muted); padding: 2px 6px; }
   #tools { top: max(10px, env(safe-area-inset-top)); right: max(7px, env(safe-area-inset-right)); text-align: right; }
   #tools .row { margin-bottom: 2px; }
   #tools .row > span { color: var(--muted); }
-  #note { left: max(7px, env(safe-area-inset-left)); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 44px); max-width: min(52vw, 560px); }
+  /* the lower left corner, one over the other: the note that names the place, then the readout. Stacked, because the
+     readout's second line folds at most widths and used to cover the note */
+  #corner { position: fixed; left: max(7px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); display: flex; flex-direction: column;
+            align-items: flex-start; gap: 4px; pointer-events: none; }
+  #corner .panel { position: static; }
+  #note { max-width: min(52vw, 560px); }
   #note[hidden] { display: none; }
   #note b { font-weight: 600; margin-right: 8px; }
   #note span { color: var(--muted); }
-  #readout { left: max(7px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); font-variant-numeric: tabular-nums; max-width: min(46vw, 560px); }
+  #readout { font-variant-numeric: tabular-nums; max-width: min(46vw, 560px); }
   #readout div + div { color: var(--muted); }
   #readout a { color: inherit; text-decoration: none; }
   #compass { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); width: 44px; height: 44px; pointer-events: none; }
@@ -44,9 +63,16 @@
   #toggle { display: none; }
   /* the map on its own, for pictures: ?ui=off */
   body.quiet #menu, body.quiet #tools, body.quiet #readout, body.quiet #compass, body.quiet #hint { visibility: hidden; }   /* the note stays: it names the place */
+  body.quiet #corner { display: block; }   /* and is written where it always was: above where the readout would be */
+  body.quiet #note { position: fixed; left: max(7px, env(safe-area-inset-left)); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 44px); }
 
   @media (max-width: 720px) {
     .panel { max-width: 70vw; }
+    #menu { max-width: min(70vw, calc(100vw - 196px)); z-index: 1; }   /* the box to write in lies whole between the left edge and the tools, and the answers over them */
+    #menu.open { max-width: 70vw; }
+    #results { position: absolute; top: 100%; left: -9px; width: calc(100vw - 14px); margin-top: 4px; padding: 4px 9px 5px; border-radius: 4px;
+               background: rgba(255, 255, 255, 0.84); }                /* the answers come out from under the box, across the page */
+    #results:empty { padding: 0; background: none; }
     #menu h1 span, #hint { display: none; }
     #toggle { display: inline; pointer-events: auto; }
     #menu nav:not(.open) { display: none; }
@@ -56,10 +82,14 @@
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="c" tabindex="0" aria-label="像素杭州：可以旋转、缩放的主城区立体地图"></canvas></div>
+<div id="stage"><canvas id="c" tabindex="0" aria-label="像素杭州：可以旋转、缩放的主城区立体地图"></canvas><canvas id="mark" aria-hidden="true"></canvas></div>
 
 <div id="menu" class="panel">
   <h1>像素杭州 <span>主城区</span><button id="toggle" type="button" aria-expanded="false" aria-controls="landmarks">地名</button></h1>
+  <div id="search" role="search">
+    <input id="find" type="search" placeholder="搜路名、地名" aria-label="搜路名和地名" aria-controls="results" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+    <ol id="results"></ol>
+  </div>
   <nav id="landmarks" aria-label="地标"></nav>
 </div>
 
@@ -69,11 +99,12 @@
   <div class="row"><button id="pixels" type="button">像素</button><button id="home" type="button">全景 R</button></div>
 </div>
 
-<div id="note" class="panel" hidden><b id="note-title"></b><span id="note-text"></span></div>
-
 <canvas id="compass" width="44" height="44" aria-hidden="true"></canvas>
-<div id="hint"><span class="mouse">拖动 平移 · 右键拖动 旋转 / 俯仰 · 滚轮 缩放 · WASD / 方向键 平移</span><span class="touch">单指拖动 平移 · 双指拖动 旋转 / 俯仰 · 双指张开 缩放</span></div>
+<div id="hint"><span class="mouse">拖动 平移 · 右键拖动 旋转 / 俯仰 · 滚轮 缩放 · WASD / 方向键 平移 · / 搜索</span><span class="touch">单指拖动 平移 · 双指拖动 旋转 / 俯仰 · 双指张开 缩放</span></div>
+<div id="corner">
+<div id="note" class="panel" hidden><b id="note-title"></b><span id="note-text"></span></div>
 <div id="readout" class="panel"><div id="readout-line"></div><div id="credits">地图数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 贡献者 · 建筑轮廓与高度 <a href="https://doi.org/10.5281/zenodo.11397014" target="_blank" rel="noopener">3D-GloBFP</a>（CC BY 4.0）· 地形 Copernicus GLO-30 · 土地覆盖 ESA WorldCover</div></div>
+</div>
 
 <script type="module" src="./src/main.js"></script>
 </body>

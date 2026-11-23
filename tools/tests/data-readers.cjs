@@ -177,9 +177,97 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
   }
   for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
+
+  // names.bin: the index the page searches by (pipeline/hz/names.py), column by column, and then finding things by name
+  const file = read('names.bin');
+  assert.ok(file.NAME && file.LINE, 'names.bin has a NAME and a LINE section');
+  const { openNames, search, said, course, KINDS, LANDMARK, ROAD, BUILDING, WATER } = await import(path.join(root, 'app/src/world/names.js'));
+  const book = openNames(file), rows = book.rows, things = rows.names.length;
+  for (const column of ['kinds', 'x', 'y', 'z', 'label', 'size', 'box', 'line', 'landmark']) assert.equal(rows[column].length, things, `a ${column} for every thing`);
+  assert.equal(rows.labels.length, new Set(rows.labels).size, 'every label once');
+  assert.equal(file.LINE.bytes.length, book.points.length / 3 * 10, 'ten bytes a point of a course');
+  const EDGE = 1000 + 2;                                  // things are kept this far outside the region (names.EDGE_M)
+  let drawn = 0, spans = 0;
+  for (let k = 0; k < things; k++) {
+    assert.ok(rows.names[k].trim() === rows.names[k] && rows.names[k].length, `a name, trimmed: ${JSON.stringify(rows.names[k])}`);
+    assert.ok(Number.isInteger(rows.kinds[k]) && rows.kinds[k] >= 0 && rows.kinds[k] <= 5, 'kind 0..5');
+    assert.ok(Number.isInteger(rows.label[k]) && rows.label[k] >= 0 && rows.label[k] < rows.labels.length, 'label into the list');
+    assert.ok(rows.x[k] >= index.bounds[0] - EDGE && rows.x[k] <= index.bounds[2] + EDGE && rows.y[k] >= index.bounds[1] - EDGE && rows.y[k] <= index.bounds[3] + EDGE, `inside the region and its edge: ${rows.names[k]}`);
+    assert.ok(rows.z[k] > -50 && rows.z[k] < 1800 && rows.size[k] >= 0, 'height and size in range');
+    if (rows.box[k]) {
+      const [w, s, e, n] = rows.box[k];
+      assert.ok(w <= e && s <= n && e - w <= 80000 && n - s <= 80000, `a box the right way round: ${rows.names[k]}`);
+    }
+    if (rows.line[k]) {
+      const [first, count] = rows.line[k];
+      assert.equal(first, drawn, `one course after another: ${rows.names[k]}`);
+      const points = course(book, k);
+      assert.equal(points.length, count * 3);
+      let any = false;
+      for (let at = 0; at < points.length; at += 3) {
+        const x = points[at], y = points[at + 1];
+        if (!Number.isFinite(x)) { assert.ok(!Number.isFinite(y), 'a break has neither place'); continue; }   // between two pieces of a course
+        any = true;
+        const [w, s, e, n] = rows.box[k];
+        assert.ok(x >= w - 1 && x <= e + 1 && y >= s - 1 && y <= n + 1 && Number.isFinite(points[at + 2]), `a point of the course inside its box: ${rows.names[k]}`);
+      }
+      assert.ok(any, `a course has points: ${rows.names[k]}`);
+      drawn += count;
+      spans++;
+    } else assert.equal(rows.box[k] !== null, rows.size[k] > 0, 'what covers ground has a box; a point has none');
+    assert.ok(book.sheets.has(k) === (rows.sheets.includes(k)), 'sheets are listed once');
+    if (book.sheets.has(k)) assert.ok(rows.line[k] && rows.box[k] && rows.kinds[k] === WATER, 'a sheet of water is water, with a course');
+  }
+  assert.equal(drawn, book.points.length / 3, 'every point of LINE belongs to a course');
+  for (const k of [...Object.keys(rows.near), ...Object.keys(rows.also)]) assert.ok(Number(k) >= 0 && Number(k) < things && String(Number(k)) === k, 'a row number as JSON writes it');
+  assert.ok(Object.values(rows.also).every(text => text.split(';').every(name => name.trim() === name && name.length)), 'other names, separated by semicolons');
+  // the landmarks of the list are there under their ids, where the bake placed them
+  const placed = JSON.parse(fs.readFileSync(path.join(baked, 'landmarks.json'), 'utf8'));
+  const listed = rows.landmark.flatMap((id, k) => id ? [[id, rows.x[k], rows.y[k], k]] : []);
+  assert.deepEqual(listed.map(([id]) => id).sort(), placed.map(row => row.id).sort(), 'every landmark of the list, once');
+  for (const [id, x, y] of listed) {
+    const row = placed.find(place => place.id === id);
+    assert.ok(Math.abs(x - row.x) < 0.1 && Math.abs(y - row.y) < 0.1, `the landmark ${id} where the bake placed it`);
+  }
+  // finding things by name, best first
+  const first = text => search(book, text)[0];
+  assert.equal(search(book, '').length, 0, 'no words, no answers');
+  assert.equal(search(book, '   ').length, 0, 'only spaces, no answers');
+  assert.equal(search(book, '没有这么一个地方的名字').length, 0, 'a name that is not in the map answers nothing');
+  assert.ok(search(book, '文三路').length >= 3 && search(book, '文三路').length <= 12, 'the answers to 文三路: a handful of them');
+  const expect = (text, name, kind, label) => {
+    const top = first(text);
+    assert.ok(top, `something answers “${text}”`);
+    assert.ok(top.name === name && top.kind === kind && (label === undefined || top.label === label), `“${text}” is answered first by ${name} (${KINDS[kind]}${label ? ' · ' + label : ''}), not by ${top.name} (${KINDS[top.kind]}${top.label ? ' · ' + top.label : ''})`);
+  };
+  expect('文三路', '文三路', ROAD, '次干道');                       // the road, not the station called after it
+  expect('文三路站', '文三路', BUILDING, '车站');                           // ... and the station when it is asked for
+  expect('武林广场', '武林广场', 4, '广场');
+  expect('武林广场站', '武林广场', BUILDING, '车站');
+  expect('龙翔桥站', '龙翔桥', BUILDING, '车站');                           // the name without its 站
+  expect('wensan road', '文三路', ROAD);                           // by its English name
+  expect('文三', '文三路', ROAD);                                   // by the beginning of its name
+  expect('西湖', '西湖', WATER, '湖');
+  expect('钱塘江', '钱塘江', WATER, '江');
+  expect('大莲花', '奥体中心', LANDMARK);                           // an alias from data/curated/aliases.json
+  expect('岳庙', '岳王庙', 4, '景点');
+  expect('断桥', '断桥残雪', LANDMARK);                             // of equal answers a landmark comes first
+  expect('东站', '杭州东站', LANDMARK);
+  expect('杭州东站', '杭州东站', LANDMARK);
+  expect('河坊街', '河坊街·南宋御街', LANDMARK);
+  assert.ok(book.sheets.has(first('钱塘江').k), 'the Qiantang is the water of its sheet, not the coarse line along it');
+  assert.match(said(book, first('钱塘江').k), /^水域 · 江 · \d+\.\d 平方公里$/);
+  assert.match(said(book, first('莫干山路').k), /^道路 · 主干道 · \d+\.\d 公里$/);
+  assert.match(said(book, first('西湖').k), /^水域 · 湖 · \d+\.\d 平方公里$/);
+  assert.match(said(book, first('市民中心').k), /^建筑( · .+)?$/);
+  // one name borne by things apart: each says where it is; borne together: nothing to tell apart
+  const peoples = search(book, '人民路').filter(row => row.name === '人民路');
+  assert.ok(peoples.length >= 2 && peoples.every(row => row.near), 'the streets called 人民路, each with the place it is in');
+  assert.ok(search(book, '文三路').filter(row => row.name === '文三路').every(row => !row.near), 'the road and its station lie together: no word to tell them apart');
   console.log(`overview: grid ${grid.nx}x${grid.ny}, ${cells} massing cells, cover ${cover.nx}x${cover.ny} (${area(wet).toFixed(1)} km² of water), ${ribbons.indices.length / 3} ribbon triangles; ${overview.GRID.bytes.length + overview.MASS.bytes.length + overview.LCV.bytes.length + overview.URB.bytes.length + overview.RIBA.bytes.length} bytes`);
   console.log(`tiles: ${sample.length} sampled of ${files.length}, sections ${[...seen].sort().join(' ')}, ${buildings} buildings, ${rooftop} rooftop boxes, ${routes} routes, ${trees} trees`);
+  console.log(`names: ${things} things to find (${rows.sheets.length} sheets of water), ${spans} courses of ${drawn} points, ${rows.labels.length} labels, ${(book.bytes / 1e6).toFixed(1)} MB`);
 })().catch(error => {
-  console.error('DATA READERS FAILED:', error.message);
+  console.error('DATA READERS FAILED:', error.message, (error.stack || '').split('\n').slice(1, 3).join(' | ').trim());
   process.exitCode = 1;
 });

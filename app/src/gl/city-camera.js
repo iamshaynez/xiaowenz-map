@@ -31,7 +31,13 @@ export class CityCamera {
 
   // screen position in the camera's two axes, before the vertical squash: u across, v up the view
   axes(x, y) {
-    const { rx, ry } = this.frame(x, y);
+    return this.about(this.x, this.y, x, y);
+  }
+
+  // the same, about any centre (cx, cy) of the world: for measuring what a flight has to hold, before the camera moves
+  about(cx, cy, x, y) {
+    const dx = x - cx, dy = y - cy, c = this.cos, s = this.sin;
+    const rx = dx * c - dy * s, ry = dx * s + dy * c;
     return { u: (rx - ry) * SQRT1_2, v: (rx + ry) * SQRT1_2 };
   }
 

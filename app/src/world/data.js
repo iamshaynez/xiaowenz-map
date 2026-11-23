@@ -1,4 +1,4 @@
-// Reading what the pipeline baked: data/baked/overview.bin and data/baked/tiles/b/<x>_<y>.bin.
+// Reading what the pipeline baked: data/baked/overview.bin, data/baked/tiles/b/<x>_<y>.bin and data/baked/names.bin.
 // The layout is defined in pipeline/hz/scene.py and pipeline/hz/compact.py: numbers in the smallest integers
 // that hold them, and what the page can work out left out. So that a file stays small, each reader puts
 // the numbers back as they were: positions in metres, heights read off the tile's grid.
@@ -287,6 +287,24 @@ export function readPaths(section) {
 // PLCE: JSON: [name, kind key, kind]
 export function readPlaces(section) {
   return JSON.parse(TEXT.decode(section.bytes));
+}
+
+// NAME and LINE of data/baked/names.bin, the names the page searches by (pipeline/hz/names.py). NAME is JSON: a
+// column a list and one value in each for every thing -- names, kinds, x, y, z, label, size, box, line, landmark, and
+// for only some things near and also, by row. LINE holds, for a thing that runs as a line, its course: a point in
+// 10 bytes, x and y (f32, metres) and z (i16, 12.5 cm); a point whose x and y are not a number ends a piece.
+// -> { rows: the columns, points: x, y, z a point (f32), course: [first, count] into it for a row, or null }
+export function readNames(sections) {
+  if (!sections.NAME || !sections.LINE) throw new Error('names.bin has no NAME and LINE sections');
+  const { view, offset, bytes } = sections.LINE;
+  if (bytes.length % 10) throw new Error('truncated courses');
+  const count = bytes.length / 10, points = new Float32Array(count * 3);
+  for (let k = 0; k < count; k++) {
+    points[k * 3] = view.getFloat32(offset + k * 10, true);
+    points[k * 3 + 1] = view.getFloat32(offset + k * 10 + 4, true);
+    points[k * 3 + 2] = view.getInt16(offset + k * 10 + 8, true) / DECK_Z_PER_M;
+  }
+  return { rows: JSON.parse(TEXT.decode(sections.NAME.bytes)), points };
 }
 
 export function readMeta(section) {

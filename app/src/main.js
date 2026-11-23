@@ -1,6 +1,7 @@
-// 像素杭州：主城区活地图。启动、输入和帧循环。页面上地图以外的部分（名录、季节、导览、飞行）在 ui.js。
+// 像素杭州：主城区活地图。启动、输入和帧循环。页面上地图以外的部分（名录、搜索、季节、导览、飞行）在 ui.js。
 import { createContext } from './gl/context.js';
 import { CityRenderer } from './render/city.js';
+import { loadNames } from './world/names.js';
 import { DISTRICT_SCALE, LIFE_SCALE, World } from './world/store.js';
 import { buildLandmarks } from './landmarks/index.js';
 import { createInterface } from './ui.js';
@@ -60,7 +61,10 @@ async function boot() {
   };
   setSeason(season);
   // the map without the words around it, for pictures
-  if (new URLSearchParams(location.search).get('ui') === 'off') document.body.classList.add('quiet');
+  const quiet = new URLSearchParams(location.search).get('ui') === 'off';
+  if (quiet) document.body.classList.add('quiet');
+  // the index of names, for the search: fetched the first time it is wanted
+  const book = { promise: null, load() { return this.promise ||= loadNames(`${DATA}/baked/names.bin`); } };
 
   const world = new World(gl, index, `${DATA}/baked`);
   await world.loadOverview();
@@ -185,7 +189,8 @@ async function boot() {
   const PAN_KEYS = ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
   // keys are heard wherever the focus is: after clicking a name in the list the focus stays on that button
   window.addEventListener('keydown', e => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // not the keys of a box to write in: those are that box's own
+    if (e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input, textarea'))) return;
     const key = e.key.toLowerCase();
     if (PAN_KEYS.includes(key)) {
       keys.add(key);
@@ -199,9 +204,12 @@ async function boot() {
   const ui = createInterface({
     camera, renderer, world, canvas, landmarks, seasons: seasonNames,
     season: () => season, setSeason: name => { setSeason(name); dirty = true; },
-    overview, overviewTarget,
+    overview, overviewTarget, names: book, quiet,
   });
   ui.onDirty(() => { dirty = true; });
+  // opened at a place: ?find=<a name> flies to the first thing that answers it
+  const openedAt = new URLSearchParams(location.search).get('find');
+  if (openedAt) ui.find(openedAt, 0).catch(error => console.error(error));
 
   // ---- loop --------------------------------------------------------------------------------------------------
   // boats, cars and the wind only show once the view is close enough; farther out a frame is made only
@@ -271,6 +279,13 @@ async function boot() {
     seasons: seasonNames,
     flyTo: (id, seconds) => ui.flyTo(id, seconds),
     flying: () => ui.flying(),
+    // the search by name: the answers to some words; the flight to the first of them (with 0 seconds it jumps);
+    // the thing found last, and what is drawn over the map for it
+    search: query => ui.search(query),
+    find: (query, seconds = 0) => ui.find(query, seconds),
+    found: () => ui.found(),
+    mark: () => ui.mark(),
+    index: () => ui.index(),
     // hold the wind and the water still, so that two frames of the same view are the same
     freeze(value = true) { frozen = value; if (value) renderer.time = 0; },
     // average time of a frame, measured the only way a browser lets you: by reading a pixel back
