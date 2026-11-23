@@ -398,3 +398,18 @@ class CompactFormsTest(unittest.TestCase):
         self.assertTrue(numpy.isclose(back[:, 2], props[:, 0], atol=0.0126).all())
         self.assertTrue(numpy.isclose(back[:, 3], props[:, 1], atol=0.0051).all())
         self.assertEqual(back[:, 4:].tolist(), props[:, [3, 5, 6, 7]].tolist())
+
+
+class TileAnchorTest(unittest.TestCase):
+    """A building is kept whole in one tile, corners relative to its corner in 16-bit integers: the giants
+    are kept from a neighbour whose corner holds them, and the truly vast have no keeper."""
+
+    def test_the_case_the_shanghai_bake_hit(self):
+        # a plant hall 473 x 1334 m, its centre in the tile below the one whose corner holds it best
+        self.assertEqual(scene.tile_anchor(55121.0, 18313.0, 55595.0, 19647.0, 55, 18), (55000.0, 19000.0))
+
+    def test_an_ordinary_building_stays_in_the_tile_of_its_centre(self):
+        self.assertEqual(scene.tile_anchor(10.0, 10.0, 990.0, 990.0, 0, 0), (0.0, 0.0))
+
+    def test_nothing_so_vast_as_to_reach_past_every_neighbour_can_be_kept(self):
+        self.assertIsNone(scene.tile_anchor(0.0, 0.0, 3000.0, 3000.0, 0, 0))

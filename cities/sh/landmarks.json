@@ -1,5 +1,5 @@
 {
- "_comment": "上海的地标。每一处：在 OSM 的哪一层里按名字找哪个要素（tag 用来在同名的要素里挑，可省），用哪个模型、多大（kit，可省：那里不搭东西，只飞过去看），模型周围多少米内画的楼让位（clear），飞到那里时的像素比例（view.scale；offset 是取景时画面中心离它的位置，米，向右、向上），一句话（note）。parts 是跟着它一起搭的，写法相同。坐标由管线从 OSM 查出来，这里不写。要加一处，在这里添一行，重跑 `python -m pixelcity.build_all --city sh --only landmarks`。",
+ "_comment": "上海的地标。每一处：在 OSM 的哪一层里按名字找哪个要素（tag 用来在同名的要素里挑，可省），用哪个模型、多大（kit，可省：那里不搭东西，只飞过去看），模型周围多少米内画的楼让位（clear），飞到那里时的像素比例（view.scale；offset 是取景时画面中心离它的位置，米，向右、向上），一句话（note）。parts 是跟着它一起搭的，写法相同。坐标由管线从 OSM 查出来，这里不写。要加一处，在这里添一行，重跑 `python -m pixelcity.build_all --city sh --only landmarks`。名字都是 OSM 里的原名（如教堂的全名“徐家汇圣依纳爵主教座堂”、塔的“东方明珠电视塔”），别名在 aliases.json 里。",
  "groups": [
   "外滩",
   "沪西",
@@ -44,7 +44,7 @@
    "title": "东方明珠",
    "group": "外滩",
    "layer": "buildings",
-   "name": "东方明珠",
+   "name": "东方明珠电视塔",
    "view": {"scale": 1.2},
    "note": "陆家嘴的电视塔，1994 年建成，高 468 米，十一颗大小球体串在一根立柱上。"
   },
@@ -86,7 +86,7 @@
    "layer": "places",
    "name": "玉佛禅寺",
    "view": {"scale": 2.2},
-   "note": "1882 年从缅甸请回两尊白玉佛，寺在安远路墙上，闹市里的一块方外之地。"
+   "note": "1882 年从缅甸请回两尊白玉佛，寺在安远路的围墙里，闹市中的一块方外之地。"
   },
   {
    "title": "四行仓库",
@@ -123,27 +123,21 @@
   {
    "title": "徐家汇天主堂",
    "group": "沪西",
-   "layer": "places",
-   "name": "徐家汇天主教堂",
+   "layer": "buildings",
+   "name": "徐家汇圣依纳爵主教座堂",
    "view": {"scale": 2.4},
-   "note": "圣依纳爵主教座堂，1906 年建成，双塔五十多米，徐家汇源的头一景。"
+   "note": "1906 年建成，双塔五十多米，徐家汇源的头一景。"
   },
   {
-   "title": "龙华寺",
+   "title": "龙华塔",
    "group": "沪西",
-   "layer": "places",
-   "name": "龙华寺",
-   "view": {"scale": 1.6},
-   "note": "相传始建于三国吴赤乌年间，弥勒殿、大雄宝殿沿中轴排开，塔在寺前。",
-   "parts": [
-    {
-     "title": "龙华塔",
-     "layer": "buildings",
-     "name": "龙华塔",
-     "kit": {"model": "pagoda", "storeys": 7, "width": 8, "storeyHeight": 5.2, "eave": 0.35, "taper": 0.04},
-     "clear": 25
-    }
-   ]
+   "layer": "buildings",
+   "name": "龙华塔",
+   "tag": ["building", "pagoda"],
+   "kit": {"model": "pagoda", "storeys": 7, "width": 8, "storeyHeight": 5.2, "eave": 0.35, "taper": 0.04},
+   "clear": 25,
+   "view": {"scale": 2.4},
+   "note": "龙华寺前的宝塔，相传始于三国、现在的塔身是宋代的格式，四十米高，上海人叫它“宝塔风铃”。"
   },
   {
    "title": "多伦路文化名人街",
@@ -162,12 +156,12 @@
    "note": "1900 年代最早对华人开放的公园之一，鲁迅墓和纪念馆都在园里。"
   },
   {
-   "title": "1933老场坊",
+   "title": "上海邮政总局",
    "group": "苏河北岸",
    "layer": "buildings",
-   "name": "1933老场坊",
+   "name": "上海邮政总局大楼",
    "view": {"scale": 2.4},
-   "note": "1933 年英式设计的宰牲场，混凝土的伞形柱与旋梯，如今是创意园区。"
+   "note": "1924 年落成在四川路桥北堍，巴洛克的两塔与“人民邮电”四个字，远东第一座大规模邮政大楼。"
   },
   {
    "title": "杨树浦水厂",
@@ -196,7 +190,7 @@
   {
    "title": "上海体育场",
    "group": "沪西",
-   "layer": "buildings",
+   "layer": "land",
    "name": "上海体育场",
    "view": {"scale": 1.0},
    "note": "1997 年八运会主场馆，伞形挑篷罩住七万个座位，上海人叫它八万人。"
