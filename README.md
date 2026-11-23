@@ -14,9 +14,9 @@
 node serve.mjs
 ```
 
-然后打开 <http://127.0.0.1:5300/hz>。首次打开约 2 秒出现全景（要加载 5.5 MB 的全景包）。
+然后打开 <http://127.0.0.1:5300/>（首页）或 <http://127.0.0.1:5300/hz>。首次打开约 2 秒出现全景（要加载 5.5 MB 的全景包）。
 
-`serve.mjs` 开两个端口，和线上一样是两个来源：5300 是页面，5400 是数据（读 `data/baked/<城市>/`，清单现场合成）。地址就是城市：`/hz` 是杭州，打开 `/` 会落到第一座城。
+`serve.mjs` 开两个端口，和线上一样是两个来源：5300 是页面，5400 是数据（读 `data/baked/<城市>/`，清单现场合成）。地址就是城市：`/hz` 是杭州；`/` 是首页——一颗会转的像素地球，已上线的城是球上的红点（本地名加英文名），点它经过一段潜入动画落进那座城（D072）。
 
 没有构建步骤，没有依赖；页面是原生 ES 模块和 WebGL2。只保证 Chrome；手机上可用（单指平移、双指转动与缩放）。
 
@@ -26,6 +26,8 @@ node serve.mjs
 
 | 动作 | 鼠标键盘 | 触屏 |
 |---|---|---|
+| （首页）转动地球 | 按住拖动：横着自转，竖着倾 | 同左 |
+| （首页）进一座城 | 点球上的红点或左上角名录 | 同左 |
 | 平移 | 左键拖动，或 W A S D / 方向键 | 单指拖动 |
 | 旋转、俯仰 | 右键拖动 | 双指一起拖动 |
 | 缩放 | 滚轮（以鼠标下面的东西为锚点） | 双指张开（以两指中间的东西为锚点） |
@@ -42,6 +44,8 @@ node serve.mjs
 
 ```
 app/                  页面。线上就是站点根目录，原样发布
+app/src/home/         首页：地球（globe.js）和它的标注、拖动、潜入（main.js）；app/globe-land.json 是球的陆地骨架
+tools/bake/           一次性的烘焙：globe-land.mjs 把 Natural Earth 烘成陆地点阵
 cities/hz/            杭州：city.json（范围、投影、数据源、这座城自己的规矩）、landmarks.json、aliases.json、routes.json
 pipeline/pixelcity/   数据管线。每一步都接收"一座城"
 tools/deploy/         发布：压缩、算指纹、上传 R2、写清单；发页面；对着线上检查
@@ -73,7 +77,7 @@ uv venv .venv && uv pip install --python .venv/bin/python -e pipeline     # 或�
 
 ### 再加一座城
 
-1. 建 `cities/<id>/city.json`：名字、经纬度范围、投影、原点、四样原始数据。
+1. 建 `cities/<id>/city.json`：名字、英文名（`en`，首页的标注用）、经纬度范围、投影、原点、四样原始数据。
 2. `python -I -m pixelcity.build_all --city <id>`。能下载的它会自己下载，下载不了的会告诉你放到哪里。
 3. `node serve.mjs`，打开 `http://127.0.0.1:5300/<id>` 看。
 4. 想要手工搭的地标、俗名、导览，再添 `landmarks.json`、`aliases.json`、`routes.json` 和 `city.json` 里的 `tour`。没有也能成一座城。

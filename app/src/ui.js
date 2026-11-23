@@ -438,6 +438,8 @@ export function createInterface(app) {
     release: () => { anchor = null; },   // the map is being panned: from now on the camera turns around the middle of the view
     turnTo: yaw => { camera.yaw = yaw; follow(); },
     flying: () => Boolean(flight),
+    // 开场：从相机此刻所在的地方飞到一个姿态（首页的地球把人送过来后，从高空落进全景的那一段）
+    enter: (pose, seconds = 2.8) => goTo(pose, seconds),
     target: () => target,           // the camera pose the last flight was bound for
     touring: () => Boolean(tour),
     tour,

@@ -16,6 +16,84 @@
   canvas#c:active { cursor: grabbing; }
   canvas#mark { pointer-events: none; image-rendering: pixelated; }
 
+  /* ---- 首页：一颗星球，几座城（和城里同一张纸、同一支墨）。城页的东西一概不动，首页自己的都在 #front 里 ---- */
+  #front { display: none; }
+  body[data-page="home"] #stage, body[data-page="home"] #menu, body[data-page="home"] #tools,
+  body[data-page="home"] #corner, body[data-page="home"] #compass, body[data-page="home"] #hint { visibility: hidden; }
+  body[data-page="home"] #front { display: block; position: fixed; inset: 0; }
+  #home-stage { position: absolute; inset: 0; display: grid; place-items: center; cursor: grab; touch-action: none; }
+  #home-stage:active { cursor: grabbing; }
+  #globe-zoom { grid-area: 1 / 1; }
+  canvas#globe { display: block; image-rendering: pixelated; }
+  #globe-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+  #markers { position: absolute; left: 50%; top: 50%; pointer-events: none; }
+  /* 一座城：红点是按钮自己的，字随它在右（在右半球的城字往左）。没露面的城不占声音，也不占点击 */
+  .marker { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; background: none; border: 0; padding: 4px; margin: -4px; cursor: pointer; font: inherit; }
+  .marker.seen { visibility: visible; pointer-events: auto; }
+  .marker .dot { position: absolute; left: 0; top: 0; width: 7px; height: 7px; background: var(--a); outline: 1px solid var(--paper); transform: translate(-50%, -50%) rotate(45deg); }
+  .marker .dot::after { content: ""; position: absolute; inset: -6px; }
+  .marker .tag { position: absolute; left: 13px; top: -1.1em; white-space: nowrap; padding-left: 10px; border-left: 1px solid var(--ink); line-height: 1.1; text-align: left; }
+  .marker.flip .tag { left: auto; right: 13px; padding-left: 0; padding-right: 10px; border-left: 0; border-right: 1px solid var(--ink); text-align: right; }
+  .marker .tag b { display: block; font-weight: 600; font-size: 13px; letter-spacing: .06em; text-shadow: 0 0 2px var(--paper), 0 0 4px var(--paper); }
+  .marker .tag small { display: block; color: var(--muted); font-size: 9px; letter-spacing: .22em; text-shadow: 0 0 2px var(--paper); }
+  .marker:hover .dot, .marker:focus-visible .dot { background: var(--ink); }
+  .marker:hover .tag b, .marker:focus-visible .tag b { color: var(--a); }
+  .marker:focus-visible { outline: 1px dotted var(--ink); outline-offset: 3px; }
+  /* 题字在左上，一行小字说这页是什么；城的名录在它下面 */
+  #home-menu { position: absolute; top: max(12px, env(safe-area-inset-top)); left: max(9px, env(safe-area-inset-left)); max-width: min(60vw, 420px); }
+  #home-menu h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .04em; }
+  #home-menu h1::after { content: ""; display: inline-block; width: 26px; height: 1px; background: var(--a); margin-left: 10px; vertical-align: middle; }
+  #home-say { color: var(--muted); margin: 3px 0 0; }
+  #home-cities { margin: 10px 0 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+  #home-cities button { color: var(--muted); padding: 1px 2px; }
+  #home-cities button:hover { color: var(--ink); }
+  #home-cities .en { color: inherit; opacity: .75; margin-left: 8px; letter-spacing: .08em; }
+  #home-empty { color: var(--muted); margin: 10px 0 0; }
+  /* 竖排的题字挂在右缘：一颗星球，几座城 */
+  #home-motto { position: absolute; right: max(18px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; color: var(--muted);
+                letter-spacing: .5em; font-size: 12px; user-select: none; }
+  #home-motto em { font-style: normal; color: var(--a); }
+  /* 读数在左下（和城里一个位置）：面向哪块地，还有陆地的出处 */
+  #home-readout { position: absolute; left: max(9px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+  #home-readout div + div { color: var(--muted); }
+  #home-readout div + div a { color: inherit; text-decoration: none; }
+  #home-readout div + div a:hover { color: var(--ink); }
+  #home-readout span { font-variant-numeric: tabular-nums; }
+  #home-hint { position: absolute; right: max(9px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); text-align: right; color: var(--muted); }
+  /* 潜入：其他的城让开；环退场；球被推近（像素长大），一圈声呐从红点荡开；然后纸白淹上来 */
+  body.diving .marker:not(.chosen) { opacity: 0 !important; pointer-events: none; }
+  body.diving #home-hint { opacity: 0; }   /* 潜在路上，"拖动 转动地球"已经不管用了 */
+  #globe-ring { transition: opacity .5s; }
+  body.diving #globe-ring { opacity: 0; }
+  #globe-zoom { transition: transform 1.05s cubic-bezier(.5, 0, .8, .4); }
+  body.zooming #globe-zoom { transform: scale(5.6); }
+  #flash { position: absolute; inset: 0; background: var(--paper); opacity: 0; pointer-events: none; transition: opacity .3s; }
+  #flash.on { opacity: 1; transition: opacity .26s ease-in; }
+  /* 登场的缓急：题字先来，球跟上，环画完一圈，读数和竖排的题字最后到。只说 #front 自己的，城页一概不碰 */
+  #front .panel { opacity: 0; }
+  body.home-in #front .panel { opacity: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    #globe-zoom { opacity: 0; animation: globe-in .9s cubic-bezier(.2, .7, .3, 1) .15s forwards; }
+    body.zooming #globe-zoom { animation: none; opacity: 1; }   /* 登场的动画让位给推近：transform 交还给过渡 */
+    @keyframes globe-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+    #front .panel { transition: opacity .5s; }
+    #home-menu.panel { transition-delay: .1s; }
+    #home-readout.panel, #home-hint.panel { transition-delay: 1s; }
+    #home-motto.panel { transition-delay: 1.3s; }
+    .marker.arrive .dot { animation: arrive .7s steps(6); }
+    @keyframes arrive { 0% { box-shadow: 0 0 0 0 rgba(181, 57, 43, 0.7); } 100% { box-shadow: 0 0 0 9px rgba(181, 57, 43, 0); } }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #globe-zoom, #flash, #front .panel, #globe-ring { transition: none; animation: none; }
+    body.zooming #globe-zoom { transform: none; }
+  }
+  @media (max-width: 720px) {
+    #home-motto, #home-say, #home-hint { display: none; }
+    .marker .tag b { font-size: 12px; }
+    .marker .tag small { display: none; }
+    #home-readout div + div { display: none; }
+  }
+
   .panel { position: fixed; pointer-events: none; max-width: min(46vw, 520px); padding: 4px 9px 5px; border-radius: 4px;
           background: rgba(255, 255, 255, 0.84); }   /* the map runs under the words: a sheet of paper behind them */
   .panel button, .panel a { pointer-events: auto; }
@@ -83,6 +161,28 @@
 </head>
 <body>
 <div id="stage"><canvas id="c" tabindex="0" aria-label="像素城市：可以旋转、缩放的立体地图"></canvas><canvas id="mark" aria-hidden="true"></canvas></div>
+
+<!-- 首页：地址没有点名哪座城（/）的时候，是这一页。球是画出来的，城是它上面的红点和两张字 -->
+<section id="front" aria-label="像素城市：一颗星球，几座城">
+  <div id="home-stage">
+    <div id="globe-zoom"><canvas id="globe" aria-hidden="true"></canvas></div>
+    <canvas id="globe-ring" aria-hidden="true"></canvas>
+    <div id="markers"></div>
+  </div>
+  <div id="home-menu" class="panel">
+    <h1>像素城市</h1>
+    <p id="home-say">地球上每个亮点，是一座活着的城。</p>
+    <nav id="home-cities" aria-label="已上线的城市"></nav>
+    <p id="home-empty" hidden>还没有哪座城上线。</p>
+  </div>
+  <p id="home-motto" class="panel" aria-hidden="true">一颗<em>星球</em>，几座城</p>
+  <div id="home-readout" class="panel">
+    <div><span id="readout-home">面向 …</span></div>
+    <div>陆地骨架 © <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a>（公有领域）· 城的地图数据随各城标注</div>
+  </div>
+  <p id="home-hint" class="panel">拖动 转动地球 · 点击红点 进入一座城</p>
+  <div id="flash" aria-hidden="true"></div>
+</section>
 
 <div id="menu" class="panel">
   <h1><span id="city-name">像素城市</span> <span id="city-subtitle"></span><button id="toggle" type="button" aria-expanded="false" aria-controls="landmarks">地名</button></h1>

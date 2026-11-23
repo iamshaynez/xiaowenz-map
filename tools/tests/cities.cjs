@@ -82,13 +82,23 @@ const stopped = page => page.waitForFunction(() => document.getElementById('read
     page.on('response', response => origins.add(new URL(response.url()).origin));
     await page.goto(`${pageOrigin}/`);
     await ready(page);
-    await page.waitForFunction(() => document.querySelectorAll('#cities button').length > 0, null, { timeout: 20000 });
     let now = await state(page);
-    check(now.address === '/hz' && now.id === 'hz', `/ shows the first city and takes its address (got ${now.address}, ${now.id})`);
+    check(now.address === '/' && now.id === null, `/ is the homepage: no city is on show (got ${now.address}, ${now.id})`);
+    check(now.title === '像素城市', `the homepage is titled as the page itself (got ${now.title})`);
+    check(await page.evaluate(() => getComputedStyle(document.getElementById('front')).display !== 'none'), 'the homepage is on show where the address names no city');
+    // the homepage's own manners are tools/tests/home.cjs's
+
+    // ---- a city: its address, and every word of it ---------------------------------------------------------------
+    await page.goto(`${pageOrigin}/hz`);
+    await ready(page);
+    await page.waitForFunction(() => document.querySelectorAll('#cities button').length > 0, null, { timeout: 20000 });
+    now = await state(page);
+    check(now.address === '/hz' && now.id === 'hz', `a city's address shows that city (got ${now.address}, ${now.id})`);
     check(now.title === '像素杭州 · 主城区' && now.heading === '像素杭州|主城区' && now.label === '像素杭州：可以旋转、缩放的立体地图', 'the title, the heading and what the canvas is said to be name the city');
     check(now.tour === '西湖导览', `a city with a tour has its button, named as the city says (got ${now.tour})`);
     check(same(now.cities, ['杭州*', '试城']), `the row of cities holds the baked cities, the one on show marked, and not the one never baked (got ${now.cities})`);
     check(now.release === 'local', 'the page reads the manifest the dev server makes up');
+    check(await page.evaluate(() => getComputedStyle(document.getElementById('front')).display === 'none'), 'and where the address names a city, the homepage is not there');
 
     // ---- another city: its button is its address ----------------------------------------------------------------
     await page.click('#cities button:nth-of-type(2)');          // the row's first child is its label
@@ -113,13 +123,19 @@ const stopped = page => page.waitForFunction(() => document.getElementById('read
     await context.close();
 
     // ---- what the address asked is kept; a trailing slash is the same address -------------------------------------
-    const asked = await opened(`${pageOrigin}/?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
-    await asked.page.goto(`${pageOrigin}/?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
+    // (/ 是首页了：带着 ?find= 的 / 也还是首页，首页不搜东西；要搜的是城的地址)
+    const asked = await opened(`${pageOrigin}/hz?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
+    await asked.page.goto(`${pageOrigin}/hz?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
     await ready(asked.page);
     await asked.page.waitForFunction(() => window.__city.found() !== null, null, { timeout: 60000 });
     now = await state(asked.page);
-    check(now.address === '/hz?find=%E6%96%87%E4%B8%89%E8%B7%AF' && now.found === '文三路', `choosing the city keeps what the address asked (got ${now.address}, found ${now.found})`);
+    check(now.address === '/hz?find=%E6%96%87%E4%B8%89%E8%B7%AF' && now.found === '文三路', `a city's address keeps what it asked and flies to it (got ${now.address}, found ${now.found})`);
     await asked.context.close();
+    const askedHome = await opened(`${pageOrigin}/?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
+    await askedHome.page.goto(`${pageOrigin}/?find=%E6%96%87%E4%B8%89%E8%B7%AF`);
+    await ready(askedHome.page);
+    check((await state(askedHome.page)).address === '/?find=%E6%96%87%E4%B8%89%E8%B7%AF' && askedHome.complaints.length === 0, `the homepage takes what the address asked and says nothing of it (got ${askedHome.complaints.join(' | ')})`);
+    await askedHome.context.close();
     const slashed = await opened(`${pageOrigin}/hz2/`);
     await slashed.page.goto(`${pageOrigin}/hz2/`);
     await ready(slashed.page);

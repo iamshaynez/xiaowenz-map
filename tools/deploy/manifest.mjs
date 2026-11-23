@@ -31,7 +31,7 @@ export function ids(root) {
 
 // what the page shows of a city before any of its files is loaded
 export function shown(said) {
-  return { id: said.id, name: said.name, subtitle: said.subtitle ?? '', bounds: said.bounds, tour: said.tour ? { label: said.tour.label } : null };
+  return { id: said.id, name: said.name, en: said.en ?? '', subtitle: said.subtitle ?? '', bounds: said.bounds, tour: said.tour ? { label: said.tour.label } : null };
 }
 
 // -> [name]: every file of a city's baked folder, as the page asks for it: its path from the folder, `/` between the names

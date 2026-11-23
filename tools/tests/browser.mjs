@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('../../', import.meta.url));
 const out = join(here, 'out', 'test-runs');
-const EVERY = ['smoke', 'search', 'tour', 'landmark-views', 'mobile', 'mouse', 'zoom-anchor', 'cities', 'flight', 'published'];
+const EVERY = ['smoke', 'home', 'search', 'tour', 'landmark-views', 'mobile', 'mouse', 'zoom-anchor', 'cities', 'flight', 'published'];
 const asked = process.argv.slice(2).map(name => name.replace(/\.cjs$/, '').replace(/^tools\/tests\//, ''));
 const names = asked.length ? asked : EVERY;
 const rows = [];

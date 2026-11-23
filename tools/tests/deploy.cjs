@@ -65,7 +65,7 @@ function repository(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pixelcity-repo-'));
   fs.mkdirSync(path.join(root, 'cities', 'x'), { recursive: true });
   fs.writeFileSync(path.join(root, 'cities', 'x', 'city.json'),
-                   JSON.stringify({ id: 'x', name: '试城', subtitle: '试验', bounds: [0, 0, 1, 1], epsg: 32651, origin: [0, 0], sources: {}, tour: { label: '环城导览' } }));
+                   JSON.stringify({ id: 'x', name: '试城', en: 'Shicheng', subtitle: '试验', bounds: [0, 0, 1, 1], epsg: 32651, origin: [0, 0], sources: {}, tour: { label: '环城导览' } }));
   for (const [name, body] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, 'data', 'baked', 'x', name)), { recursive: true });
     fs.writeFileSync(path.join(root, 'data', 'baked', 'x', name), body);
@@ -110,7 +110,7 @@ async function main() {
     check(named, 'an object is named by the hash of its compressed bytes, and by what kind of file it is');
     check(headed, 'a file is served as brotli and kept for a year: it never changes under its name');
     check(typed, 'a file is served with the type of what it is');
-    check(canonical(said(at('cities.json'))) === canonical({ cities: [{ id: 'x', name: '试城', subtitle: '试验', bounds: [0, 0, 1, 1], tour: { label: '环城导览' } }] }),
+    check(canonical(said(at('cities.json'))) === canonical({ cities: [{ id: 'x', name: '试城', en: 'Shicheng', subtitle: '试验', bounds: [0, 0, 1, 1], tour: { label: '环城导览' } }] }),
           'the list of cities holds the city, and what the page shows of it before its files are loaded');
     check(at('cities.json').cache === 'no-cache' && at(MANIFEST).cache === 'no-cache', 'the two lists are asked about every time: they are what changes when a city is published');
     check(said(at(`x/releases/${manifest.release}.json`)).release === manifest.release && at(`x/releases/${manifest.release}.json`).cache.includes('immutable'), 'the manifest is kept as a release, never to change');

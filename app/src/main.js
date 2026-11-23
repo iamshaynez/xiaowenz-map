@@ -1,4 +1,4 @@
-// 像素城市：一座城的活地图，是哪座城看它的地址（/hz）。启动、输入和帧循环。页面上地图以外的部分（名录、搜索、季节、导览、飞行）在 ui.js。
+// 像素城市：一座城的活地图，是哪座城看它的地址（/hz）；/ 是首页，一颗星球几座城（home/main.js）。启动、输入和帧循环。页面上地图以外的部分（名录、搜索、季节、导览、飞行）在 ui.js。
 import { createContext } from './gl/context.js';
 import { CityRenderer } from './render/city.js';
 import { loadNames } from './world/names.js';
@@ -11,21 +11,22 @@ import { createInterface } from './ui.js';
 const MAX_WIDTH = 960, MAX_HEIGHT = 540;   // the frame at the middle pixel size; finer and coarser sizes scale it
 const MIN_WIDTH = 320;                       // but never narrower than this: on a phone a pixel is one CSS pixel
 
-// The city to show: the one its address names (/hz), as the channel the address names tells of it (?channel=next:
-// what is published as next; world/source.js). Where the address names no city (/), the first of the cities there is,
-// and the address is made the city's own, so that it can be sent on.
-async function cityOnShow() {
+// The city to show: the one its address names (/hz), read through the channel the address names (?channel=next:
+// what is published as next; world/source.js). Where the address names no city (/), that is the homepage: the
+// globe and the cities there are (home/main.js), and it is not this boot's business.
+async function cityOnShow(id) {
   const askedFor = new URLSearchParams(location.search).get('channel'), channel = CHANNELS.includes(askedFor) ? askedFor : CHANNELS[0];
-  const asked = cityAsked(location.pathname);
-  if (asked) return openCity(DATA_ORIGIN, asked, channel);
-  const first = (await openCities(DATA_ORIGIN))[0];
-  if (!first) throw new Error('还没有哪座城市发布');
-  const city = await openCity(DATA_ORIGIN, first.id, channel);
-  history.replaceState(null, '', `/${city.id}${location.search}`);
-  return city;
+  return openCity(DATA_ORIGIN, id, channel);
 }
 
 async function boot() {
+  // the address decides: one that names a city is that city's page; the root (/) is the homepage, a page
+  // of its own (the globe, home/main.js), and it shares this file and the paper it is drawn on
+  const cityId = cityAsked(location.pathname);
+  if (!cityId) {
+    const { bootHome } = await import('./home/main.js');
+    return bootHome();
+  }
   // how big a pixel is on the page: the middle size keeps the frame within 960 x 540, the fine one has
   // half the pixels of that each way, the coarse one twice; ?px= overrides for tests
   const auto = Math.max(1, Math.ceil(Math.max(innerWidth / MAX_WIDTH, innerHeight / MAX_HEIGHT)));
@@ -34,7 +35,7 @@ async function boot() {
   const width = Math.max(160, Math.floor(innerWidth / pixelScale)), height = Math.max(120, Math.floor(innerHeight / pixelScale));
   const canvas = document.getElementById('c'), $ = id => document.getElementById(id);
   // the city comes first: everything else here is a file of it, except the palette, which is the page's own
-  const city = await cityOnShow();
+  const city = await cityOnShow(cityId);
   const [index, paletteFile] = await Promise.all([
     fetch(city.url('index.json')).then(r => r.json()),
     fetch(new URL('../palette.json', import.meta.url)).then(r => r.json()),
@@ -109,6 +110,10 @@ async function boot() {
   };
   Object.assign(camera, overviewTarget());
   const overview = () => Object.assign(camera, overviewTarget());
+  // 从首页的地球过来的（?from=globe）：先停在很高很高的地方，ui 到位后按平时飞行的缓动落进全景——
+  // 地球把人推近到白光一闪，这里接的是那一闪之后的一段。嫌动画的人（prefers-reduced-motion）不绕这一趟
+  const fromGlobe = new URLSearchParams(location.search).get('from') === 'globe' && matchMedia('(prefers-reduced-motion: no-preference)').matches;
+  if (fromGlobe) Object.assign(camera, { ...overviewTarget(), scale: overviewTarget().scale * 0.05, pitch: 1.47 });
 
   // ---- input ------------------------------------------------------------------------------------------
   const pointers = new Map();
@@ -224,6 +229,7 @@ async function boot() {
     overview, overviewTarget, names: book, quiet, tour: city.tour,
   });
   ui.onDirty(() => { dirty = true; });
+  if (fromGlobe) ui.enter(overviewTarget(), 2.8);   // 从高空落到全景：飞行的缓动和途中的俯冲都是现成的（ui.js）
   // the words that name the city: the title of the page, its heading, and what the canvas is said to be
   const titled = `像素${city.name}`;
   document.title = city.subtitle ? `${titled} · ${city.subtitle}` : titled;
@@ -353,6 +359,10 @@ async function boot() {
 }
 
 boot().catch(error => {
-  document.getElementById('readout-line').textContent = `启动失败：${error.message}`;
+  // 首页和城页各有一条读数栏，谁在就写在谁那里
+  for (const at of ['readout-line', 'readout-home']) {
+    const line = document.getElementById(at);
+    if (line) line.textContent = `启动失败：${error.message}`;
+  }
   throw error;
 });
