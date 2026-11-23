@@ -4,15 +4,19 @@
 
 ![西湖与主城区](docs/REVIEW/over-and-above.png)
 
+工程按"一座城一个目录"组织：一座城的范围、数据源、地标和它自己的规矩都在 `cities/<id>/` 里，管线和页面不认得任何一座具体的城。杭州是 `cities/hz/`。页面在 Cloudflare Workers 上，数据在 Cloudflare R2 上，都不用自己的服务器；怎么上线见 [`deploy/README.md`](deploy/README.md)。
+
 ## 运行
 
-需要 Node 18 以上。页面读的烘焙数据（`data/baked/`，约 324 MB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
+需要 Node 18 以上。页面读的烘焙数据（`data/baked/hz/`，约 340 MB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
 
 ```
 node serve.mjs
 ```
 
-然后打开 <http://127.0.0.1:5300/app/>。首次打开约 2 秒出现全景（要加载 5 MB 的全景包）。
+然后打开 <http://127.0.0.1:5300/hz>。首次打开约 2 秒出现全景（要加载 5.5 MB 的全景包）。
+
+`serve.mjs` 开两个端口，和线上一样是两个来源：5300 是页面，5400 是数据（读 `data/baked/<城市>/`，清单现场合成）。地址就是城市：`/hz` 是杭州，打开 `/` 会落到第一座城。
 
 没有构建步骤，没有依赖；页面是原生 ES 模块和 WebGL2。只保证 Chrome；手机上可用（单指平移、双指转动与缩放）。
 
@@ -30,51 +34,97 @@ node serve.mjs
 | 季节 | 1 2 3 4 或右上角的按钮 | 按钮 |
 | 去一处地标 | 点左上角名录里的名字（窄屏先点"地名"）；之后右键拖动是绕着它转 | 同左 |
 | 找一个地方 | 左上角的搜索框里写路名、地名；`/` 或 Ctrl+K 把键盘交给它。写一个字出一批候选，上下键选，回车去，Esc 清除。地址后面加 `?find=文三路` 打开就落在那里 | 点搜索框，再点一条候选 |
-| 西湖导览 | T 或"西湖导览" | 按钮 |
+| 导览 | T 或导览按钮（这座城有导览的话） | 按钮 |
+| 换一座城 | 右上角"城市"一栏 | 同左 |
 | 像素大小 | 右上角"像素"按钮，三档 | — |
+
+## 目录
+
+```
+app/                  页面。线上就是站点根目录，原样发布
+cities/hz/            杭州：city.json（范围、投影、数据源、这座城自己的规矩）、landmarks.json、aliases.json、routes.json
+pipeline/pixelcity/   数据管线。每一步都接收"一座城"
+tools/deploy/         发布：压缩、算指纹、上传 R2、写清单；发页面；对着线上检查
+deploy/               上线要做的事、桶的跨域策略
+wrangler.jsonc        页面怎么发
+data/                 不入库：raw/（按来源分，多城共用） work/<城市>/ baked/<城市>/
+docs/                 计划、决定、进度、数据报告、验收图
+tools/tests/          测试
+```
 
 ## 从头构建数据
 
-需要 Python 3.11 以上和约 3 GB 磁盘。原始数据不在仓库里：OpenStreetMap 的浙江提取包、3D-GloBFP 的一块瓦片、Copernicus GLO-30 的一块、ESA WorldCover 的一块（地址见 `docs/DATA-SOURCES.md`），放到 `data/raw/`。
+需要 Python 3.12 以上和约 3 GB 磁盘。原始数据不在仓库里，管线的第一步会下载缺的：OpenStreetMap 的浙江提取包、Copernicus GLO-30 的一块、ESA WorldCover 的一块。楼高数据集 3D-GloBFP 要手工下载：它的服务器只应答浏览器，下载后把压缩包解压到 `data/raw/buildings/<瓦片号>/`。地址见 `docs/DATA-SOURCES.md`。
 
 ```
-python3 -m venv .venv
-.venv/bin/pip install -e pipeline          # osmium、shapely、numpy、pyproj、pyshp、tifffile、imagecodecs
-PYTHONPATH=pipeline .venv/bin/python -I -m hz.build_all     # 下载之后的一切：提取、合并、地形、地面、树、地标、烘焙，约 12 分钟
+uv venv .venv && uv pip install --python .venv/bin/python -e pipeline     # 或者 python3 -m venv .venv && .venv/bin/pip install -e pipeline
+.venv/bin/python -I -m pixelcity.build_all --city hz                      # 下载之后的一切：提取、合并、地形、地面、树、地标、名字、烘焙，约 12 分钟
 ```
 
-`--list` 列出每一步，`--from ground` 从某一步起重跑，`--only trees` 只跑一步。`hz/landmarks.py` 是 24 处地标的表（对应的 OSM 要素、模型尺寸、取景距离）。`hz/names.py` 是搜索用的名字索引；俗名、简称记在 `data/curated/aliases.json`，要加一条就在那里添一行，重跑 `--only names`。
+依赖 osmium、shapely、numpy、pyproj、pyshp、tifffile、imagecodecs。
+
+`--list` 列出每一步和有哪些城市，`--from ground` 从某一步起重跑，`--only trees` 只跑一步。跑完在 `data/baked/hz/bake.json` 留一张烘焙戳：什么时候、从哪个提交、用了哪些原始数据。
+
+- `cities/hz/city.json` 是这座城的定义。`look` 一节是它自己的规矩：哪几片是白墙黑瓦的老街区、哪里是茶山、哪几片是商务区、哪几处是寺庙用地、名字带什么的水道算江。
+- `cities/hz/landmarks.json` 是 24 处地标的表：对应 OSM 里的哪个要素、用哪个模型、多大、取景多近。坐标由管线从 OSM 查，表里不写。
+- `cities/hz/aliases.json` 是俗名和简称。要加一条就在那里添一行，重跑 `--only names`。
+- `cities/hz/routes.json` 是西湖上的游船航线。
+- `python -m pixelcity.report hz` 把数据报告现算一遍，写 `cities/hz/DATA-REPORT.md`。
+
+### 再加一座城
+
+1. 建 `cities/<id>/city.json`：名字、经纬度范围、投影、原点、四样原始数据。
+2. `python -I -m pixelcity.build_all --city <id>`。能下载的它会自己下载，下载不了的会告诉你放到哪里。
+3. `node serve.mjs`，打开 `http://127.0.0.1:5300/<id>` 看。
+4. 想要手工搭的地标、俗名、导览，再添 `landmarks.json`、`aliases.json`、`routes.json` 和 `city.json` 里的 `tour`。没有也能成一座城。
+5. 发布：`npm run publish -- <id>`，见 `deploy/README.md`。
+
+现在的两处限制：地形和土地覆盖各只读一块方格，范围跨过经纬度整度的城市（比如上海）还做不了，`city.json` 里多写了会报错；数据报告的说明文字是照杭州写的，别的城要把文字重新读一遍。另外 `pipeline/pixelcity/classify.py` 里的建筑原型和树种是江南一带的样子。
+
+## 发布
+
+烘焙数据不进 git，发到 Cloudflare R2。页面是 Workers 上的一组静态文件。上线前一次性要做的事、以后每次发布的命令、预发布和回退，都在 [`deploy/README.md`](deploy/README.md)。
+
+```
+npm run publish -- hz --dry-run     会传什么
+npm run publish -- hz               压缩、算指纹、只上传新的、写清单
+npm run deploy                      页面
+npm run verify -- hz                对着线上检查
+```
 
 ## 测试
 
 ```
-node tools/tests/data-readers.cjs                                                    # 网页端的读取器对着真实烘焙文件核对；名字索引逐列核对，15 个名字各自的第一名
-node tools/tests/bake-compare.cjs <上一版烘焙的目录>                                  # 新一版烘焙逐栋、逐棵、逐块对着上一版：位置差不超过半个单位，其余相同
+npm test                                                             # 数据读取器、请求签名、发布（对着一个假桶）、管线的单元测试
+npm run test:browser                                                 # 下面的浏览器测试逐个跑（fidelity 除外），汇总在 out/test-runs/
+node tools/tests/bake-compare.cjs <上一版烘焙的目录> [上一版的读取器]      # 改数据格式时用：新一版烘焙逐栋、逐棵、逐块对着上一版
+node tools/tests/frames.cjs <目录> && node tools/tests/frames-diff.cjs <改前目录> <改后目录>   # 54 张定死的静帧，逐像素比
 .venv/bin/python -I -m unittest discover -s pipeline/tests -t pipeline/tests          # 数据管线的单元测试
-NODE_PATH="$(npm root -g)" node tools/tests/search.cjs                                                    # 按名字找地方：搜索框、候选、飞达、高亮落在路上、手机
+NODE_PATH="$(npm root -g)" node tools/tests/cities.cjs                               # 多城市：地址、选城、换城、预发布通道
+NODE_PATH="$(npm root -g)" node tools/tests/published.cjs                             # 整条链路在本机走一遍：发布到一个假桶，页面从它那里取压缩过的文件，画面和读本地原文件一样
+NODE_PATH="$(npm root -g)" node tools/tests/search.cjs                               # 按名字找地方：搜索框、候选、飞达、高亮落在路上、手机
 NODE_PATH="$(npm root -g)" node tools/tests/shadows.cjs                              # 阴影贴图对着解析答案逐像素比对
-NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs                               # 真实城市的十四个视角
+NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs                                # 真实城市的十四个视角
 NODE_PATH="$(npm root -g)" node tools/tests/tour.cjs                                 # 24 处地标、四季、缩放阶梯，顺带出验收图
-NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs                         # 每处地标的取景：露出来多少像素、在不在中央、是不是自己的颜色
-NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs                             # 滚轮缩放的锚点：鼠标下面的东西不动
-NODE_PATH="$(npm root -g)" node tools/tests/mouse.cjs                                   # 左键拖动平移、右键拖动转视角
+NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs                       # 每处地标的取景：露出来多少像素、在不在中央、是不是自己的颜色
+NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs                          # 滚轮缩放的锚点：鼠标下面的东西不动
+NODE_PATH="$(npm root -g)" node tools/tests/mouse.cjs                                # 左键拖动平移、右键拖动转视角
 NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs                               # 两种手机的模拟
 NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --ss 2,4 --out 名字        # 吞吐
 NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10                    # 随机漫游十分钟
 NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                             # 与原版参照逐像素比（闸门 G1）
-NODE_PATH="$(npm root -g)" node tools/tests/frames.cjs <目录>                         # 54 张定死的静帧（时间冻结、界面隐藏），改数据或渲染前后各拍一次
-node tools/tests/frames-diff.cjs <改前目录> <改后目录>                                  # 逐像素比这两组静帧
 ```
 
-浏览器测试各自起一个本地服务器（端口 5390–5399），不要同时跑两个。`fidelity.cjs` 的退出码是 1：它停下来报的就是下面那项已知的例外，其余指标全过。
+浏览器测试各自起一个本地服务器（页面端口 5388–5399，数据端口各加 100），一个跑完再跑下一个。`fidelity.cjs` 的退出码是 1：它停下来报的就是下面那项已知的例外，其余指标全过。
 
 浏览器测试需要全局安装的 Playwright 和 `/Applications/Google Chrome.app`。
 
 ## 文档
 
+- `deploy/README.md` 上线：一次性准备、每次发布、预发布和回退。
 - `docs/PLAN.md` 批准的计划；`docs/PROGRESS.md` 进度；`docs/DECISIONS.md` 执行期间的全部取舍。
 - `docs/GATES.md` 三道闸门的结果（其中 G1 带着一项未达标，见下）。
-- `docs/DATA-REPORT.md` 数据底座：数量、来源、推断清单。`docs/DATA-SOURCES.md` 原始数据与许可。
+- `cities/hz/DATA-REPORT.md` 杭州的数据底座：数量、来源、推断清单。`docs/DATA-SOURCES.md` 原始数据与许可。
 - `docs/STYLE-GUIDE.md` 这座城是怎么画的。
 - `docs/REVIEW/` 验收图：24 处地标各三个侧面（`1-01.png` … `4-05.png`，左边是页面原大的主视角，右边两个是另两个侧面的中间部分；`focus-1.png` … `focus-6.png` 是主视角中间放大两倍的近景）、西湖核心的四季、从全景到断桥的六档缩放、绕雷峰塔一圈、俯视与全景。全尺寸的帧在 `out/review/`。
 - `docs/REVIEW-QUEUE.md` 等你定夺的品味问题。
@@ -89,14 +139,18 @@ node tools/tests/frames-diff.cjs <改前目录> <改后目录>                  
 
 ## 已知的限制
 
+- **已经上线（2026-11-23）**：页面 <https://city.xiaowenz.com/hz>，数据在 <https://data-city.xiaowenz.com>（R2 桶 `city`）。全部 1558 块瓦片从线上取回逐一核对过，真浏览器打开无报错。大陆的访问速度还没有实测。
+- **只有一座城。** 多城市的机制（地址、选城、清单）用杭州的数据挂成两座城测过，没有第二座真实的城市烘焙过。
 - **我没有看过这些画面。** 这个环境里截图只能交给视觉模型转述。画质靠客观比对、自动测试和视觉模型的目检保证；最终的样子需要你看验收图。
 - **建筑的颜色直到验收阶段才真正生效**：着色器里读错了一个纹理，之前全城的墙都是同一种灰白。修正之后只复核了 8 张地标图（断桥、保俶塔、雷峰塔、净慈寺、城隍阁、灵隐寺、六和塔、拱宸桥），其余的验收图没有经过看图复核，只过了数字检查。请重点看颜色。经过见 `docs/DECISIONS.md` D048、`docs/PROGRESS.md`。
 - **闸门 G1 带着一项未达标**：与原版逐像素比对，背面机位的明暗分布差 2.08%（门槛 2%）。原因在参照版一方（它从这个角度漏出桥拱的下表面）；其余四项指标五个机位全过。见 `docs/GATES.md` 和 `docs/DECISIONS.md` D013、D014。
-- **搜索只认 OpenStreetMap 里的名字**：主路搜得到，小区里的小路和人行道大多没有名字；由楼高数据集补出来的楼（87%）没有名字。俗名靠别名表。钱塘江高亮画的是江面的岸，因为 OSM 里沿江的线画得很粗，有十几公里是从陆地上穿过去的。见 `docs/DATA-REPORT.md`"名字"一节、`docs/DECISIONS.md` D062。
-- **钱塘江现在是运河的青绿色，不是下面写的土黄色**：江面在 OSM 里没有名字，"名字里有钱塘才是江"的规则对它不生效（D053）。原有的问题，做搜索时发现的，没有动；见 `docs/REVIEW-QUEUE.md` 第 32 条。
-- 楼高 3.3% 是推断的；屋顶上的小件、树的位置、车船行人全是按规矩生成的；地标的坐标来自 OSM，模型尺寸一半是公开数字、一半按形制估。清单在 `docs/DATA-REPORT.md`。
+- **搜索只认 OpenStreetMap 里的名字**：主路搜得到，小区里的小路和人行道大多没有名字；由楼高数据集补出来的楼（87%）没有名字。俗名靠别名表。钱塘江高亮画的是江面的岸，因为 OSM 里沿江的线画得很粗，有十几公里是从陆地上穿过去的。见 `cities/hz/DATA-REPORT.md`"名字"一节、`docs/DECISIONS.md` D062。
+- **钱塘江现在是运河的青绿色，不是文档里说的土黄色**：江面在 OSM 里没有名字，"名字里有钱塘才是江"的规则对它不生效（D053）。原有的问题，做搜索时发现的，没有动；见 `docs/REVIEW-QUEUE.md` 第 32 条。
+- **飞行途中的画面由全景包顶着。** 飞行只取落点需要的瓦片（跨城飞行 15 块，原来取 92 块、41 MB），途中掠过的地方不再临时加载——快速掠过时本来也看不清。见 `docs/DECISIONS.md` D071。
+- 楼高 3.3% 是推断的；屋顶上的小件、树的位置、车船行人全是按规矩生成的；地标的坐标来自 OSM，模型尺寸一半是公开数字、一半按形制估。清单在 `cities/hz/DATA-REPORT.md`。
 - **位置存成了 4 厘米一格的整数**（数据从 1.1 GB 降到 320 MB 的代价）。几何在 2 厘米以内和原来一样，但着色器的颗粒噪声是按位置铺的，所以约 1.5% 的像素会比原来高或低一级明暗，远景多一些、近景少一些；肉眼分不出，逐像素比会看到。见 `docs/DECISIONS.md` D058。
-- 3D-GloBFP 给三分之一的轮廓记了两条高度不同的记录，烘焙时每组只留较高的一条（`docs/DATA-REPORT.md`"重复的轮廓"）。
+- 3D-GloBFP 给三分之一的轮廓记了两条高度不同的记录，烘焙时每组只留较高的一条（`cities/hz/DATA-REPORT.md`"重复的轮廓"）。
 - 全景和城区两档之间没有过渡。桥面不投影。街道没有车道线。Safari、Firefox 和真机手机没有测过。
 - 只在这台 Mac Studio（M3 Ultra）的 Chrome 上测过性能：所有图层都开，最差一行 95 分位 7.7 毫秒（4 倍超采样，960 × 540）。其他机器没有数据。
-- 源码在公开仓库 <https://github.com/iamshaynez/xiaowenz-map>；烘焙数据、原始数据和页面本身都没有发布。
+- 源码在公开仓库 <https://github.com/iamshaynez/xiaowenz-map>；烘焙数据和原始数据不进仓库，发布到 R2（`deploy/README.md`）。
+- **R2 API 令牌出现过一次在对话里**（配置当天）。轮换的方法：控制台 → R2 → 管理 R2 API 令牌 → 滚转或重建，换 `.env` 里两行。
