@@ -1,7 +1,7 @@
 // The page on a phone: a small touch screen, held upright and sideways. What is checked: it loads and
-// draws at a sensible resolution, the list of places opens from its button, a touch turns the city, two
-// fingers zoom it about what is under their middle and pan when they move together, the season buttons
-// work, and nothing runs off the side of the page.
+// draws at a sensible resolution, the list of places opens from its button, a touch drags the map along,
+// two fingers zoom about what is under their middle and turn the city when they move together, the season
+// buttons work, and nothing runs off the side of the page.
 //
 // Usage: NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs [out-dir]
 const { chromium, devices } = require('playwright');
@@ -13,6 +13,7 @@ const root = path.resolve(__dirname, '../..');
 const outDir = path.resolve(root, process.argv[2] || 'out/mobile');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 5393;
+const OFF_PX = 1.5;            // how far what was taken hold of may be from the finger, in CSS pixels
 
 const failures = [];
 const check = (ok, message) => { if (!ok) failures.push(message); };
@@ -79,14 +80,19 @@ async function run(browser, device, name) {
   check(here.away < 5, `${name}: the flight from the list arrives (${here.away.toFixed(1)} m away)`);
   await page.screenshot({ path: path.join(outDir, `${name}-leifeng.png`) });
 
-  // one finger turns the city
+  // one finger drags the map along: what was taken hold of stays under it, and the view does not turn
   const client = await context.newCDPSession(page);
   const before = await page.evaluate(() => ({ yaw: window.__hz.camera.yaw, pitch: window.__hz.camera.pitch, scale: window.__hz.camera.scale }));
   const w = info.viewport[0], h = info.viewport[1];
-  await drag(client, w * 0.5, h * 0.5, w * 0.25, h * 0.08);
+  const heldAt = { x: w * 0.5, y: h * 0.5 };
+  const grabbed = await under(page, heldAt.x, heldAt.y);
+  await drag(client, heldAt.x, heldAt.y, w * 0.25, h * 0.08);
+  await page.evaluate(() => window.__hz.settle(30000));
   const after = await page.evaluate(() => ({ yaw: window.__hz.camera.yaw, pitch: window.__hz.camera.pitch, scale: window.__hz.camera.scale }));
-  check(Math.abs(after.yaw - before.yaw) > 0.1 && Math.abs(after.pitch - before.pitch) > 0.02, `${name}: a finger drag turns and tilts (yaw ${before.yaw.toFixed(2)} -> ${after.yaw.toFixed(2)}, pitch ${before.pitch.toFixed(2)} -> ${after.pitch.toFixed(2)})`);
-  check(Math.abs(after.scale - before.scale) < 1e-6, `${name}: one finger does not zoom`);
+  const followed = await projectedOff(page, grabbed, heldAt.x + w * 0.25, heldAt.y + h * 0.08);
+  check(followed < OFF_PX, `${name}: a finger drag pans: what was under the finger follows it (${followed.toFixed(2)} px off)`);
+  check(after.yaw === before.yaw && after.pitch === before.pitch, `${name}: a finger drag does not turn the view (yaw ${before.yaw.toFixed(2)} -> ${after.yaw.toFixed(2)}, pitch ${before.pitch.toFixed(2)} -> ${after.pitch.toFixed(2)})`);
+  check(after.scale === before.scale, `${name}: one finger does not zoom`);
   // two fingers zoom, about what is under their middle: it stays there. The view is of a pagoda on a hill
   // and the middle of the page is half-way up it: a zoom taken about the ground under the fingers, as it
   // used to be, leaves the pagoda sliding up the page.
@@ -96,16 +102,21 @@ async function run(browser, device, name) {
   const zoomed = await page.evaluate(() => window.__hz.camera.scale);
   check(zoomed > after.scale * 1.5, `${name}: two fingers spread zoom in (${after.scale.toFixed(2)} -> ${zoomed.toFixed(2)})`);
   await page.evaluate(() => window.__hz.settle(30000));
-  const still = await under(page, middle.x, middle.y);
-  const slipped = Math.hypot(still.x - held.x, still.y - held.y, still.z - held.z);
-  check(slipped < 2, `${name}: what was under the middle of the fingers stays there (${slipped.toFixed(1)} m off; was ${held.z.toFixed(0)} m up)`);
-  // two fingers together carry the map along
+  // measured by where the held point now lands on the page, not by what the page draws under the middle
+  // now: zooming in brings a different slope or wall under the middle, and asking the page what is there
+  // would compare two different surfaces
+  const slipped = await projectedOff(page, held, middle.x, middle.y);
+  check(slipped < OFF_PX, `${name}: what was under the middle of the fingers stays there (${slipped.toFixed(2)} px off; it was ${held.z.toFixed(0)} m up)`);
+  // two fingers moving together turn the city and tilt it, and the map does not move
   const shift = { x: w * 0.12, y: h * 0.1 };
+  const centre = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
   await move2(client, middle.x, middle.y, 60, shift.x, shift.y);
   await page.evaluate(() => window.__hz.settle(30000));
-  const carried = await under(page, middle.x + shift.x, middle.y + shift.y);
-  const left = Math.hypot(carried.x - still.x, carried.y - still.y, carried.z - still.z);
-  check(left < 3, `${name}: two fingers moving together pan: what was under their middle follows it (${left.toFixed(1)} m off)`);
+  const turned = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
+  check(Math.abs(turned.yaw - (centre.yaw - shift.x * 0.006)) < 1e-4, `${name}: two fingers moving together turn the view (${(turned.yaw - centre.yaw).toFixed(3)} rad, expected ${(-shift.x * 0.006).toFixed(3)})`);
+  check(Math.abs(turned.pitch - (centre.pitch + shift.y * 0.005)) < 1e-4, `${name}: two fingers moving together tilt the view (${(turned.pitch - centre.pitch).toFixed(3)} rad, expected ${(shift.y * 0.005).toFixed(3)})`);
+  check(Math.abs(turned.x - centre.x) < 1e-3 && Math.abs(turned.y - centre.y) < 1e-3 && Math.abs(turned.scale - centre.scale) < 1e-5,
+    `${name}: two fingers moving together do not move the map (${Math.hypot(turned.x - centre.x, turned.y - centre.y).toExponential(1)} m, scale ${(turned.scale - centre.scale).toExponential(1)})`);
   await page.screenshot({ path: path.join(outDir, `${name}-zoomed.png`) });
   // seasons by their buttons
   await page.click('#seasons button[data-season="winter"]');
@@ -117,7 +128,7 @@ async function run(browser, device, name) {
   await context.close();
 }
 
-// two fingers moving together across the canvas: a pan
+// two fingers moving together across the canvas: a turn and a tilt
 async function move2(client, x, y, spread, dx, dy, steps = 8) {
   await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x - spread, y, id: 1 }, { x: x + spread, y, id: 2 }] });
   for (let k = 1; k <= steps; k++) {
@@ -129,6 +140,12 @@ async function move2(client, x, y, spread, dx, dy, steps = 8) {
 
 // the world point the page draws at a position on the page
 const under = (page, x, y) => page.evaluate(({ x, y }) => window.__hz.under(x, y), { x, y });
+// how far a world point lands from a position on the page, in CSS pixels
+const projectedOff = (page, point, x, y) => page.evaluate(({ point, x, y }) => {
+  const c = window.__hz.camera.project(point.x, point.y, point.z), canvas = document.getElementById('c');
+  const css = canvas.clientWidth / window.__hz.renderer.W;          // the CSS pixels one frame pixel makes
+  return Math.hypot(c.sx * css - x, c.sy * css - y);
+}, { point, x, y });
 
 (async () => {
   const server = spawn('node', [path.join(root, 'serve.mjs')], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });

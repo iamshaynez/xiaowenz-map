@@ -37,7 +37,7 @@
   | `NODE_PATH="$(npm root -g)" node tools/tests/mouse.cjs` | 左键拖动平移（抓住的东西跟着指针走，视角不变）、右键拖动旋转和俯仰（地图不动）、右键没有菜单；桌面和 960×540 两种页面 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs` | 24 处地标的取景，三个侧面：手工地标露出来的像素数、是否在画面中央、是不是它自己的颜色；页面读到的地面高度 = 烘焙写下的；其余地标的取景不空白 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs` | 滚轮缩放的锚点：鼠标下面的东西（塔顶、山顶、湖面）在拉近、拉远时不动；桌面的像素大小（一个内部像素两个 CSS 像素）和 960×540 的小页面各查一遍 | 通过（移动不超过 0.3 像素） |
-  | `NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs` | iPhone 13 竖屏、Pixel 5 横屏：画面分辨率、名录折叠、单指转动、双指绕着两指中间的东西缩放、两指一起移动是平移、季节按钮 | 通过 |
+  | `NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs` | 手机触控（D061）：iPhone 13 竖屏、Pixel 5 横屏：画面分辨率、名录折叠、单指拖着地图走（抓住的东西跟着手指，视角不变）、双指绕着两指落下时中间的东西缩放、双指一起拖动旋转和俯仰（地图不动）、季节按钮 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --ss 2,4 --out final` | 吞吐（闸门 G2）：最差一行 95 分位 7.3 毫秒（4 倍超采样，城区最宽一档） | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10` | 随机漫游十分钟：1,333 次操作，无报错，不丢显卡上下文，堆的中位数（第二个四分之一时段对最后一个）45 → 42 MB，瓦片不超过 300 块，19 帧抽样最慢 2.7 毫秒 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs` | 与参照版逐像素比（闸门 G1 的回归） | 退出码 1：就是上面那项已知的例外（2.08%），其余全过 |
@@ -105,6 +105,7 @@
 - [x] 数据量：量清楚 1.1 GB 花在哪、看一个视角要下载多少（`out/scratch/` 里的一次性脚本，结论在对话里）
 - [x] 烘焙数据改成整数：1.1 GB → 358 MB（D058）；页面读取器、`bake-compare`、`frames`、`frames-diff`
 - [x] 静帧比对查出来的两件事：回到全景的缩放算错（D057）；楼高数据集的重复记录（D059）→ 去掉，321 MB
+- [x] 触屏照鼠标改：单指平移，双指一起拖动旋转和俯仰（D061）
 - [x] 在最终的数据上重跑全部检查（上表）；验收图按新的数据重出（`docs/REVIEW/` 的 35 个文件都变了）
 - [ ] 推送 D057 起的三次提交（等你点头）
 

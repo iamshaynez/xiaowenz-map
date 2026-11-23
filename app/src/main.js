@@ -91,7 +91,7 @@ async function boot() {
 
   // ---- input ------------------------------------------------------------------------------------------
   const pointers = new Map();
-  let pinch = null;            // two fingers: how far apart they were, where their middle was, and what is drawn under it
+  let pinch = null;            // two fingers: how far apart they were when the gesture was last applied, their middle, and what is drawn under it
   let drag = null;             // one pointer holding the canvas: whether it turns the view, and the height of what it took hold of
   let wheelZoom = null;        // a turn of the wheel not yet applied: where the cursor is, and by how much to zoom
   // a pointer's position in the frame's own pixels. The canvas shows each of them as pixelScale CSS pixels,
@@ -108,9 +108,9 @@ async function boot() {
     const ground = camera.unproject(at.x, at.y);
     return world.groundAt(ground.x, ground.y);
   };
-  // A mouse drags the map along with its left button and turns the view with its right one (D055). A finger
-  // or a pen has one button, and it turns the view.
-  const turns = e => e.pointerType !== 'mouse' || e.button === 2;
+  // A mouse drags the map along with its left button and turns the view with its right one (D055). A touch
+  // is the same the other way round (D061): one finger pans, two fingers together turn and tilt.
+  const turns = e => e.pointerType === 'mouse' && e.button === 2;
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== 0) e.preventDefault();          // no middle-click autoscroll, nothing else the browser does with a button
     canvas.focus({ preventScroll: true });
@@ -129,17 +129,10 @@ async function boot() {
     if (!pointers.has(e.pointerId)) return;
     const was = pointers.get(e.pointerId), now = toFrame(e);
     pointers.set(e.pointerId, now);
-    if (pointers.size === 2 && pinch) {
-      // two fingers: zoom by how far apart they are, about the middle of them, and the middle carries what
-      // was under it along (so two fingers together pan). All at the height of what was under the middle
-      // when the second finger touched: the thing seen there stays under the fingers.
-      const state = pinchState(), { x, y, height } = pinch;
-      const kept = camera.unprojectAt(x, y, camera.scale, height);
-      camera.zoomAt(state.x, state.y, camera.scale * state.distance / pinch.distance, height);
-      const after = camera.unprojectAt(state.x, state.y, camera.scale, height);
-      camera.x += kept.x - after.x;
-      camera.y += kept.y - after.y;
-      pinch = { ...state, height };
+    if (pointers.size === 2) {
+      // two fingers: nothing is done here. The browser reports one finger at a time, and the distance
+      // between them half way through a move is neither the old nor the new one; the gesture is applied in
+      // the frame loop, once for the latest position of both fingers
     } else if (pointers.size === 1 && drag) {
       if (drag.turn) {
         // turn the city, and tilt it with a pull up or down, by how far the hand moved on the page (CSS
@@ -224,6 +217,22 @@ async function boot() {
       const { x, y, factor } = wheelZoom;
       wheelZoom = null;
       camera.zoomAt(x, y, Math.min(24, Math.max(0.004, camera.scale * factor)), surfaceAt({ x, y }));
+      dirty = true;
+    }
+    if (pinch && pointers.size === 2) {
+      // two fingers: zoom by how far apart they are, about the middle of them (the wheel's job on a mouse),
+      // and how they have moved together turns the city and tilts it (the right button's). All at the height
+      // of what was under the middle when the second finger touched: the thing seen there stays under the
+      // fingers. Applied here, once a frame, for the reasons in the pointermove handler
+      const state = pinchState(), { x, y, height } = pinch;
+      // the zoom anchors at the middle of the fingers where they touched: one anchor for the whole
+      // gesture, so that a zoom whose anchor wobbles with the fingers does not leave the map shifted
+      camera.zoomAt(x, y, camera.scale * state.distance / pinch.distance, height);
+      const across = (state.x - pinch.x) * pixelScale, down = (state.y - pinch.y) * pixelScale;
+      camera.yaw -= across * 0.006;
+      camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
+      if (across || down) ui.follow();      // turns around the landmark last flown to, if there is any
+      pinch = { ...state, height };
       dirty = true;
     }
     if (!frozen) renderer.time = now / 1000;
