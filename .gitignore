@@ -16,3 +16,5 @@ __pycache__/
 .pytest_cache/
 # node
 node_modules/
+# pip's metadata from an editable install (pip install -e pipeline)
+*.egg-info/
