@@ -6,7 +6,7 @@
 
 ## 运行
 
-需要 Node 18 以上。数据已经烘焙好（`data/baked/`，约 1.1 GB，不入库）。
+需要 Node 18 以上。页面读的烘焙数据（`data/baked/`，约 1.1 GB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
 
 ```
 node serve.mjs
@@ -90,4 +90,4 @@ NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                        
 - 楼高 2.9% 是推断的；屋顶上的小件、树的位置、车船行人全是按规矩生成的；地标的坐标来自 OSM，模型尺寸一半是公开数字、一半按形制估。清单在 `docs/DATA-REPORT.md`。
 - 全景和城区两档之间没有过渡。桥面不投影。街道没有车道线。Safari、Firefox 和真机手机没有测过。
 - 只在这台 Mac Studio（M3 Ultra）的 Chrome 上测过性能：所有图层都开，最差一行 95 分位 7.7 毫秒（4 倍超采样，960 × 540）。其他机器没有数据。
-- 提交只在本地仓库，从未推送。
+- 源码在公开仓库 <https://github.com/iamshaynez/xiaowenz-map>；烘焙数据、原始数据和页面本身都没有发布。
