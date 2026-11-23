@@ -1,14 +1,29 @@
-// 像素杭州：主城区活地图。启动、输入和帧循环。页面上地图以外的部分（名录、搜索、季节、导览、飞行）在 ui.js。
+// 像素城市：一座城的活地图，是哪座城看它的地址（/hz）。启动、输入和帧循环。页面上地图以外的部分（名录、搜索、季节、导览、飞行）在 ui.js。
 import { createContext } from './gl/context.js';
 import { CityRenderer } from './render/city.js';
 import { loadNames } from './world/names.js';
 import { DISTRICT_SCALE, LIFE_SCALE, World } from './world/store.js';
+import { CHANNELS, cityAsked, openCity, openCities } from './world/source.js';
+import { DATA_ORIGIN } from './config.js';
 import { buildLandmarks } from './landmarks/index.js';
 import { createInterface } from './ui.js';
 
-const DATA = '../data';
 const MAX_WIDTH = 960, MAX_HEIGHT = 540;   // the frame at the middle pixel size; finer and coarser sizes scale it
 const MIN_WIDTH = 320;                       // but never narrower than this: on a phone a pixel is one CSS pixel
+
+// The city to show: the one its address names (/hz), as the channel the address names tells of it (?channel=next:
+// what is published as next; world/source.js). Where the address names no city (/), the first of the cities there is,
+// and the address is made the city's own, so that it can be sent on.
+async function cityOnShow() {
+  const askedFor = new URLSearchParams(location.search).get('channel'), channel = CHANNELS.includes(askedFor) ? askedFor : CHANNELS[0];
+  const asked = cityAsked(location.pathname);
+  if (asked) return openCity(DATA_ORIGIN, asked, channel);
+  const first = (await openCities(DATA_ORIGIN))[0];
+  if (!first) throw new Error('还没有哪座城市发布');
+  const city = await openCity(DATA_ORIGIN, first.id, channel);
+  history.replaceState(null, '', `/${city.id}${location.search}`);
+  return city;
+}
 
 async function boot() {
   // how big a pixel is on the page: the middle size keeps the frame within 960 x 540, the fine one has
@@ -17,10 +32,12 @@ async function boot() {
   const size = Number(new URLSearchParams(location.search).get('px') ?? localStorage.getItem('pixel-size') ?? 1);
   const pixelScale = Math.max(1, Math.min(auto - 1 + size, Math.floor(innerWidth / MIN_WIDTH)));
   const width = Math.max(160, Math.floor(innerWidth / pixelScale)), height = Math.max(120, Math.floor(innerHeight / pixelScale));
-  const canvas = document.getElementById('c');
+  const canvas = document.getElementById('c'), $ = id => document.getElementById(id);
+  // the city comes first: everything else here is a file of it, except the palette, which is the page's own
+  const city = await cityOnShow();
   const [index, paletteFile] = await Promise.all([
-    fetch(`${DATA}/baked/index.json`).then(r => r.json()),
-    fetch(`${DATA}/curated/palette.json`).then(r => r.json()),
+    fetch(city.url('index.json')).then(r => r.json()),
+    fetch(new URL('../palette.json', import.meta.url)).then(r => r.json()),
   ]);
   const gl = createContext(canvas);
   // supersampling only decides whether a pixel is covered (D015): four samples each way on a desktop,
@@ -64,14 +81,14 @@ async function boot() {
   const quiet = new URLSearchParams(location.search).get('ui') === 'off';
   if (quiet) document.body.classList.add('quiet');
   // the index of names, for the search: fetched the first time it is wanted
-  const book = { promise: null, load() { return this.promise ||= loadNames(`${DATA}/baked/names.bin`); } };
+  const book = { promise: null, load() { return this.promise ||= loadNames(city.url('names.bin')); } };
 
-  const world = new World(gl, index, `${DATA}/baked`);
+  const world = new World(gl, index, city);
   await world.loadOverview();
   // the landmarks built by hand, standing where the bake placed them. The list with the models in it is
   // the one the page uses as well: a landmark is looked at half-way up, and only its model knows how high
   // that is.
-  const list = await fetch(`${DATA}/baked/landmarks.json`).then(r => r.json());
+  const list = await fetch(city.url('landmarks.json')).then(r => r.json());
   const landmarks = buildLandmarks(gl, list, place);
   renderer.landmarks = landmarks;
   renderer.groundAt = (x, y) => world.groundAt(x, y);
@@ -204,9 +221,18 @@ async function boot() {
   const ui = createInterface({
     camera, renderer, world, canvas, landmarks, seasons: seasonNames,
     season: () => season, setSeason: name => { setSeason(name); dirty = true; },
-    overview, overviewTarget, names: book, quiet,
+    overview, overviewTarget, names: book, quiet, tour: city.tour,
   });
   ui.onDirty(() => { dirty = true; });
+  // the words that name the city: the title of the page, its heading, and what the canvas is said to be
+  const titled = `像素${city.name}`;
+  document.title = city.subtitle ? `${titled} · ${city.subtitle}` : titled;
+  $('city-name').textContent = titled;
+  $('city-subtitle').textContent = city.subtitle;
+  $('city-subtitle').hidden = !city.subtitle;
+  canvas.setAttribute('aria-label', `${titled}：可以旋转、缩放的立体地图`);
+  // the other cities there are, once their list has come: another city is the same page at its own address
+  openCities(DATA_ORIGIN).then(list => ui.cities(list, city.id), () => {});
   // opened at a place: ?find=<a name> flies to the first thing that answers it
   const openedAt = new URLSearchParams(location.search).get('find');
   if (openedAt) ui.find(openedAt, 0).catch(error => console.error(error));
@@ -244,8 +270,18 @@ async function boot() {
       dirty = true;
     }
     if (!frozen) renderer.time = now / 1000;
-    // tiles are only wanted from the district tier on; the overview draws from its own package
-    if (camera.scale >= DISTRICT_SCALE * 0.5) world.request(world.visible(camera), 10);
+    // tiles are only wanted from the district tier on; the overview draws from its own package. While a flight
+    // is on, only what its destination needs is asked for (D071), and what is on its way but of no use there
+    // is let go: the flight passes over tiles it would never wait for, and the overview is drawn meanwhile.
+    const flyingToTiles = ui.flying() && ui.target().scale >= DISTRICT_SCALE * 0.5;
+    if (flyingToTiles) {
+      const view = world.viewOf(ui.target(), camera);
+      if (!world.flightTarget) world.beginFlight(view);
+      world.request(view, 10);
+    } else {
+      if (world.flightTarget) world.endFlight();
+      if (camera.scale >= DISTRICT_SCALE * 0.5) world.request(world.visible(camera), 10);
+    }
     world.upload(4);
     if (dirty || world.pending.size || (camera.scale >= LIFE_SCALE && !frozen)) {
       renderer.present(renderer.render(world));
@@ -257,9 +293,9 @@ async function boot() {
   requestAnimationFrame(frame);
 
   // for tests and the console
-  window.__hz = {
+  window.__city = {
     camera, renderer, world, index, gl, ui,
-    landmarks,
+    landmarks, city,
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things
     landmarkMask: id => renderer.landmarkMask(id),

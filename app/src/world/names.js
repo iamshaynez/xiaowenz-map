@@ -1,7 +1,7 @@
-// The names the map's things are called by, and finding them: what the pipeline baked in data/baked/names.bin.
+// The names the map's things are called by, and finding them: what the pipeline baked in a city's names.bin.
 //
 // A thing is found by its name, by the other names the map gives it (an English one, an old one, an alias from
-// data/curated/aliases.json) and, for a landmark of the curated list, by each part of its title. The best answers
+// the city's own aliases, cities/<id>/aliases.json) and, for a landmark of the curated list, by each part of its title. The best answers
 // come first. A station the map calls by the place above it (武林广场 for the station under the square) is found
 // as if its name ended in 站, so that the place comes before it; and a query that ends in 站 finds the thing without it.
 import { loadContainer, readNames } from './data.js';

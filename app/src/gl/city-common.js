@@ -98,7 +98,7 @@ bool onIsland(vec2 world, ivec2 pixel) {
 }
 `;
 
-// Ground classes; the numbers are those of pipeline/hz/ground.py and reach the app through index.json.
+// Ground classes; the numbers are those of pipeline/pixelcity/ground.py and reach the app through index.json.
 export const GROUND_CLASSES = {
   WATER_LAKE: 1, WATER_RIVER: 2, WATER_CANAL: 3, WATER_POND: 4,
   ROAD_MAJOR: 5, ROAD_SECONDARY: 6, ROAD_MINOR: 7, ROAD_SERVICE: 8, ROAD_PEDESTRIAN: 9, PATH: 10,

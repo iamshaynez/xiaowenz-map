@@ -1,4 +1,4 @@
-// The landmarks of the app: the curated list (data/curated/landmarks.json, placed on the map by the bake)
+// The landmarks of the app: the city's list (cities/<id>/landmarks.json, looked up in the map and placed by the bake)
 // with every landmark that is built by hand assembled and ready on the graphics card.
 import { assemble, floatTexture } from '../world/store.js';
 import * as models from './models.js';

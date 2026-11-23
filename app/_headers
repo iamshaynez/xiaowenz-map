@@ -1,0 +1,8 @@
+# 页面自己的文件怎么发出去。部署时 Workers 读这个文件，它本身不对外提供。数据不在页面这边：数据在桶里，
+# 每个对象自带自己的缓存头（tools/deploy/publish.mjs）。
+
+# 页面的代码没有带版本号的文件名，所以每次都问一声有没有变（变了的才重新下载）：这也是 Workers 的默认做法。
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

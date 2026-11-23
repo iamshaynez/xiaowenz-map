@@ -19,7 +19,7 @@ const smooth = t => t * t * (3 - 2 * t);
 const lerpAngle = (a, b, t) => a + ((((b - a) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI) * t;
 
 // app: { camera, renderer, world, canvas, landmarks, seasons, season(), setSeason(name), overview(), overviewTarget(),
-//        names: { load() }, quiet }
+//        names: { load() }, quiet, tour }   tour: { label } where the city has a tour, null where it has none
 export function createInterface(app) {
   const { camera, landmarks } = app;
   const $ = id => document.getElementById(id);
@@ -133,9 +133,13 @@ export function createInterface(app) {
     return moved;
   }
 
-  // ---- the tour of West Lake -----------------------------------------------------------------------------
-  const lake = landmarks.filter(l => l.group === groups[0].name);
+  // ---- the tour: the landmarks of the first group, one after another ---------------------------------------------
+  // Whether the city has a tour, and what its button is called, the city says (cities/<id>/city.json, "tour").
+  const lake = app.tour ? landmarks.filter(l => l.group === groups[0].name) : [];
+  $('tour').hidden = !lake.length;
+  $('tour').textContent = app.tour?.label || '';
   function startTour() {
+    if (!lake.length) return;
     tour = { index: 0 };
     $('tour').setAttribute('aria-pressed', 'true');
     $('tour').textContent = '停止导览';
@@ -151,7 +155,7 @@ export function createInterface(app) {
     if (!tour) return;
     tour = null;
     $('tour').setAttribute('aria-pressed', 'false');
-    $('tour').textContent = '西湖导览';
+    $('tour').textContent = app.tour.label;
   }
   $('tour').addEventListener('click', () => { if (tour) stopTour(); else startTour(); });
 
@@ -401,9 +405,28 @@ export function createInterface(app) {
     if (found) mark.paint(camera);         // what was found by name, over the frame just made
   }
 
+  // ---- the other cities -------------------------------------------------------------------------------------------
+  // The cities there are (world/source.js), as buttons: the current one marked, each other one the same page at
+  // its own address.
+  function cities(list, current) {
+    const row = $('cities');
+    for (const said of list) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = said.name;
+      button.title = said.subtitle;
+      button.className = said.id === current ? 'current' : '';
+      button.setAttribute('aria-pressed', String(said.id === current));
+      if (said.id !== current) button.addEventListener('click', () => { location.assign(`/${said.id}`); });
+      row.append(button);
+    }
+    row.hidden = !list.length;
+  }
+
   return {
     tick,
     paint,
+    cities,
     onDirty: hook => { hooks.dirty = hook; },
     setSeason,
     flyTo: (id, seconds = 1.8) => { const landmark = landmarks.find(l => l.id === id); if (!landmark) throw new Error(`没有 ${id} 这处地标`); stopTour(); goTo({ ...place(landmark), landmark }, seconds); },

@@ -1,5 +1,5 @@
-// Reading what the pipeline baked: data/baked/overview.bin, data/baked/tiles/b/<x>_<y>.bin and data/baked/names.bin.
-// The layout is defined in pipeline/hz/scene.py and pipeline/hz/compact.py: numbers in the smallest integers
+// Reading what the pipeline baked for a city (data/baked/<city>/): overview.bin, tiles/b/<x>_<y>.bin and names.bin.
+// The layout is defined in pipeline/pixelcity/scene.py and pipeline/pixelcity/compact.py: numbers in the smallest integers
 // that hold them, and what the page can work out left out. So that a file stays small, each reader puts
 // the numbers back as they were: positions in metres, heights read off the tile's grid.
 //
@@ -22,7 +22,7 @@ export function parseContainer(buffer) {
   const view = new DataView(buffer);
   if (!MAGIC.every((byte, k) => view.getUint8(k) === byte)) throw new Error('not a baked file');
   const format = view.getUint16(4, true);
-  if (format !== FORMAT) throw new Error(`这是第 ${format} 版的烘焙数据，页面读的是第 ${FORMAT} 版：请重新烘焙（python -m hz.build_all --from bake）`);
+  if (format !== FORMAT) throw new Error(`这是第 ${format} 版的烘焙数据，页面读的是第 ${FORMAT} 版：请重新烘焙（python -m pixelcity.build_all --city <城市> --from bake）`);
   const count = view.getUint16(6, true);
   const sections = {};
   for (let k = 0; k < count; k++) {
@@ -53,7 +53,7 @@ export function readGrid(section) {
 
 // The ground as the page draws it over a height grid (rows from the north): each cell is two triangles, as
 // gridMesh splits them, a-c-b and b-c-d with a south-west, b south-east, c north-west and d north-east. It
-// is what the bake's surface() computes (pipeline/hz/bake.py): whatever is laid on the ground follows the mesh.
+// is what the bake's surface() computes (pipeline/pixelcity/bake.py): whatever is laid on the ground follows the mesh.
 export function surfaceOn(grid, x, y) {
   const fx = (x - grid.x0) / grid.cell, fy = (y - grid.y0) / grid.cell;
   const i = Math.min(grid.nx - 2, Math.max(0, Math.floor(fx))), j = Math.min(grid.ny - 2, Math.max(0, Math.floor(fy)));
@@ -289,7 +289,7 @@ export function readPlaces(section) {
   return JSON.parse(TEXT.decode(section.bytes));
 }
 
-// NAME and LINE of data/baked/names.bin, the names the page searches by (pipeline/hz/names.py). NAME is JSON: a
+// NAME and LINE of names.bin, the names the page searches by (pipeline/pixelcity/names.py). NAME is JSON: a
 // column a list and one value in each for every thing -- names, kinds, x, y, z, label, size, box, line, landmark, and
 // for only some things near and also, by row. LINE holds, for a thing that runs as a line, its course: a point in
 // 10 bytes, x and y (f32, metres) and z (i16, 12.5 cm); a point whose x and y are not a number ends a piece.
@@ -311,8 +311,8 @@ export function readMeta(section) {
   return JSON.parse(TEXT.decode(section.bytes));
 }
 
-export async function loadContainer(url) {
-  const response = await fetch(url);
+export async function loadContainer(url, signal = null) {
+  const response = await fetch(url, signal ? { signal } : undefined);
   if (!response.ok) throw new Error(`${url}: ${response.status}`);
   return parseContainer(await response.arrayBuffer());
 }

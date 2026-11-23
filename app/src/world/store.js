@@ -1,6 +1,7 @@
 // What the app draws: the overview package, plus the 1 km tiles that are in view.
 // Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
-// longest ago are let go.
+// longest ago are let go. Where a file is fetched from the city says (world/source.js): by the manifest
+// of the city, which names every file of it.
 import { TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
 
 export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
@@ -133,12 +134,12 @@ export const UNIT_BOX = unitBox();
 export const UNIT_SQUARE = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 
 export class World {
-  constructor(gl, index, urlBase) {
+  constructor(gl, index, city) {
     this.gl = gl;
     this.index = index;
     // how far each class of ground lies above the terrain it is drawn on (the bake's LIFT)
     this.lifts = Object.fromEntries(Object.entries(index.groundClasses).map(([id, info]) => [Number(id), info.lift]));
-    this.urlBase = urlBase;
+    this.city = city;           // says whether a file is part of the city, and where it is fetched from
     this.overview = null;
     this.tiles = new Map();        // "x_y" -> tile
     this.pending = new Map();
@@ -172,7 +173,7 @@ export class World {
   }
 
   async loadOverview() {
-    const sections = await loadContainer(`${this.urlBase}/overview.bin`);
+    const sections = await loadContainer(this.city.url('overview.bin'));
     const gl = this.gl;
     const grid = readGrid(sections.GRID);
     const cells = readMassing(sections.MASS);
@@ -218,18 +219,47 @@ export class World {
   }
 
   // start fetching what is missing, a few at a time
+  // the tiles a pose of the camera can see, nearest first: the destination of a flight, while it is on its way.
+  // A pose is the camera's { x, y, scale, pitch, yaw }; the frame's size and the projecting come from the camera.
+  viewOf(pose, camera) {
+    return this.visible({ x: pose.x, y: pose.y, scale: pose.scale, width: camera.width, height: camera.height,
+                          sinPitch: Math.sin(pose.pitch), cosPitch: Math.cos(pose.pitch), axes: (x, y) => camera.about(pose.x, pose.y, x, y) });
+  }
+
+  // While a flight is on, only what its destination needs is asked for (D071): what the flight passes over would
+  // be out of date before it arrives, and the overview is drawn under it meanwhile. What was asked for before
+  // and is of no use there is let go, so that it stops taking bandwidth.
+  beginFlight(view) {
+    this.flightTarget = new Set(view.map(tile => `${tile.tx}_${tile.ty}`));
+    for (const [key, entry] of this.pending) {
+      if (!this.flightTarget.has(key)) {
+        entry.abort?.();
+        this.pending.delete(key);
+      }
+    }
+  }
+
+  endFlight() {
+    this.flightTarget = null;
+  }
+
   request(visible, budget = 6) {
     let started = 0;
     for (const tile of visible) {
       const key = `${tile.tx}_${tile.ty}`;
       if (this.tiles.has(key) || this.pending.has(key)) continue;
+      if (this.flightTarget && !this.flightTarget.has(key)) continue;
+      const name = `tiles/b/${key}.bin`;
+      if (!this.city.has(name)) continue;           // nothing was baked for this square (open water, beyond the region)
       if (started >= budget) break;
       const entry = { key, tx: tile.tx, ty: tile.ty };
+      const controller = new AbortController();
+      entry.abort = () => controller.abort();
       this.pending.set(key, entry);
       started++;
-      loadContainer(`${this.urlBase}/tiles/b/${tile.tx}_${tile.ty}.bin`)
+      loadContainer(this.city.url(name), controller.signal)
         .then(sections => { entry.sections = sections; })
-        .catch(error => { entry.error = error; });
+        .catch(error => { if (!controller.signal.aborted) entry.error = error; });
     }
   }
 
