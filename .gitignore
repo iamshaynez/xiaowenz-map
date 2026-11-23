@@ -18,3 +18,7 @@ __pycache__/
 node_modules/
 # pip's metadata from an editable install (pip install -e pipeline)
 *.egg-info/
+# what publishing and deploying are told: keys and tokens, never kept (.env.example at the root lists what goes in)
+.env
+.dev.vars
+.wrangler/

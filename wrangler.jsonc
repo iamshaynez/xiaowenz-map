@@ -1,0 +1,18 @@
+// 页面在线上的样子：一个只有文件、没有脚本的 Worker，挂在自己的域名下。app/ 里是什么就原样发布什么，没有构建步骤。
+// 部署：npm run deploy（tools/deploy/deploy.mjs 调 wrangler）。上线前要做的事见 deploy/README.md。
+{
+  "name": "pixel-cities",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,                                    // 只用自己的域名：*.workers.dev 在大陆打不开，也不必有两处入口
+  "routes": [
+    {
+      "pattern": "city.xiaowenz.com",                      // 页面的域名（数据在 data-city.xiaowenz.com，见 app/src/config.js）
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./app",
+    "not_found_handling": "single-page-application",       // /hz 这样一座城的地址都回到这一个页面，页面看地址知道是哪座城
+    "html_handling": "auto-trailing-slash"
+  }
+}

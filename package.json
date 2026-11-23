@@ -1,12 +1,17 @@
 {
-  "name": "pixel-hangzhou",
-  "version": "0.1.0",
+  "name": "pixel-cities",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "像素杭州：主城区活地图。pixel-plays 风格，WebGL2，无构建步骤。",
+  "description": "像素城市：一座城的活地图，是哪座城看它的地址（/hz）。pixel-plays 风格，WebGL2，无构建步骤；数据在 Cloudflare R2。",
   "scripts": {
     "start": "node serve.mjs",
-    "test": "node --test tests/",
+    "build": ".venv/bin/python -I -m pixelcity.build_all --city hz",
+    "publish": "node tools/deploy/publish.mjs",
+    "deploy": "node tools/deploy/deploy.mjs",
+    "verify": "node tools/deploy/verify.mjs",
+    "test": "node tools/tests/data-readers.cjs > /dev/null && node tools/tests/r2-signing.cjs && node tools/tests/deploy.cjs && .venv/bin/python -I -m unittest discover -s pipeline/tests -t pipeline/tests",
+    "test:browser": "NODE_PATH=\"$(npm root -g)\" node tools/tests/browser.mjs",
     "test:fidelity": "NODE_PATH=\"$(npm root -g)\" node tools/tests/fidelity.cjs"
   }
 }
