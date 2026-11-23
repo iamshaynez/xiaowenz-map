@@ -211,8 +211,15 @@ async function main() {
     check(Math.abs(yaw - dragged.yaw) > 0.05, 'the right button turns the city');
     await page.click('#home');
     await arrived();
-    const whole = await page.evaluate(() => ({ scale: window.__hz.camera.scale, tour: window.__hz.ui.touring() }));
-    check(whole.scale < 0.02 && !whole.tour, `R and the home button bring the whole city back (scale ${whole.scale.toFixed(4)})`);
+    // the whole city, at the zoom that holds all of it, from whatever zoom the camera had (it once came out
+    // divided by that zoom)
+    const whole = await page.evaluate(() => ({ scale: window.__hz.camera.scale, want: window.__hz.overviewTarget().scale, tour: window.__hz.ui.touring() }));
+    check(Math.abs(whole.scale - whole.want) < 1e-9 && !whole.tour, `R and the home button bring the whole city back (scale ${whole.scale.toFixed(5)}, the overview's own ${whole.want.toFixed(5)})`);
+    await page.evaluate(() => { Object.assign(window.__hz.camera, { scale: 12 }); window.__hz.touch(); });
+    await page.keyboard.press('r');
+    await arrived();
+    const again = await page.evaluate(() => ({ scale: window.__hz.camera.scale, want: window.__hz.overviewTarget().scale }));
+    check(Math.abs(again.scale - again.want) < 1e-9, `R from up close brings the whole city back too (scale ${again.scale.toFixed(5)}, the overview's own ${again.want.toFixed(5)})`);
     await quiet(page, true);
     await shoot(path.join(outDir, 'overview.png'));
     await quiet(page, false);

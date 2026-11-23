@@ -76,11 +76,14 @@ async function boot() {
   const camera = renderer.city;
   const [west, south, east, north] = index.bounds;
   camera.pitch = Math.PI / 6;
-  // the camera that holds the whole region, with a margin, at this pitch and yaw
+  // the camera that holds the whole region, with a margin, at this pitch and yaw. The region's extent is
+  // taken at a zoom of one pixel to a metre, whatever the camera's zoom is now: this is asked for from any
+  // zoom (R, the home button), and it once came out divided by the zoom it was asked at, so that R pressed
+  // at the overview zoomed in to a pixel a metre (D057).
   const overviewTarget = () => {
-    const corners = [[west, south], [west, north], [east, south], [east, north]].map(([x, y]) => camera.project(x, y, 0));
-    const spanX = Math.max(...corners.map(c => c.sx)) - Math.min(...corners.map(c => c.sx));
-    const spanY = Math.max(...corners.map(c => c.sy)) - Math.min(...corners.map(c => c.sy));
+    const corners = [[west, south], [west, north], [east, south], [east, north]].map(([x, y]) => camera.axes(x, y));
+    const spanX = Math.max(...corners.map(c => c.u)) - Math.min(...corners.map(c => c.u));
+    const spanY = (Math.max(...corners.map(c => c.v)) - Math.min(...corners.map(c => c.v))) * camera.sinPitch;
     return { x: (west + east) / 2, y: (south + north) / 2, scale: Math.min(0.9 * width / spanX, 0.84 * height / spanY) };
   };
   Object.assign(camera, overviewTarget());
@@ -252,6 +255,7 @@ async function boot() {
       return { x: point.x, y: point.y, z };
     },
     overview,
+    overviewTarget,                     // the pose `overview()` flies to, for tests
     touch: () => { dirty = true; },
     season: () => season,
     setSeason: name => ui.setSeason(name),
