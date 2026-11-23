@@ -28,17 +28,18 @@
   | `PYTHONPATH=pipeline .venv/bin/python -I -m unittest discover -s pipeline/tests -t pipeline/tests` | 数据管线 39 项：烘焙几何、坡屋顶、殿堂大屋顶、贴地高度、地标的让位（圆与走廊）、寺庙殿堂、屋顶形状、水色 | 39 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/shadows.cjs` | 阴影贴图对着解析答案逐像素比对，顺带编译全部城市着色器 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs` | 真实城市十四个视角（含四季）无报错 | 通过 |
-  | `NODE_PATH="$(npm root -g)" node tools/tests/tour.cjs` | 24 处地标逐个点名飞达：地标的一半高度落在画面中央，转动之后还在；四季按钮；缩放阶梯；导览；俯视；拖动。顺带出验收图 | 通过 |
+  | `NODE_PATH="$(npm root -g)" node tools/tests/tour.cjs` | 24 处地标逐个点名飞达：地标的一半高度落在画面中央，转动之后还在；四季按钮；缩放阶梯；导览；俯视；左键拖动停导览并平移、右键拖动旋转。顺带出验收图 | 通过 |
+  | `NODE_PATH="$(npm root -g)" node tools/tests/mouse.cjs` | 左键拖动平移（抓住的东西跟着指针走，视角不变）、右键拖动旋转和俯仰（地图不动）、右键没有菜单；桌面和 960×540 两种页面 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs` | 24 处地标的取景，三个侧面：手工地标露出来的像素数、是否在画面中央、是不是它自己的颜色；页面读到的地面高度 = 烘焙写下的；其余地标的取景不空白 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs` | 滚轮缩放的锚点：鼠标下面的东西（塔顶、山顶、湖面）在拉近、拉远时不动；桌面的像素大小（一个内部像素两个 CSS 像素）和 960×540 的小页面各查一遍 | 通过（移动不超过 0.3 像素） |
   | `NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs` | iPhone 13 竖屏、Pixel 5 横屏：画面分辨率、名录折叠、单指转动、双指绕着两指中间的东西缩放、两指一起移动是平移、季节按钮 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --out final` | 吞吐（闸门 G2）：最差一行 95 分位 7.7 毫秒 | 通过 |
-  | `NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10` | 随机漫游十分钟：1,333 次操作，无报错，不丢显卡上下文，堆的中位数 40 → 51 MB，瓦片不超过 300 块，19 帧抽样最慢 3.7 毫秒 | 通过 |
+  | `NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10` | 随机漫游十分钟：1,333 次操作，无报错，不丢显卡上下文，堆的中位数（第二个四分之一时段对最后一个）49 → 43 MB，瓦片不超过 300 块，19 帧抽样最慢 2.7 毫秒 | 通过 |
   | `NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs` | 与参照版逐像素比（闸门 G1 的回归） | 退出码 1：就是上面那项已知的例外（2.08%），其余全过 |
 
   浏览器测试各自起一个本地服务器（端口 5390–5399），不要同时跑两个。
 
-  缩放锚点修正（D054）之后重跑过的是：冒烟、巡游、手机、地标取景、一分钟漫游、缩放锚点。数据、渲染内核和着色器没有动，其余几项的结果沿用。
+  缩放锚点（D054）和鼠标左右键（D055）修正之后重跑过的是：冒烟、巡游、鼠标、手机、地标取景、缩放锚点、一分钟和十分钟的漫游，都通过。数据、渲染内核和着色器没有动（只加了读深度的一个函数），其余几项的结果沿用。漫游的内存检查改成跳过第一个四分之一时段（预热），再比较：原来拿开头三句的中位数作基数，随机操作一变就可能把 24 MB 当基数，报出"+101%"的假警报。
 - 写代码后的自检：`ruff check pipeline --select F,E9,B --ignore E501`；`node --check`；`grep -rn "if False\|if false"`；Python 测试要在重烘之前跑。
 
 ## 各阶段
@@ -80,7 +81,8 @@
 ### 阶段 6：体验层
 
 - [x] 名录（四组）、四季、导览、俯视、全景、像素大小、指北针、读数、说明（`app/src/ui.js`）
-- [x] 飞行动画；转动绕地标转（D049）；文字垫纸（D050）
+- [x] 飞行动画；右键转动绕地标转（D049）；文字垫纸（D050）
+- [x] 缩放以指针下面画着的面为锚点（D054）；鼠标左键平移、右键转视角（D055）
 - [x] 手机触控；画面下限 320 像素（D037）
 
 ### 阶段 7：验收与交付
