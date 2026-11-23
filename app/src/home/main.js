@@ -50,7 +50,7 @@ export async function bootHome() {
     button.type = 'button';
     button.className = 'marker';
     button.dataset.city = city.id;
-    button.setAttribute('aria-label', `进入 ${city.name} ${city.en} 的地图`);
+    button.setAttribute('aria-label', `进入 ${city.name} ${city.en || ''} 的地图`.replace(/\s+/g, ' ').trim());
     button.innerHTML = `<i class="dot" aria-hidden="true"></i><span class="tag"><b>${city.name}</b><small>${(city.en || '').toUpperCase()}</small></span>`;
     button.addEventListener('click', () => enter(city));
     button.addEventListener('pointerenter', () => globe.hold(true));
@@ -58,11 +58,11 @@ export async function bootHome() {
     $('markers').append(button);
     return { city, button, seen: false };
   });
-  // 名录里同样一行（键盘和读屏的人不必到球上找）
+  // 名录里同样一行（键盘和读屏的人不必到球上找）。英文名是后来才有的字段，桶里旧的城市清单可能没有
   for (const marker of markers) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = `${marker.city.name} ${marker.city.en}`;
+    button.textContent = `${marker.city.name} ${marker.city.en || ''}`.trim();
     button.addEventListener('click', () => enter(marker.city));
     $('home-cities').append(button);
   }
