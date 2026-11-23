@@ -5,6 +5,7 @@ Run after the bake:  python -m pixelcity.report <city>
 The numbers are the city's own wherever it is; the prose was written for Hangzhou, and a new city wants it read again.
 """
 import json
+import math
 import pickle
 import sys
 from collections import Counter
@@ -70,7 +71,8 @@ def build(city, log=print):
     add(f"> 像素{city.name}{city.subtitle}活地图的数据底座。所有数字由 `python -m pixelcity.report {city.id}` 从 `data/work/{city.id}/` 和 `data/baked/{city.id}/` 现算，写进本文件。\n")
     add("## 范围\n")
     add(f"- 经纬 {city.west}–{city.east} E，{city.south}–{city.north} N。投影 UTM {city.epsg - 32600}N（EPSG:{city.epsg}），原点东 {city.origin_e:.0f}、北 {city.origin_n:.0f}。")
-    add(f"- 外接框 {east - west / 1:.0f} 米东西 × {north - south:.0f} 米南北，约 {region_km2:.0f} 平方公里；范围本身在地面是个转了约 1.4 度的四边形（见 `index.json` 的 `island`）。")
+    turn = math.degrees(math.atan2(index["island"]["sin"], index["island"]["cos"]))
+    add(f"- 外接框 {east - west:.0f} 米东西 × {north - south:.0f} 米南北，约 {region_km2:.0f} 平方公里；范围本身在地面是个转了约 {turn:.1f} 度的四边形（见 `index.json` 的 `island`）。")
     add(f"- 烘焙 {index['tilesBaked']} 块 1 公里瓦片，外加全景包 `overview.bin`。\n")
 
     add("## 建筑\n")
@@ -97,7 +99,7 @@ def build(city, log=print):
     halls = sum(1 for b in buildings if b.get("temple_hall"))
     pitched = sum(1 for b in buildings if b.get("osm_roof"))
     add("")
-    add(f"有来源的（前三类）占 {100 * (1 - sources['inferred'] / len(buildings)):.1f}%。推断的 {sources['inferred']:,} 栋里：{capped:,} 栋是茶村、湿地村里的房子，数据集给的楼高被压到 {VILLAGE_LEVELS} 层以内；{halls:,} 栋是寺庙的殿堂（按 OSM 的标签和名字认出，如“济公殿”），一律按一层高的大殿处理，因为数据集把大屋顶量成了五六层的楼；{pitched:,} 栋是 OSM 记了屋顶形状的房子（如“人字顶、黑色”），按一两层的坡顶房处理；其余按类型和名称关键词估层数。有的寺庙在 OSM 里只有一个节点，它的地面内（城市定义的 `look.templeGrounds`）没有名字、没有高度来源的轮廓也按殿堂处理。")
+    add(f"有来源的（前三类）占 {100 * (1 - sources['inferred'] / len(buildings)):.1f}%。推断的 {sources['inferred']:,} 栋里：{capped:,} 栋是老街区里按村里规矩压层的房子（城市定义 `look.historic` 里 village 为 true 的圈），数据集给的楼高被压到 {VILLAGE_LEVELS} 层以内；{halls:,} 栋是寺庙的殿堂（按 OSM 的标签和名字认出，如“大雄宝殿”），一律按一层高的大殿处理，因为数据集把大屋顶量成了五六层的楼；{pitched:,} 栋是 OSM 记了屋顶形状的房子（如“人字顶、黑色”），按一两层的坡顶房处理；其余按类型和名称关键词估层数。有的寺庙在 OSM 里只有一个节点，它的地面内（`look.templeGrounds`）没有名字、没有高度来源的轮廓也按殿堂处理。")
     add("")
     add(table(["楼高", "米"], [["中位", f"{numpy.median(heights):.0f}"], ["90 分位", f"{numpy.percentile(heights, 90):.0f}"], ["99 分位", f"{numpy.percentile(heights, 99):.0f}"], ["最高", f"{heights.max():.0f}"]]))
     add("")
@@ -179,8 +181,12 @@ def build(city, log=print):
     add("")
     add("## 地形与土地覆盖\n")
     add(f"- Copernicus GLO-30，网格 {grid.shape[1]} × {grid.shape[0]}，30 米一格，{grid.min()} 到 {grid.max()} 米。最高 {int(grid.max())} 米。")
-    add("- ESA WorldCover 2021，10 米：树林、灌木按 1 格 1 棵的概率撒树（保留 55%），茶园附近降到 12%；建成区、耕地、草地、裸地直接作地面色。")
-    add(f"- 茶园：OSM 里名字带“茶园”的农田多边形，加上城市定义里的茶山（{len(circles(city, "tea"))} 处，`cities/{city.id}/city.json` 的 `look.tea`）；圈内卫星图上的“树”当茶田，不撒树。\n")
+    tea = circles(city, "tea")
+    add("- ESA WorldCover 2021，10 米：树林、灌木按 1 格 1 棵的概率撒树（保留 55%）" + ("，茶园附近降到 12%" if tea else "") + "；建成区、耕地、草地、裸地直接作地面色。")
+    if tea:
+        add(f"- 茶园：OSM 里名字带“茶园”的农田多边形，加上城市定义里的茶山（{len(tea)} 处，`cities/{city.id}/city.json` 的 `look.tea`）；圈内卫星图上的“树”当茶田，不撒树。\n")
+    else:
+        add(f"- 茶园：这座城市没有（`cities/{city.id}/city.json` 的 `look.tea` 留空），撒树只看树林密度。\n")
     add("## 树\n")
     trees = numpy.load(city.work / "trees.npy")
     kinds = Counter(trees["kind"].tolist())
@@ -240,7 +246,7 @@ def build(city, log=print):
         return "、".join(names.get(m, m) for m in models) or "—"
     add(table(["编号", "名称", "组", "对应 OSM 里的要素", "手工模型"], [[r["id"], r["title"], r["group"], r["source"].replace("OpenStreetMap: ", ""), built(r)] for r in landmarks]))
     add("")
-    add("地标的坐标全部从 OpenStreetMap 按名字查出来（`pixelcity/landmarks.py`，地标表在 `cities/<id>/landmarks.json`），没有一个凭记忆写。模型尺寸：塔高、层数取公开数字（雷峰塔 71.7 米 5 层、六和塔 59.89 米、城隍阁 41.6 米），其余（檐口出挑、塔身收分、各层高度）是按形制估的。\n")
+    add("地标的坐标全部从 OpenStreetMap 按名字查出来（`pixelcity/landmarks.py`，地标表在 `cities/<id>/landmarks.json`），没有一个凭记忆写。模型尺寸：塔高、层数取公开数字，其余（檐口出挑、塔身收分、各层高度）按形制估。\n")
     add("## 推断清单\n")
     add("按计划，所有不是直接来自数据的东西列在这里，页面上可以用调试图层查看：\n")
     add(f"- 楼高：{sources['inferred']:,} 栋（{100 * sources['inferred'] / len(buildings):.1f}%）是推断的，其中 {capped:,} 栋是村里的房子被压到 {VILLAGE_LEVELS} 层以内，{halls:,} 栋是寺庙的殿堂，{pitched:,} 栋是 OSM 记了屋顶形状的房子。")

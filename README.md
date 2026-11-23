@@ -1,22 +1,25 @@
-# 像素杭州 · 主城区活地图
+# 像素城市：杭州与上海
 
-一座可以转、可以放大、可以走进去的像素杭州。整座主城区（东经 120.00–120.40，北纬 30.12–30.44，约 1,430 平方公里）是一个悬浮在白底上的立体模型，边缘化成散点溶进白色。画风来自 [pixel-plays](https://github.com/amirmushichge/pixel-plays)（MIT）：五级色阶、左上来的光、紫灰的影子、深度的描边、抖动。44 万栋建筑、每一片水、每一条路都来自开放数据。路名、地名和 24 处地标都能搜，搜到就飞过去，并在图上画出来。
+可以转、可以放大、可以走进去的像素城市。一座城的整片主城区是一个悬浮在白底上的立体模型，边缘化成散点溶进白色。画风来自 [pixel-plays](https://github.com/amirmushichge/pixel-plays)（MIT）：五级色阶、左上来的光、紫灰的影子、深度的描边、抖动。每一栋建筑、每一片水、每一条路都来自开放数据。路名、地名和地标都能搜，搜到就飞过去，并在图上画出来。
+
+- **像素杭州**：主城区东经 120.00–120.40、北纬 30.12–30.44，约 1,430 平方公里，44 万栋建筑，24 处地标，西湖四季。
+- **像素上海**：主城区东经 121.22–121.84、北纬 30.98–31.45，外接框约 3,000 平方公里（主城区约 1,161 平方公里），24 处地标，外滩到陆家嘴的黄浦江两岸。
 
 ![西湖与主城区](docs/REVIEW/over-and-above.png)
 
-工程按"一座城一个目录"组织：一座城的范围、数据源、地标和它自己的规矩都在 `cities/<id>/` 里，管线和页面不认得任何一座具体的城。杭州是 `cities/hz/`。页面在 Cloudflare Workers 上，数据在 Cloudflare R2 上，都不用自己的服务器；怎么上线见 [`deploy/README.md`](deploy/README.md)。
+工程按"一座城一个目录"组织：一座城的范围、数据源、地标和它自己的规矩都在 `cities/<id>/` 里，管线和页面不认得任何一座具体的城。杭州是 `cities/hz/`，上海是 `cities/sh/`。页面在 Cloudflare Workers 上，数据在 Cloudflare R2 上，都不用自己的服务器；怎么上线见 [`deploy/README.md`](deploy/README.md)。
 
 ## 运行
 
-需要 Node 18 以上。页面读的烘焙数据（`data/baked/hz/`，约 340 MB）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
+需要 Node 18 以上。页面读的烘焙数据（`data/baked/<城市>/`，杭州约 340 MB、上海还在这一轮的产出里）不在仓库里：新克隆的仓库要先按下面"从头构建数据"把它做出来。
 
 ```
 node serve.mjs
 ```
 
-然后打开 <http://127.0.0.1:5300/>（首页）或 <http://127.0.0.1:5300/hz>。首次打开约 2 秒出现全景（要加载 5.5 MB 的全景包）。
+然后打开 <http://127.0.0.1:5300/>（首页）或 <http://127.0.0.1:5300/hz>、<http://127.0.0.1:5300/sh>。首次打开约 2 秒出现全景（要加载几 MB 的全景包）。
 
-`serve.mjs` 开两个端口，和线上一样是两个来源：5300 是页面，5400 是数据（读 `data/baked/<城市>/`，清单现场合成）。地址就是城市：`/hz` 是杭州；`/` 是首页——一颗会转的像素地球，已上线的城是球上的红点（本地名加英文名），点它经过一段潜入动画落进那座城（D072）。
+`serve.mjs` 开两个端口，和线上一样是两个来源：5300 是页面，5400 是数据（读 `data/baked/<城市>/`，清单现场合成）。地址就是城市：`/hz` 是杭州、`/sh` 是上海；`/` 是首页——一颗会转的像素地球，已上线的城是球上的红点（本地名加英文名），点它经过一段潜入动画落进那座城（D072）。上海还没上线，球上还没有它。
 
 没有构建步骤，没有依赖；页面是原生 ES 模块和 WebGL2。只保证 Chrome；手机上可用（单指平移、双指转动与缩放）。
 
@@ -47,6 +50,7 @@ app/                  页面。线上就是站点根目录，原样发布
 app/src/home/         首页：地球（globe.js）和它的标注、拖动、潜入（main.js）；app/globe-land.json 是球的陆地骨架
 tools/bake/           一次性的烘焙：globe-land.mjs 把 Natural Earth 烘成陆地点阵
 cities/hz/            杭州：city.json（范围、投影、数据源、这座城自己的规矩）、landmarks.json、aliases.json、routes.json
+cities/sh/            上海：同上
 pipeline/pixelcity/   数据管线。每一步都接收"一座城"
 tools/deploy/         发布：压缩、算指纹、上传 R2、写清单；发页面；对着线上检查
 deploy/               上线要做的事、桶的跨域策略
@@ -58,22 +62,23 @@ tools/tests/          测试
 
 ## 从头构建数据
 
-需要 Python 3.12 以上和约 3 GB 磁盘。原始数据不在仓库里，管线的第一步会下载缺的：OpenStreetMap 的浙江提取包、Copernicus GLO-30 的一块、ESA WorldCover 的一块。楼高数据集 3D-GloBFP 要手工下载：它的服务器只应答浏览器，下载后把压缩包解压到 `data/raw/buildings/<瓦片号>/`。地址见 `docs/DATA-SOURCES.md`。
+需要 Python 3.12 以上和约 4 GB 磁盘一座城。原始数据不在仓库里，管线的第一步会下载缺的：OpenStreetMap 的提取包、Copernicus GLO-30 的一两块、ESA WorldCover 的一块（三度一格，两座城共用 N30E120）。楼高数据集 3D-GloBFP 按 1.25 度分块：city.json 里写了 `files` 表的瓦片管线自己下载；万一它只应答浏览器，就手工下载解压到 `data/raw/buildings/<瓦片号>/`。地址见 `docs/DATA-SOURCES.md`。
 
 ```
 uv venv .venv && uv pip install --python .venv/bin/python -e pipeline     # 或者 python3 -m venv .venv && .venv/bin/pip install -e pipeline
-.venv/bin/python -I -m pixelcity.build_all --city hz                      # 下载之后的一切：提取、合并、地形、地面、树、地标、名字、烘焙，约 12 分钟
+.venv/bin/python -I -m pixelcity.build_all --city hz                      # 杭州：下载之后的一切，约 12 分钟
+.venv/bin/python -I -m pixelcity.build_all --city sh                      # 上海：范围大一圈，更久
 ```
 
 依赖 osmium、shapely、numpy、pyproj、pyshp、tifffile、imagecodecs。
 
-`--list` 列出每一步和有哪些城市，`--from ground` 从某一步起重跑，`--only trees` 只跑一步。跑完在 `data/baked/hz/bake.json` 留一张烘焙戳：什么时候、从哪个提交、用了哪些原始数据。
+`--list` 列出每一步和有哪些城市，`--from ground` 从某一步起重跑，`--only trees` 只跑一步。跑完在 `data/baked/<城市>/bake.json` 留一张烘焙戳：什么时候、从哪个提交、用了哪些原始数据。
 
-- `cities/hz/city.json` 是这座城的定义。`look` 一节是它自己的规矩：哪几片是白墙黑瓦的老街区、哪里是茶山、哪几片是商务区、哪几处是寺庙用地、名字带什么的水道算江。
-- `cities/hz/landmarks.json` 是 24 处地标的表：对应 OSM 里的哪个要素、用哪个模型、多大、取景多近。坐标由管线从 OSM 查，表里不写。
-- `cities/hz/aliases.json` 是俗名和简称。要加一条就在那里添一行，重跑 `--only names`。
-- `cities/hz/routes.json` 是西湖上的游船航线。
-- `python -m pixelcity.report hz` 把数据报告现算一遍，写 `cities/hz/DATA-REPORT.md`。
+- `cities/<id>/city.json` 是一座城的定义。`look` 一节是它自己的规矩：哪几片是老街区、哪几片是商务区、哪几处是寺庙用地、名字带什么的水道算江（杭州另有茶山，上海没有）。
+- `cities/<id>/landmarks.json` 是地标的表：对应 OSM 里的哪个要素、用哪个模型、多大、取景多近。坐标由管线从 OSM 查，表里不写。
+- `cities/<id>/aliases.json` 是俗名和简称。要加一条就在那里添一行，重跑 `--only names`。
+- `cities/<id>/routes.json` 是开阔水面上的游船航线（杭州西湖、上海黄浦江）。
+- `python -m pixelcity.report <id>` 把数据报告现算一遍，写 `cities/<id>/DATA-REPORT.md`。
 
 ### 再加一座城
 
@@ -83,7 +88,7 @@ uv venv .venv && uv pip install --python .venv/bin/python -e pipeline     # 或�
 4. 想要手工搭的地标、俗名、导览，再添 `landmarks.json`、`aliases.json`、`routes.json` 和 `city.json` 里的 `tour`。没有也能成一座城。
 5. 发布：`npm run publish -- <id>`，见 `deploy/README.md`。
 
-现在的两处限制：地形和土地覆盖各只读一块方格，范围跨过经纬度整度的城市（比如上海）还做不了，`city.json` 里多写了会报错；数据报告的说明文字是照杭州写的，别的城要把文字重新读一遍。另外 `pipeline/pixelcity/classify.py` 里的建筑原型和树种是江南一带的样子。
+现在的限制：地形、土地覆盖、楼高各按自己的网格分块（GLO-30 一度一块、WorldCover 三度一块、3D-GloBFP 一点二五度一块），范围跨过哪条分界线，就在 `city.json` 里把那几块都写上（`dem`、`landcover`、`buildings.tile` 都收一列）；建筑原型和树种（`pipeline/pixelcity/classify.py`）是江南一带的样子，出了江南要注意。数据报告的数字跟着城市走，说明文字在加上海时已改成不说杭州的事，但新的一座城还是要把整份报告重读一遍。
 
 ## 发布
 
@@ -143,8 +148,8 @@ NODE_PATH="$(npm root -g)" node tools/tests/fidelity.cjs                        
 
 ## 已知的限制
 
-- **已经上线（2026-11-23）**：页面 <https://city.xiaowenz.com/hz>，数据在 <https://data-city.xiaowenz.com>（R2 桶 `city`）。全部 1558 块瓦片从线上取回逐一核对过，真浏览器打开无报错。大陆的访问速度还没有实测。
-- **只有一座城。** 多城市的机制（地址、选城、清单）用杭州的数据挂成两座城测过，没有第二座真实的城市烘焙过。
+- **已经上线（2026-11-23）**：页面 <https://city.xiaowenz.com/hz>，数据在 <https://data-city.xiaowenz.com>（R2 桶 `city`）。全部 1558 块瓦片从线上取回逐一核对过，真浏览器打开无报错。大陆的访问速度还没有实测。上海还没有发布。
+- **两座城：杭州（验收过的）、上海（2026-11-24 新烘的，第一版）。** 多城市的机制（地址、选城、清单）用杭州的数据挂成两座城测过（D066）；上海是第一座真的第二城，画面和地标取景都是第一版，等你看过验收图再定去留（`REVIEW-QUEUE.md` 33–36）。
 - **我没有看过这些画面。** 这个环境里截图只能交给视觉模型转述。画质靠客观比对、自动测试和视觉模型的目检保证；最终的样子需要你看验收图。
 - **建筑的颜色直到验收阶段才真正生效**：着色器里读错了一个纹理，之前全城的墙都是同一种灰白。修正之后只复核了 8 张地标图（断桥、保俶塔、雷峰塔、净慈寺、城隍阁、灵隐寺、六和塔、拱宸桥），其余的验收图没有经过看图复核，只过了数字检查。请重点看颜色。经过见 `docs/DECISIONS.md` D048、`docs/PROGRESS.md`。
 - **闸门 G1 带着一项未达标**：与原版逐像素比对，背面机位的明暗分布差 2.08%（门槛 2%）。原因在参照版一方（它从这个角度漏出桥拱的下表面）；其余四项指标五个机位全过。见 `docs/GATES.md` 和 `docs/DECISIONS.md` D013、D014。
