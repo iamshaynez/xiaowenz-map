@@ -336,23 +336,42 @@ def flag_cleared(props, clears):
     return cleared
 
 
-def tile_anchor(west, south, east, north, ix, iy):
-    """The tile corner among the nine around the tile (ix, iy) whose corner sits best among these bounds:
-    -> (ox, oy), or None when no neighbour's window holds them.
+def tile_anchor(west, south, east, north, ix, iy, tx0, tx1, ty0, ty1):
+    """The tile of the grid whose corner sits best among these bounds: -> (tx, ty), or None when no tile's
+    corner window (±1365 m, the 16-bit corner of compact.XY_PER_M) holds them.
 
-    A building is kept whole in one tile, its corners held relative to that tile's corner in 16-bit integers
-    (±1365 m, compact.XY_PER_M). A plant hall a kilometre and a half long reaches past the window of the tile
-    that holds its centre, and is kept from the neighbour that holds it best. A shape so vast that no
-    neighbour's window holds it cannot be baked at this precision, and is left out.
+    A building is kept whole in one tile, its corners held relative to that tile's corner. A plant hall a
+    kilometre and a half long reaches past the window of the tile that holds its centre; a building of the
+    margin outside the tiles is held by the edge tile the grouping clamps it to, and the pile against that
+    edge can reach past it too. Both are kept from the neighbouring tile of the grid that holds them best.
+    A shape no tile of the grid holds cannot be baked at this precision -- it stands in the dissolving
+    margin, where nothing is drawn -- and is left out.
     """
     best = None
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            ox, oy = (ix + dx) * TILE_M, (iy + dy) * TILE_M
+    for tx in range(max(tx0, ix - 1), min(tx1, ix + 1) + 1):
+        for ty in range(max(ty0, iy - 1), min(ty1, iy + 1) + 1):
+            ox, oy = tx * TILE_M, ty * TILE_M
             worst = max(abs(west - ox), abs(east - ox), abs(south - oy), abs(north - oy))
             if best is None or worst < best[0]:
-                best = (worst, ox, oy)
+                best = (worst, tx, ty)
     return None if best[0] > 32767 / compact.XY_PER_M else (best[1], best[2])
+
+
+def unholdable(geoms, cx, cy, tx0, tx1, ty0, ty1):
+    """Which of these records no tile of the grid can keep: they stand in the dissolving margin, past what a
+    16-bit corner window can hold from any tile corner of the grid (tile_anchor finds a keeper for the rest),
+    and the bake leaves them out. `cx`, `cy`: the records' own centres."""
+    boxes = shapely.bounds(numpy.asarray(geoms, dtype=object))
+    ix = numpy.clip(numpy.floor(cx / TILE_M).astype(numpy.int64), tx0, tx1)
+    iy = numpy.clip(numpy.floor(cy / TILE_M).astype(numpy.int64), ty0, ty1)
+    at_x, at_y = ix * TILE_M, iy * TILE_M
+    worst = numpy.maximum.reduce([numpy.abs(boxes[:, 0] - at_x), numpy.abs(boxes[:, 2] - at_x),
+                                  numpy.abs(boxes[:, 1] - at_y), numpy.abs(boxes[:, 3] - at_y)])
+    out = numpy.zeros(len(boxes), dtype=bool)
+    for k in numpy.flatnonzero(worst > 32767 / compact.XY_PER_M):
+        if tile_anchor(*boxes[k], ix[k], iy[k], tx0, tx1, ty0, ty1) is None:
+            out[k] = True
+    return out
 
 
 def bake(city, limit=None, log=print):
@@ -390,9 +409,18 @@ def bake(city, limit=None, log=print):
     # numbers over the buildings in order, so one left out would move what stands on every roof after it
     repeated_pairs = []
     twice = doubles(buildings, pairs=repeated_pairs, log=log)
+    tx0, tx1 = int(numpy.floor(west / TILE_M)), int(numpy.floor(east / TILE_M))
+    ty0, ty1 = int(numpy.floor(south / TILE_M)), int(numpy.floor(north / TILE_M))
+    nx_tiles, ny_tiles = tx1 - tx0 + 1, ty1 - ty0 + 1
     areas = shapely.area(geoms)
     centres = shapely.centroid(geoms)
     cx, cy = shapely.get_x(centres), shapely.get_y(centres)
+    # what no tile of the grid can keep stands in the dissolving margin, past what a corner window can hold
+    # from any tile corner of the grid (see tile_anchor): the bake leaves it out with the repeated records
+    past = unholdable(geoms, cx, cy, tx0, tx1, ty0, ty1)
+    if past.any():
+        log(f"{int(past.sum())} left out that no tile of the grid could hold")
+    gone = twice | past
     # per building: the nine property floats, then the centre, for grouping
     # flags (the ninth): what is known about the building and what was inferred; the app can show them
     flags = numpy.array([FLAG_INFERRED_HEIGHT * (b["height_source"] == "inferred") + FLAG_VILLAGE_CAP * bool(b.get("village_cap"))
@@ -413,44 +441,37 @@ def bake(city, limit=None, log=print):
     # app can leave them out until they are more than a pixel. Made over every record, kept or not (see above)
     roof_geoms, roof_rows = rooftop_props(geoms, props, colour_index)
     repeated = int(twice.sum())
-    if repeated:
-        on_kept = ~twice[roof_rows[:, 11].astype(numpy.int64)]
+    if repeated or past.any():
+        on_kept = ~gone[roof_rows[:, 11].astype(numpy.int64)]
         roof_geoms, roof_rows = roof_geoms[on_kept], roof_rows[on_kept]
-        buildings = [b for b, t in zip(buildings, twice, strict=True) if not t]
-        geoms, areas, cx, cy, flags, props, cleared = geoms[~twice], areas[~twice], cx[~twice], cy[~twice], flags[~twice], props[~twice], cleared[~twice]
+        buildings = [b for b, t in zip(buildings, gone, strict=True) if not t]
+        geoms, areas, cx, cy, flags, props, cleared = geoms[~gone], areas[~gone], cx[~gone], cy[~gone], flags[~gone], props[~gone], cleared[~gone]
     live = props[~cleared]             # what is drawn, for the overview tier
     live_areas = areas[~cleared]
 
-    tx0, tx1 = int(numpy.floor(west / TILE_M)), int(numpy.floor(east / TILE_M))
-    ty0, ty1 = int(numpy.floor(south / TILE_M)), int(numpy.floor(north / TILE_M))
-    nx_tiles, ny_tiles = tx1 - tx0 + 1, ty1 - ty0 + 1
-    # which tile keeps each building: the tile of its centre, except the few giants that reach past a corner's
-    # window (see tile_anchor), which are kept from a neighbour; a centre moved onto its keeper tile's middle
-    # only to place it there -- the props' centre is still the building's own
+    # which tile keeps each building: the tile its centre falls in, clamped to the grid (buildings of the
+    # margin, outside the tiles, are kept by the edge tile the clamp picks). A corner is held relative to
+    # that tile's corner in a 16-bit integer, so the giants and the margin buildings piled against the grid's
+    # edge can reach past it (see tile_anchor); those few are kept from a neighbouring tile of the grid whose
+    # corner holds them. A centre moved onto its keeper tile's middle is only to place it there -- the props'
+    # centre is still the building's own
     gx, gy = cx, cy
-    bounds = shapely.bounds(geoms)
+    boxes = shapely.bounds(geoms)
+    ix = numpy.clip(numpy.floor(cx / TILE_M).astype(numpy.int64), tx0, tx1)
+    iy = numpy.clip(numpy.floor(cy / TILE_M).astype(numpy.int64), ty0, ty1)
+    at_x, at_y = ix * TILE_M, iy * TILE_M
     over = numpy.flatnonzero(numpy.maximum.reduce([
-        numpy.abs(bounds[:, 0] - numpy.floor(cx / TILE_M) * TILE_M), numpy.abs(bounds[:, 2] - numpy.floor(cx / TILE_M) * TILE_M),
-        numpy.abs(bounds[:, 1] - numpy.floor(cy / TILE_M) * TILE_M), numpy.abs(bounds[:, 3] - numpy.floor(cy / TILE_M) * TILE_M)]) > 32767 / compact.XY_PER_M)
-    left_out = []
+        numpy.abs(boxes[:, 0] - at_x), numpy.abs(boxes[:, 2] - at_x),
+        numpy.abs(boxes[:, 1] - at_y), numpy.abs(boxes[:, 3] - at_y)]) > 32767 / compact.XY_PER_M)
     for k in over:
-        anchor = tile_anchor(*bounds[k], int(numpy.floor(cx[k] / TILE_M)), int(numpy.floor(cy[k] / TILE_M)))
-        if anchor is None:
-            left_out.append(k)
+        anchor = tile_anchor(*boxes[k], ix[k], iy[k], tx0, tx1, ty0, ty1)
+        if anchor is None:                                # cannot happen: the unholdable ones went out above
             continue
         if gx is cx:
             gx, gy = cx.copy(), cy.copy()
-        gx[k], gy[k] = anchor[0] + TILE_M / 2, anchor[1] + TILE_M / 2
+        gx[k], gy[k] = anchor[0] * TILE_M + TILE_M / 2, anchor[1] * TILE_M + TILE_M / 2
     if over.size:
-        log(f"{over.size - len(left_out)} giant building{'s' if over.size - len(left_out) != 1 else ''} kept from a neighbouring tile's corner"
-            + (f", {len(left_out)} left out that no tile could hold" if left_out else ""))
-    if left_out:
-        stay = numpy.ones(len(geoms), dtype=bool)
-        stay[left_out] = False
-        buildings = [b for b, s in zip(buildings, stay, strict=True) if s]
-        geoms, areas, cx, cy, flags, props, cleared, gx, gy = geoms[stay], areas[stay], cx[stay], cy[stay], flags[stay], props[stay], cleared[stay], gx[stay], gy[stay]
-        alive_roofs = stay[roof_rows[:, 11].astype(numpy.int64)]      # the props carry the record's original index
-        roof_geoms, roof_rows = roof_geoms[alive_roofs], roof_rows[alive_roofs]
+        log(f"{over.size} building{'s' if over.size != 1 else ''} kept from a tile whose corner holds them")
     by_tile, tile_starts = group_by_tile(gx, gy, tx0, ty0, nx_tiles, ny_tiles)
     tree_tile, tree_starts = group_by_tile(trees["x"].astype(float), trees["y"].astype(float), tx0, ty0, nx_tiles, ny_tiles)
 

@@ -13,15 +13,15 @@ from collections import Counter
 import numpy
 import shapely
 
-from .city import of
+from .city import TILE_M, of
 from .buildings import doubles, same_outline_pairs
 from .classify import (
     ARCHETYPE_NAMES,
     ROOF_FLAT,
     ROOF_GABLE,
-    ROOF_GREAT,
     ROOF_HIP,
     ROOF_SAW,
+    ROOF_GREAT,
     VILLAGE_LEVELS,
     circles,
     classify,
@@ -30,7 +30,7 @@ from .ground import GROUND_COLOURS, Ground
 from .landmarks import cleared_around, cleared_mask
 from . import names
 from .osm_extract import Layers
-from .scene import in_water
+from .scene import in_water, unholdable
 from .terrain import load as load_terrain
 
 HEIGHT_SOURCES = {"osm:height": "OSM 的 height 标签", "osm:levels": "OSM 的层数标签 × 层高", "globfp": "3D-GloBFP 数据集", "inferred": "推断"}
@@ -49,13 +49,22 @@ def build(city, log=print):
     grid, info = load_terrain(city.work / "terrain.bin")
     classify(city, buildings, grid, info, log=lambda *a: None)
     records = buildings
-    # what the bake draws: not what stands in water, and of a footprint the data set holds twice one record
+    # what the bake draws: not what stands in water, of a footprint the data set holds twice one record,
+    # and what no tile of the grid can hold (tile_anchor: they stand in the dissolving margin)
     all_geoms = numpy.asarray([b["geom"] for b in records], dtype=object)
     afloat = in_water(all_geoms, Ground.load(city.work / "ground.pkl").water)
     afloat = numpy.asarray(afloat, dtype=bool)
     twice = numpy.zeros(len(records), dtype=bool)
     twice[~afloat] = doubles([b for b, a in zip(records, afloat, strict=True) if not a], log=lambda *a: None)
-    buildings = [b for b, a, t in zip(records, afloat, twice, strict=True) if not a and not t]
+    past = numpy.zeros(len(records), dtype=bool)
+    west0, south0, east0, north0 = city.bounds()            # world metres, like the bake's grid
+    at = numpy.flatnonzero(~afloat)
+    sub = all_geoms[at]
+    subc = shapely.centroid(sub)
+    past[at] = unholdable(sub, shapely.get_x(subc), shapely.get_y(subc),
+                          int(numpy.floor(west0 / TILE_M)), int(numpy.floor(east0 / TILE_M)),
+                          int(numpy.floor(south0 / TILE_M)), int(numpy.floor(north0 / TILE_M)))
+    buildings = [b for b, a, t, u in zip(records, afloat, twice, past, strict=True) if not a and not t and not u]
     index = json.loads((city.baked / "index.json").read_text(encoding="utf-8"))
     geoms = numpy.asarray([b["geom"] for b in buildings], dtype=object)
     areas = shapely.area(geoms)
@@ -84,6 +93,7 @@ def build(city, log=print):
         ["合并后的建筑记录", f"{len(records):,}"],
         ["立在水里、不入图", f"{int(afloat.sum()):,}"],
         ["其中数据集重复给的轮廓，只留一条", f"{int(twice.sum()):,}"],
+        ["范围外、任何瓦片都放不下的边距楼，不入图", f"{int(past.sum()):,}"],
         ["入图的建筑记录", f"{len(buildings):,}"],
         ["其中给手工搭的地标让位、不画的", f"{int(cleared.sum()):,}"],
     ]))

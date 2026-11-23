@@ -402,14 +402,21 @@ class CompactFormsTest(unittest.TestCase):
 
 class TileAnchorTest(unittest.TestCase):
     """A building is kept whole in one tile, corners relative to its corner in 16-bit integers: the giants
-    are kept from a neighbour whose corner holds them, and the truly vast have no keeper."""
+    and the margin buildings piled against the grid's edge are kept from a neighbour whose corner holds
+    them, and what no tile of the grid holds is left out."""
 
     def test_the_case_the_shanghai_bake_hit(self):
         # a plant hall 473 x 1334 m, its centre in the tile below the one whose corner holds it best
-        self.assertEqual(scene.tile_anchor(55121.0, 18313.0, 55595.0, 19647.0, 55, 18), (55000.0, 19000.0))
+        self.assertEqual(scene.tile_anchor(55121.0, 18313.0, 55595.0, 19647.0, 55, 18, 0, 59, 0, 52), (55, 19))
+
+    def test_a_margin_building_piled_against_the_grid_edge_leaves_the_grid(self):
+        # a building of the margin clamped into the northernmost tile: its far corner is past that tile's
+        # window, and the tile one row down cannot hold it either -- it stands 1.4 km out in the dissolving
+        # margin, where nothing is drawn
+        self.assertEqual(scene.tile_anchor(18970.5, 52840.0, 19479.2, 53397.8, 19, 52, 0, 59, 0, 52), None)
 
     def test_an_ordinary_building_stays_in_the_tile_of_its_centre(self):
-        self.assertEqual(scene.tile_anchor(10.0, 10.0, 990.0, 990.0, 0, 0), (0.0, 0.0))
+        self.assertEqual(scene.tile_anchor(10.0, 10.0, 990.0, 990.0, 0, 0, 0, 59, 0, 52), (0, 0))
 
     def test_nothing_so_vast_as_to_reach_past_every_neighbour_can_be_kept(self):
-        self.assertIsNone(scene.tile_anchor(0.0, 0.0, 3000.0, 3000.0, 0, 0))
+        self.assertIsNone(scene.tile_anchor(0.0, 0.0, 3000.0, 3000.0, 0, 0, 0, 59, 0, 52))
