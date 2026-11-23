@@ -192,13 +192,23 @@ async function main() {
     await wait(2500);
     const touring = await page.evaluate(() => window.__hz.ui.touring());
     check(touring, 'the tour starts');
+    // the left button drags the map along; the right one turns the view (D055)
     await page.mouse.move(480, 270);
     await page.mouse.down();
+    check(!(await page.evaluate(() => window.__hz.ui.touring())), 'touching the map stops the tour');
+    // (read from here on: until the touch, the tour was still turning the view by itself)
+    const before = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
     await page.mouse.move(560, 290, { steps: 6 });
     await page.mouse.up();
-    check(!(await page.evaluate(() => window.__hz.ui.touring())), 'dragging the map stops the tour');
+    const dragged = await page.evaluate(() => { const c = window.__hz.camera; return { x: c.x, y: c.y, yaw: c.yaw }; });
+    check(Math.hypot(dragged.x - before.x, dragged.y - before.y) > 1 && dragged.yaw === before.yaw,
+      `the left button drags the map and does not turn it (moved ${Math.hypot(dragged.x - before.x, dragged.y - before.y).toFixed(0)} m, yaw ${before.yaw.toFixed(3)} -> ${dragged.yaw.toFixed(3)})`);
+    await page.mouse.move(480, 270);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(600, 290, { steps: 6 });
+    await page.mouse.up({ button: 'right' });
     const yaw = await page.evaluate(() => window.__hz.camera.yaw);
-    check(Math.abs(yaw) > 0.05, 'dragging turns the city');
+    check(Math.abs(yaw - dragged.yaw) > 0.05, 'the right button turns the city');
     await page.click('#home');
     await arrived();
     const whole = await page.evaluate(() => ({ scale: window.__hz.camera.scale, tour: window.__hz.ui.touring() }));

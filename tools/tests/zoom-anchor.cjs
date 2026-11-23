@@ -18,7 +18,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '../..');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 5399;
+const PORT = 5391;
 const OFF_PX = 1.5;                        // how far the point under the cursor may move, in frame pixels
 
 const failures = [];

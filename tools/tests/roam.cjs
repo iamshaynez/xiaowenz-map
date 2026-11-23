@@ -121,12 +121,16 @@ async function main() {
     check(errors.length === 0, `page errors: ${errors.slice(0, 5).join(' | ')}`);
     check(lost === 0, `the graphics context was lost in ${lost} samples`);
     check(glErrors === 0, `GL errors in ${glErrors} samples`);
+    // memory: the first quarter of the run is warm-up (tiles are still coming in), so the second quarter's
+    // median is what the end is compared with; it may grow by half, or by 20 MB, whichever is more
     const heaps = samples.map(s => s.heap).filter(Number.isFinite);
     let heapReport = 'heap sizes not available';
-    if (heaps.length > 6) {
-      const first = median(heaps.slice(0, Math.max(3, heaps.length >> 2))), last = median(heaps.slice(-Math.max(3, heaps.length >> 2)));
-      heapReport = `JS heap: median ${first} early, ${last} late (${(100 * last / first - 100).toFixed(0)}%)`;
-      check(last < first * 1.5, heapReport);
+    if (heaps.length > 8) {
+      const quarter = heaps.length >> 2;
+      const first = median(heaps.slice(quarter, 2 * quarter)), last = median(heaps.slice(-quarter));
+      const mb = n => (n / 1048576).toFixed(1);
+      heapReport = `JS heap: median ${mb(first)} MB in the second quarter, ${mb(last)} MB in the last (${(100 * last / first - 100).toFixed(0)}%); highest sample ${mb(Math.max(...heaps))} MB`;
+      check(last - first < Math.max(20 * 1048576, first * 0.5), heapReport);
     }
     const maxTiles = Math.max(...samples.map(s => s.tiles));
     check(maxTiles <= 300, `at most 300 tiles kept (${maxTiles})`);

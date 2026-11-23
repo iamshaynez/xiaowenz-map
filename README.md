@@ -22,13 +22,13 @@ node serve.mjs
 
 | 动作 | 鼠标键盘 | 触屏 |
 |---|---|---|
-| 旋转、俯仰 | 拖动 | 单指拖动 |
+| 平移 | 左键拖动，或 W A S D / 方向键 | 两指一起移动 |
+| 旋转、俯仰 | 右键拖动 | 单指拖动 |
 | 缩放 | 滚轮（以鼠标下面的东西为锚点） | 双指张开（以两指中间的东西为锚点） |
-| 平移 | W A S D 或方向键 | 两指一起移动 |
 | 回到全景 | R 或"全景"按钮 | "全景"按钮 |
 | 正俯视 | M 或"俯视"按钮 | "俯视"按钮 |
 | 季节 | 1 2 3 4 或右上角的按钮 | 按钮 |
-| 去一处地标 | 点左上角名录里的名字（窄屏先点"地名"）；之后拖动是绕着它转 | 同左 |
+| 去一处地标 | 点左上角名录里的名字（窄屏先点"地名"）；之后右键拖动是绕着它转 | 同左 |
 | 西湖导览 | T 或"西湖导览" | 按钮 |
 | 像素大小 | 右上角"像素"按钮，三档 | — |
 
@@ -54,6 +54,7 @@ NODE_PATH="$(npm root -g)" node tools/tests/smoke.cjs                           
 NODE_PATH="$(npm root -g)" node tools/tests/tour.cjs                                 # 24 处地标、四季、缩放阶梯，顺带出验收图
 NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs                         # 每处地标的取景：露出来多少像素、在不在中央、是不是自己的颜色
 NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs                             # 滚轮缩放的锚点：鼠标下面的东西不动
+NODE_PATH="$(npm root -g)" node tools/tests/mouse.cjs                                   # 左键拖动平移、右键拖动转视角
 NODE_PATH="$(npm root -g)" node tools/tests/mobile.cjs                               # 两种手机的模拟
 NODE_PATH="$(npm root -g)" node tools/tests/throughput.cjs --ss 2,4 --out 名字        # 吞吐
 NODE_PATH="$(npm root -g)" node tools/tests/roam.cjs --minutes 10                    # 随机漫游十分钟

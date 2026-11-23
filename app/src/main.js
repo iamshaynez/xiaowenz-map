@@ -89,6 +89,7 @@ async function boot() {
   // ---- input ------------------------------------------------------------------------------------------
   const pointers = new Map();
   let pinch = null;            // two fingers: how far apart they were, where their middle was, and what is drawn under it
+  let drag = null;             // one pointer holding the canvas: whether it turns the view, and the height of what it took hold of
   let wheelZoom = null;        // a turn of the wheel not yet applied: where the cursor is, and by how much to zoom
   // a pointer's position in the frame's own pixels. The canvas shows each of them as pixelScale CSS pixels,
   // and the camera works in the frame's pixels.
@@ -104,12 +105,19 @@ async function boot() {
     const ground = camera.unproject(at.x, at.y);
     return world.groundAt(ground.x, ground.y);
   };
+  // A mouse drags the map along with its left button and turns the view with its right one (D055). A finger
+  // or a pen has one button, and it turns the view.
+  const turns = e => e.pointerType !== 'mouse' || e.button === 2;
   canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0) e.preventDefault();          // no middle-click autoscroll, nothing else the browser does with a button
     canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, toFrame(e));
+    if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(toFrame(e)) };
     if (pointers.size === 2) pinch = { ...pinchState(), height: surfaceAt(pinchState()) };
   });
+  // the right button is for turning the view: it brings no menu of its own
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
   const pinchState = () => {
     const [a, b] = [...pointers.values()];
     return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -129,17 +137,27 @@ async function boot() {
       camera.x += kept.x - after.x;
       camera.y += kept.y - after.y;
       pinch = { ...state, height };
-    } else if (pointers.size === 1) {
-      // one finger or a mouse: turn the city, and tilt it with a pull up or down, by how far the hand moved
-      // on the page (CSS pixels), whatever the size of a frame's pixel
-      const across = (now.x - was.x) * pixelScale, down = (now.y - was.y) * pixelScale;
-      camera.yaw -= across * 0.006;
-      camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
-      ui.follow();                 // turns around the landmark last flown to, if there is one
+    } else if (pointers.size === 1 && drag) {
+      if (drag.turn) {
+        // turn the city, and tilt it with a pull up or down, by how far the hand moved on the page (CSS
+        // pixels), whatever the size of a frame's pixel
+        const across = (now.x - was.x) * pixelScale, down = (now.y - was.y) * pixelScale;
+        camera.yaw -= across * 0.006;
+        camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
+        ui.follow();               // turns around the landmark last flown to, if there is one
+      } else {
+        // drag the map along: what was taken hold of stays under the pointer. At the height of what was under
+        // the pointer when it touched, so that a roof or a hill taken hold of goes with it and does not slip
+        const before = camera.unprojectAt(was.x, was.y, camera.scale, drag.height);
+        const after = camera.unprojectAt(now.x, now.y, camera.scale, drag.height);
+        camera.x += before.x - after.x;
+        camera.y += before.y - after.y;
+        ui.release();              // the map is being panned: from now on the view turns around the middle of it
+      }
     }
     dirty = true;
   });
-  const release = e => { pointers.delete(e.pointerId); pinch = null; };
+  const release = e => { pointers.delete(e.pointerId); pinch = null; drag = null; };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', e => {
