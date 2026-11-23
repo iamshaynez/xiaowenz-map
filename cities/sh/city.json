@@ -1,0 +1,56 @@
+{
+ "_comment": "一座城一份：范围、投影、要哪些原始数据，以及这座城自己的规矩（look）。管线和发布脚本都读它。再加一座城，就再建一个 cities/<id>/。",
+ "id": "sh",
+ "name": "上海",
+ "subtitle": "主城区",
+ "bounds": [121.22, 30.98, 121.84, 31.45],
+ "epsg": 32651,
+ "origin": [330000.0, 3428000.0],
+ "sources": {
+  "_comment": "bounds 是主城区的经纬度：西、南、东、北。epsg 是投影（UTM 51N，单位米，北朝上），origin 是这个世界坐标的原点。sources 是四样原始数据：OSM 提取包的地址；楼高数据集 3D-GloBFP 的瓦片和各块的下载地址（有 files 表的管线自己取，拿不到就手工放进 data/raw/buildings/<瓦片号>/）；地形 Copernicus GLO-30 一度一块（主城区跨北纬 31 度整线，要两块）；土地覆盖 ESA WorldCover 三度一块（N30E120 一块就盖住 30–33 度北、120–123 度东的上海）。来源与许可见 docs/DATA-SOURCES.md。",
+  "osm": "https://download.geofabrik.de/asia/china/shanghai/shanghai-latest.osm.pbf",
+  "buildings": {
+   "tile": ["2432", "2433", "2434", "2435"],
+   "url": "https://figshare.com/articles/dataset/3D-GloBFP_the_first_global_three-dimensional_building_footprint_dataset_PART_grid_ID_2300-2599_/28906499",
+   "files": {
+    "2432": "https://ndownloader.figshare.com/files/54116894",
+    "2433": "https://ndownloader.figshare.com/files/54116810",
+    "2434": "https://ndownloader.figshare.com/files/54116888",
+    "2435": "https://ndownloader.figshare.com/files/54116807"
+   }
+  },
+  "dem": ["N31_00_E121_00", "N30_00_E121_00"],
+  "landcover": "N30E120"
+ },
+ "look": {
+  "_comment": "这座城自己的规矩，画法上和别的城不一样的地方。historic：老街区，圈内房子按老样子画，village 为 true 的圈里一律矮（石库门里弄的楼高在那儿不可信）。modern：玻璃幕墙的商务区，圈内的高楼多按写字楼画。templeGrounds：寺庙用地，OSM 只标了寺庙、没标殿堂，圈内没有名字的轮廓按殿堂画。rivers：名字里带这些词的水道用江水的土黄色，其余标成“河”的按运河的青绿画。water：报告里量面积的那片水。这些圈是按知名地名画的，不是官方边界。",
+  "rivers": ["黄浦", "苏州河", "吴淞"],
+  "water": {"name": "黄浦江", "at": [121.5, 31.24]},
+  "historic": [
+   {"at": [121.489, 31.227], "radius": 0.65, "village": true, "note": "老城厢：豫园、城隍庙一带"},
+   {"at": [121.467, 31.235], "radius": 0.4, "village": true, "note": "南京路两侧的老里弄：慈德里、永安里一带"},
+   {"at": [121.471, 31.217], "radius": 0.45, "village": true, "note": "新天地、田子坊一带的石库门里弄"},
+   {"at": [121.455, 31.227], "radius": 0.35, "village": true, "note": "张园、静安别墅的石库门"},
+   {"at": [121.452, 31.213], "radius": 0.75, "village": true, "note": "衡山路复兴路历史文化风貌区"},
+   {"at": [121.481, 31.267], "radius": 0.4, "village": true, "note": "多伦路、山阴路的里弄"}
+  ],
+  "modern": [
+   {"at": [121.505, 31.243], "radius": 1.3, "note": "陆家嘴金融城"},
+   {"at": [121.492, 31.256], "radius": 0.9, "note": "北外滩"},
+   {"at": [121.4515, 31.228], "radius": 1.2, "note": "南京西路"},
+   {"at": [121.4375, 31.195], "radius": 0.9, "note": "徐家汇"},
+   {"at": [121.318, 31.195], "radius": 1.8, "note": "虹桥商务区与国家会展中心"},
+   {"at": [121.483, 31.162], "radius": 1.2, "note": "前滩"}
+  ],
+  "templeGrounds": [
+   {"at": [121.4455, 31.2237], "radius": 0.1, "note": "静安寺"},
+   {"at": [121.4375, 31.2487], "radius": 0.1, "note": "玉佛禅寺"},
+   {"at": [121.4526, 31.1723], "radius": 0.15, "note": "龙华寺"},
+   {"at": [121.4895, 31.2275], "radius": 0.12, "note": "豫园、城隍庙"}
+  ]
+ },
+ "tour": {
+  "_comment": "导览：沿着地标表第一组的地标依次飞过去。label 是按钮上的字。没有这一项就不出导览按钮。",
+  "label": "外滩导览"
+ }
+}

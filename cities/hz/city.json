@@ -8,11 +8,12 @@
  "epsg": 32651,
  "origin": [200000.0, 3340000.0],
  "sources": {
-  "_comment": "bounds 是主城区的经纬度：西、南、东、北。epsg 是投影（这里用的是 UTM 51N，单位米，北朝上），origin 是这个世界坐标的原点：页面里的米是从它量起的。sources 是四样原始数据：OSM 提取包的地址；楼高数据集 3D-GloBFP 的一块瓦片和它当时的下载地址（figshare 不让脚本下载，要手工放进 data/raw/buildings/<瓦片号>/）；地形 Copernicus GLO-30 和土地覆盖 ESA WorldCover 各一块的编号（各覆盖一个经纬度的方格）。后两样目前只支持一块。来源与许可见 docs/DATA-SOURCES.md。",
+  "_comment": "bounds 是主城区的经纬度：西、南、东、北。epsg 是投影（这里用的是 UTM 51N，单位米，北朝上），origin 是这个世界坐标的原点：页面里的米是从它量起的。sources 是四样原始数据：OSM 提取包的地址；楼高数据集 3D-GloBFP 的一块瓦片和它的下载地址（有 files 表的瓦片管线自己取；脚本拿不到的就按 url 手工下载，放进 data/raw/buildings/<瓦片号>/ 解压）；地形 Copernicus GLO-30 和土地覆盖 ESA WorldCover 覆盖范围的一块或几块的编号。来源与许可见 docs/DATA-SOURCES.md。",
   "osm": "https://download.geofabrik.de/asia/china/zhejiang/zhejiang-latest.osm.pbf",
   "buildings": {
    "tile": "2434",
-   "url": "https://figshare.com/ndownloader/files/54116888"
+   "url": "https://figshare.com/ndownloader/files/54116888",
+   "files": {"2434": "https://ndownloader.figshare.com/files/54116888"}
   },
   "dem": "N30_00_E120_00",
   "landcover": "N30E120"

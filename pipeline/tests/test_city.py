@@ -31,7 +31,8 @@ def a_city(tmp, definition):
 
 class TheCitiesThereAre(unittest.TestCase):
     def test_a_city_is_a_folder_under_cities_holding_a_definition_that_names_itself(self):
-        self.assertEqual(city.ids(), ["hz"])
+        self.assertEqual(city.ids(), sorted(city.ids()))
+        self.assertIn("hz", city.ids())
         self.assertEqual(city.load("hz").folder, city.CITIES / "hz")
         self.assertEqual((CITY.id, CITY.name, CITY.subtitle), ("hz", "杭州", "主城区"))
 
@@ -152,6 +153,8 @@ class WhereTheRawDataLies(unittest.TestCase):
         self.assertIn("N30_00_E120_00", stopped.exception.code)
 
     def test_the_land_cover_is_covered_by_its_tiles_too(self):
+        # the satellite map is cut three degrees a side: a region reaching south past the 30th parallel
+        # asks for the tile that starts there, not for one per degree
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "hz"
             folder.mkdir()
@@ -159,7 +162,7 @@ class WhereTheRawDataLies(unittest.TestCase):
             wider = city.City(folder)
             with self.assertRaises(SystemExit) as stopped:
                 sources.covering(wider, "land cover", sources.landcover_tiles(wider), sources.cover_cell)
-        self.assertIn("N29E120", stopped.exception.code)
+        self.assertIn("N27E120", stopped.exception.code)
 
 
 if __name__ == "__main__":

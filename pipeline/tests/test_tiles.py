@@ -98,8 +98,9 @@ class ARegionOfTwoTiles(unittest.TestCase):
     def test_a_region_across_a_boundary_is_covered_by_the_tiles_it_names(self):
         self.assertEqual(sources.covering(self.city, "terrain", sources.dem_tiles(self.city), sources.dem_cell),
                          ["N30_00_E120_00", "N31_00_E120_00"])
-        self.assertEqual(sources.covering(self.city, "land cover", sources.landcover_tiles(self.city), sources.cover_cell),
-                         ["N30E120", "N31E120"])
+        # the land cover is three degrees a side, so this whole region is inside one tile of it
+        self.assertEqual(sources.covering(self.city, "land cover", sources.landcover_tiles(self.city), sources.cover_cell, 3),
+                         ["N30E120"])
 
     def test_terrain_beyond_the_tiles_stops_and_names_the_tile_wanted(self):
         self.addCleanup(setattr, self.city, "east", self.city.definition["bounds"][2])

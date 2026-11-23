@@ -101,16 +101,16 @@ def dem_cell(lon, lat):
 
 
 def cover_cell(lon, lat):
-    """The WorldCover tile covering a point: 'N30E120'."""
-    return f"N{math.floor(lat):02d}E{math.floor(lon):02d}"
+    """The WorldCover tile covering a point: 'N30E120' — the satellite map is cut three degrees a side."""
+    return f"N{3 * math.floor(lat / 3):02d}E{3 * math.floor(lon / 3):02d}"
 
 
-def cells(west, south, east, north, cell):
-    """Every degree tile a window in lon/lat reaches into, named as `cell` names them, in order. A tenth of a
-    degree-arcsecond of slop is allowed on every side, so that a region that only just touches a boundary from
-    the inside does not ask for the tile next door."""
-    cols = range(math.floor(west + 1e-9), math.floor(east - 1e-9) + 1)
-    rows = range(math.floor(south + 1e-9), math.floor(north - 1e-9) + 1)
+def cells(west, south, east, north, cell, step=1):
+    """Every tile of `step` degrees a side that a window in lon/lat reaches into, named as `cell` names them, in
+    order. A tenth of a degree-arcsecond of slop is allowed on every side, so that a region that only just touches
+    a boundary from the inside does not ask for the tile next door."""
+    cols = range(math.floor((west + 1e-9) / step) * step, math.floor((east - 1e-9) / step) * step + 1, step)
+    rows = range(math.floor((south + 1e-9) / step) * step, math.floor((north - 1e-9) / step) * step + 1, step)
     return sorted(cell(x, y) for x in cols for y in rows)
 
 
@@ -128,11 +128,11 @@ def reached(c):
     return float(min(lon)), float(min(lat)), float(max(lon)), float(max(lat))
 
 
-def covering(c, what, named, cell):
+def covering(c, what, named, cell, step=1):
     """The tiles the region itself reaches into must all be named; stops and says which are missing. The margin
     outside the region is not asked for: it is the dissolving edge of the island, and the readers sample it from
     the tile edge where the tiles named do not reach."""
-    needed = cells(*reached(c), cell)
+    needed = cells(*reached(c), cell, step)
     missing = [tile for tile in needed if tile not in named]
     if missing:
         raise SystemExit(f"the {what} tiles the region reaches into are {', '.join(needed)}; city.json names "
@@ -332,7 +332,7 @@ def ensure(c, log=print, fetch_missing=True):
     if missing:
         raise SystemExit(f"{path} does not say where {', '.join(missing)} come from")
     covering(c, "terrain", dem_tiles(c), dem_cell)
-    covering(c, "land cover", landcover_tiles(c), cover_cell)
+    covering(c, "land cover", landcover_tiles(c), cover_cell, 3)
     _missing_footprints(c, log, fetch_missing)
     out = {"buildings": _noted_footprints(c, log)}
     for kind, files, template, what in (("osm", [osm_file(c)], None, "the OpenStreetMap extract"),
