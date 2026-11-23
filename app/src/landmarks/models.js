@@ -133,3 +133,68 @@ export function lotus(c, { a, b, petals = 28, height = 40 }) {
   }
   return k;
 }
+
+// A ball: latitude bands of facets, each face's normal the horizontal part of its outward direction (the
+// shader builds the vertical part from it, as it does for a roof slope). Faceted on purpose: it is a
+// pixel map, and a faceted ball shades like the originals' domes do.
+function ball(k, part, cx, cy, cz, radius, bands = 6, sides = 12) {
+  const ringAt = b => {
+    const phi = Math.PI * (b / bands - 0.5), r = Math.max(radius * Math.cos(phi), radius * 0.015), z = cz + radius * Math.sin(phi);
+    return { r, z, corners: Array.from({ length: sides }, (_, s) => Kit.corner(cx, cy, r, sides, s)) };
+  };
+  for (let b = 0; b < bands; b++) {
+    const lo = ringAt(b), hi = ringAt(b + 1);
+    const shade = Math.cos(Math.PI * ((b + 0.5) / bands - 0.5));       // the face normal's horizontal share
+    for (let s = 0; s < sides; s++) {
+      const lam = 2 * Math.PI * (s + 0.5) / sides;
+      k.quad(part, [[lo.corners[s][0], lo.corners[s][1], lo.z], [lo.corners[(s + 1) % sides][0], lo.corners[(s + 1) % sides][1], lo.z],
+                    [hi.corners[(s + 1) % sides][0], hi.corners[(s + 1) % sides][1], hi.z], [hi.corners[s][0], hi.corners[s][1], hi.z]],
+             Math.cos(lam) * shade, Math.sin(lam) * shade);
+    }
+  }
+}
+
+// A square-section prism leaning from one point to another: three slanted legs hold the Oriental Pearl up.
+function leaningPrism(k, part, from, to, half) {
+  const len = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const ux = (to[0] - from[0]) / len, uy = (to[1] - from[1]) / len, uz = (to[2] - from[2]) / len;
+  let s1x = -uy, s1y = ux;                                             // the horizontal side, across the lean
+  const l1 = Math.hypot(s1x, s1y) || 1;
+  s1x /= l1; s1y /= l1;
+  const s2x = uy * 0 - uz * s1y, s2y = uz * s1x - ux * 0, s2z = ux * s1y - uy * s1x;   // the axis across s1
+  const at = (p, a, b) => [p[0] + s1x * half * a + s2x * half * b, p[1] + s1y * half * a + s2y * half * b, p[2] + s2z * half * b];
+  const ends = [from, to].map(p => [at(p, -1, -1), at(p, 1, -1), at(p, 1, 1), at(p, -1, 1)]);
+  const [P, Q] = ends;
+  for (const [i, j] of [[0, 1], [1, 2], [2, 3], [3, 0]]) {
+    const mx = (P[i][0] + P[j][0] + Q[i][0] + Q[j][0]) / 4 - (from[0] + to[0]) / 2;
+    const my = (P[i][1] + P[j][1] + Q[i][1] + Q[j][1]) / 4 - (from[1] + to[1]) / 2;
+    const ml = Math.hypot(mx, my) || 1;
+    k.quad(part, [[P[i][0], P[i][1], P[i][2]], [P[j][0], P[j][1], P[j][2]], [Q[j][0], Q[j][1], Q[j][2]], [Q[i][0], Q[i][1], Q[i][2]]], mx / ml, my / ml);
+  }
+}
+
+// The Oriental Pearl: three slanted legs holding a great lower sphere, three columns threading a string of
+// small balls up to the great upper sphere, and a capsule with the antenna above. The public numbers are
+// the tower's own: 468 m to the antenna's tip, the lower sphere 50 m across about 49 m up, the upper sphere
+// 45 m across at 263–295 m, the capsule 16 m at 350 m, the mast 118 m. The small balls' diameters (12 m)
+// and their 13 m spacing are by eye and by manner.
+export function pearlTower(c, { height = 468, lower = 50, upper = 45, capsule = 16, smalls = 5 }) {
+  const k = new Kit();
+  const concrete = k.part(c.concrete, c.concrete), glass = k.part(c.white, c.white), rose = k.part(c.rose, c.rose), white = k.part(c.white, c.white), metal = k.part(c.metal, c.metal);
+  for (let i = 0; i < 3; i++) {
+    const a = 2 * Math.PI * i / 3, ux = Math.cos(a), uy = Math.sin(a);
+    leaningPrism(k, concrete, [ux * 44, uy * 44, 0], [ux * 9, uy * 9, 62], 3.2);       // the slanted legs
+  }
+  ball(k, glass, 0, 0, 49, lower / 2, 8, 16);                                          // the lower sphere
+  for (let i = 0; i < 3; i++) {
+    const p = Kit.corner(0, 0, 11, 1, 0, 2 * Math.PI * i / 3 + Math.PI / 6);
+    k.prism(concrete, p[0], p[1], 55, 263, 4, 8);                                      // the three columns
+  }
+  for (let i = 0; i < smalls; i++) ball(k, rose, 0, 0, 118 + i * 13, 6, 4, 10);        // the small balls
+  ball(k, glass, 0, 0, 279, upper / 2, 8, 16);                                         // the upper sphere
+  k.prism(concrete, 0, 0, 295, 342, 3.2, 8);                                           // the mast below the capsule
+  ball(k, white, 0, 0, 350, capsule / 2, 5, 12);                                       // the capsule
+  k.prism(metal, 0, 0, 358, height, 2.2, 6);                                           // the antenna
+  k.cap(metal, 0, 0, height, 2.2, 6);
+  return k;
+}

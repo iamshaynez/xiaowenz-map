@@ -170,10 +170,16 @@ export function createInterface(app) {
     // where the middle of the frame lies from the landmark, in metres along the screen's two axes (across to
     // the right, up the page): nothing for most; a place whose view holds more than the landmark gives it in
     // the table. v grows down the page, so both the offset and the height move the camera up the page.
+    // A landmark may hold a yaw of its own — its standard portrait: the camera stands on that side of it and
+    // the flight turns to look along it. The rest keep the direction the visitor was looking in.
     const [du, up] = landmark.view.offset ?? [0, 0];
     const dv = -up - height * Math.cos(pitch) / Math.sin(pitch);
-    const rx = (du + dv) * Math.SQRT1_2, ry = (dv - du) * Math.SQRT1_2, yaw = camera.yaw;
-    return { x: landmark.x + rx * Math.cos(yaw) + ry * Math.sin(yaw), y: landmark.y - rx * Math.sin(yaw) + ry * Math.cos(yaw), scale: Math.min(4, landmark.view.scale * 1.3), pitch };
+    const portrait = landmark.view.yaw;
+    const yaw = portrait === undefined ? camera.yaw : portrait;
+    const rx = (du + dv) * Math.SQRT1_2, ry = (dv - du) * Math.SQRT1_2;
+    const pose = { x: landmark.x + rx * Math.cos(yaw) + ry * Math.sin(yaw), y: landmark.y - rx * Math.sin(yaw) + ry * Math.cos(yaw), scale: Math.min(4, landmark.view.scale * 1.3), pitch };
+    if (portrait !== undefined) pose.yaw = portrait;
+    return pose;
   }
 
   // ---- the other buttons and the keys --------------------------------------------------------------------
