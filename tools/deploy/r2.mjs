@@ -46,9 +46,25 @@ export class R2 {
 
   async request(method, key, { body = null, headers = {} } = {}) {
     const path = `/${this.bucket}/${key}`;
-    const signed = signedHeaders({ method, host: this.host, path, headers, payload: body ?? new Uint8Array(), now: this.now, ...this.keys });
-    delete signed.host;                                                      // fetch sets it from the address
-    return this.send(this.base + encodePath(path), { method, headers: signed, body });
+    // R2, and the network between here and it, drop the occasional request of a bulk upload — a 500 with
+    // "please try again", a connection reset. Everything this client asks is idempotent, so a transient
+    // failure is retried with a growing pause before it is believed; anything else comes back as it is.
+    const transient = new Set([429, 500, 502, 503, 504]);
+    let response = null, dropped = null;
+    for (const pause of [0, 2000, 5000, 10000]) {
+      if (pause) await new Promise(done => setTimeout(done, pause));
+      dropped = null;
+      try {
+        const signed = signedHeaders({ method, host: this.host, path, headers, payload: body ?? new Uint8Array(), now: this.now, ...this.keys });
+        delete signed.host;                                                  // fetch sets it from the address
+        response = await this.send(this.base + encodePath(path), { method, headers: signed, body });
+        if (response.ok || !transient.has(response.status)) return response;
+      } catch (thrown) {
+        dropped = thrown;                                                    // the request never got out at all
+      }
+    }
+    if (dropped !== null) throw dropped;
+    return response;
   }
 
   // body: bytes. type: the content type the object is served with; cacheControl and contentEncoding: the same, as

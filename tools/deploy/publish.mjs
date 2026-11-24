@@ -91,11 +91,14 @@ export async function publish({ bucket, root, city, channel = MANIFEST.slice(0, 
   });
   // the small lists first: they tell of every object, so every object is there before they say so
   const manifest = manifestOf(root, city, plan, packing), fresh = [];
-  let kept = 0;
+  let kept = 0, putCount = 0;
   await together(plan, async item => {
     if (await bucket.head(item.key)) { kept++; return; }
     fresh.push({ name: item.name, bytes: item.body.length });
-    if (!dryRun) await bucket.put(item.key, item.body, { type: TYPES[kindOf(item.name)], cacheControl: IMMUTABLE, contentEncoding: packing.header });
+    if (!dryRun) {
+      await bucket.put(item.key, item.body, { type: TYPES[kindOf(item.name)], cacheControl: IMMUTABLE, contentEncoding: packing.header });
+      if (++putCount % 200 === 0) log(`  ${putCount} uploaded so far (${(fresh.reduce((sum, item) => sum + item.bytes, 0) / 1e6).toFixed(0)} MB of new files found)`);
+    }
   });
   const upload = fresh.reduce((sum, item) => sum + item.bytes, 0);
   const what = `${city} ${manifest.release}: ${plan.length} files, ${(plan.reduce((sum, item) => sum + item.body.length, 0) / 1e6).toFixed(1)} MB as ${packing.header}`;
