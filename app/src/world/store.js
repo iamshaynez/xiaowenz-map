@@ -2,7 +2,7 @@
 // Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
 // longest ago are let go. Where a file is fetched from the city says (world/source.js): by the manifest
 // of the city, which names every file of it.
-import { TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
+import { TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBrands, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
 
 export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
 export const BOX_SCALE = 0.04;          // from this zoom up the overview draws its boxes (1 pixel under 25 m)
@@ -332,6 +332,16 @@ export class World {
     }
     if (sections.PLCE) tile.places = readPlaces(sections.PLCE);
     if (sections.PATH) tile.paths = readPaths(sections.PATH);
+    if (sections.BRND) {
+      const shops = readBrands(sections.BRND, (x, y) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y)));
+      if (shops.count) {
+        tile.brands = shops;
+        tile.brandMesh = assemble(gl, [
+          { data: UNIT_SQUARE, layout: [[0, 2]] },
+          { data: shops.records, stride: 16, layout: [[1, 3, gl.FLOAT, 0], [2, 4, gl.UNSIGNED_BYTE, 12]], divisor: 1 },
+        ]);
+      }
+    }
     // how high and how low the tile reaches: what the sun's picture must hold
     tile.floor = tile.grid ? tile.grid.heights.reduce((min, h) => Math.min(min, h), Infinity) : 0;
     tile.top = tile.grid ? tile.grid.heights.reduce((max, h) => Math.max(max, h), -Infinity) : 0;
@@ -346,6 +356,7 @@ export class World {
     const gl = this.gl;
     release(gl, tile.buildings);
     release(gl, tile.roofs);
+    release(gl, tile.brandMesh);
     Object.values(tile.ground).forEach(mesh => release(gl, mesh));
     release(gl, tile.treeMesh);
     for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);

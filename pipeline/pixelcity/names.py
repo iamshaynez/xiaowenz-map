@@ -21,7 +21,7 @@ data/baked/<city>/names.bin:
   NAME  JSON: a column a list, and one value in each for every thing
         labels     what a thing is, in a word or two, once each; a thing's `label` is its place in this list
         names      what it is called
-        kinds      0 landmark of the curated list, 1 road, 2 railway, 3 building, 4 place, 5 water
+        kinds      0 landmark of the curated list, 1 road, 2 railway, 3 building, 4 place, 5 water, 6 chain-brand shop
         x, y       where it stands, world metres; for a line, a point half way along its longest piece
         z          the height of the ground there
         label      its place in `labels`
@@ -52,13 +52,14 @@ from shapely.geometry import box
 from shapely.ops import voronoi_diagram
 from shapely.strtree import STRtree
 
-from . import compact, ground
+from . import brands, compact, ground
 from .city import TILE_M, of
 from .bake import FORMAT, MAGIC, TERRAIN_CELLS, container, surface
 from .osm_extract import Layers
 from .terrain import load as load_terrain
 
-LANDMARK, ROAD, RAIL, BUILDING, PLACE, WATER = range(6)
+LANDMARK, ROAD, RAIL, BUILDING, PLACE, WATER, BRAND = range(7)
+KIND_LABELS = ("landmarks", "roads", "railways", "buildings", "places", "water", "brand shops")
 JOIN_M = 1000.0                # ways of one name this close together are one road (a stretch between them is left unnamed); a name reused lies further
 SAME_M = 80.0                  # a node, an outline and a piece of ground of one name this close together are one thing
 UNDER_LANDMARK_M = 150.0       # what lies this close to a landmark and is called what the landmark is, is that landmark
@@ -302,6 +303,9 @@ def _features(osm, area):
         name = _named(tags)
         if name:
             add(WATER, "water", geom, tags, water_label(tags, name))
+    for geom, tags in osm.brands:
+        # a chain shop: found by its store's name and by the brand's (the brand rides in as alt_name)
+        add(BRAND, "brand", geom, tags, brands.category(tags["brand_id"]))
     return out
 
 
@@ -513,8 +517,8 @@ def collect(city, osm, landmarks, height, aliases=None, log=print):
     packed = numpy.empty(len(course), dtype=POINT)
     packed["x"], packed["y"] = course[:, 0].astype("<f4"), course[:, 1].astype("<f4")
     packed["z"] = compact.i16(course[:, 2], compact.DECK_Z_PER_M, "the height of a point of a named line")
-    count = {kind: sum(1 for entry in entries if entry["kind"] == kind) for kind in range(6)}
-    log("names: " + ", ".join(f"{label} {count[kind]}" for kind, label in enumerate(("landmarks", "roads", "railways", "buildings", "places", "water")))
+    count = {kind: sum(1 for entry in entries if entry["kind"] == kind) for kind in range(7)}
+    log("names: " + ", ".join(f"{label} {count[kind]}" for kind, label in enumerate(KIND_LABELS))
         + f"; {len(borne)} names borne by more than one, {len(columns['sheets'])} of them sheets of water; {len(points)} lines, {len(course)} points")
     return columns, packed
 

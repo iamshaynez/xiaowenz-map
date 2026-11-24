@@ -6,8 +6,8 @@
 // as if its name ended in 站, so that the place comes before it; and a query that ends in 站 finds the thing without it.
 import { loadContainer, readNames } from './data.js';
 
-export const LANDMARK = 0, ROAD = 1, RAIL = 2, BUILDING = 3, PLACE = 4, WATER = 5;
-export const KINDS = ['地标', '道路', '铁路', '建筑', '地点', '水域'];
+export const LANDMARK = 0, ROAD = 1, RAIL = 2, BUILDING = 3, PLACE = 4, WATER = 5, BRAND = 6;
+export const KINDS = ['地标', '道路', '铁路', '建筑', '地点', '水域', '品牌门店'];
 const STATION = '车站';
 const SHOWN = 12;
 

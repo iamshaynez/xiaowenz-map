@@ -292,6 +292,30 @@ class LandmarkTest(unittest.TestCase):
             names.collect(CITY, Layers(), self.LANDMARKS, FLAT, {"小莲花": "网球中心"}, **QUIET)
 
 
+class BrandTest(unittest.TestCase):
+    """A chain-brand shop is in the index by its store's name and by the brand's, and is what the labels say it is."""
+
+    def setUp(self):
+        self.osm = Layers()
+        self.osm.places += [village(100, 100, "甲村"), village(4000, 300, "乙村")]
+
+    def shop(self, x, y, name, brand_id="mcd"):
+        return (Point(OX + x, OY + y), {"name": name, "alt_name": "" if name == "麦当劳" else "麦当劳", "brand_id": brand_id, "kind_key": "shop", "kind": "fast_food"})
+
+    def test_a_shop_is_found_by_the_brand_and_labelled_with_the_category(self):
+        self.osm.brands += [self.shop(0, 0, "麦当劳(文三路店)"), self.shop(3000, 0, "麦当劳"), self.shop(5000, 0, "麦当劳")]
+        rows, _ = names.collect(CITY, self.osm, [], FLAT, **QUIET)
+        self.assertEqual([rows["kinds"][k] for k in at(rows, "麦当劳(文三路店)")], [names.BRAND])
+        self.assertEqual(said(rows, at(rows, "麦当劳(文三路店)")[0]), "快餐店")
+        self.assertEqual(rows["also"][str(at(rows, "麦当劳(文三路店)")[0])], "麦当劳")
+        self.assertEqual(rows["near"][str(at(rows, "麦当劳")[-1])], "乙村")       # two of one brand far apart: a word says which
+
+    def test_two_shops_of_one_brand_by_the_door_are_one(self):
+        self.osm.brands += [self.shop(0, 0, "麦当劳"), self.shop(40, 0, "麦当劳")]
+        rows, _ = names.collect(CITY, self.osm, [], FLAT, **QUIET)
+        self.assertEqual(len(at(rows, "麦当劳")), 1)
+
+
 class FileTest(unittest.TestCase):
     def test_the_file_reads_back_as_it_was_written(self):
         osm = Layers()

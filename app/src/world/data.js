@@ -260,6 +260,25 @@ export function readBase(section) {
   return ownCopy(section);
 }
 
+// BRND: the chain-brand shops of the tile (scene.py, pixelcity/brands.py): count (u32), then 5 bytes each:
+// x, y relative to the tile's corner (i16, 4 cm) and the palette index of the brand's colour. Its height is
+// the ground's under it, which `height(x, y)` reads off TERR, as a tree's is.
+// -> records of 16 bytes each, as the brands' shader takes them: x, y, z, colour
+export function readBrands(section, height) {
+  const { view, offset } = section;
+  const count = view.getUint32(offset, true);
+  const records = new Uint8Array(count * 16), data = new DataView(records.buffer);
+  let at = offset + 4;
+  for (let k = 0; k < count; k++, at += 5) {
+    const x = view.getInt16(at, true) / XY_PER_M, y = view.getInt16(at + 2, true) / XY_PER_M, o = k * 16;
+    data.setFloat32(o, x, true);
+    data.setFloat32(o + 4, y, true);
+    data.setFloat32(o + 8, height(x, y), true);
+    records[o + 12] = view.getUint8(at + 4);
+  }
+  return { count, records };
+}
+
 // PATH: the lines things move along. u32 count, then per line u16 points, u8 class, u8 spare, f32 width, f32 length,
 // and per point x, y relative to the tile, z, distance from the start (f32 each)
 export function readPaths(section) {

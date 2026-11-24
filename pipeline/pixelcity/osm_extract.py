@@ -14,7 +14,9 @@ import numpy
 import osmium
 import shapely
 from shapely.geometry import Point
+from shapely.ops import nearest_points
 
+from . import brands
 from .city import of
 from .sources import ensure, osm_file
 
@@ -76,6 +78,7 @@ class Layers:
         self.water_lines = []   # lines: streams and narrow canals mapped as centrelines
         self.land = []          # polygons: land use and cover, parks, woods, campuses, squares
         self.places = []        # points and polygons with a name worth showing
+        self.brands = []        # points: the chain-brand shops the table in brands.py knows (pixelcity.brands)
         self.meta = {}
 
     def save(self, path):
@@ -135,6 +138,32 @@ class Extractor(osmium.SimpleHandler):
             raise ValueError("empty multipolygon")
         return geom.make_valid() if not geom.is_valid else geom
 
+    def _brand_tags(self, tags, brand):
+        """The tags a brand shop carries: the store's own name when the map gives one worth keeping, the brand
+        as an alt_name (what the search finds it by besides), and what is needed to label and colour it."""
+        brand_id, matched = brand
+        name = str(tags.get("name") or "").strip()
+        if not brands.meaningful(name):
+            name = brands.display(brand_id)
+        kind_key = next((key for key in brands.SHOP_KEYS if tags.get(key) in brands.SHOP_VALUES), "shop")
+        return {"name": name, "alt_name": brands.display(brand_id) if name != brands.display(brand_id) else "",
+                "brand_id": brand_id, "kind_key": kind_key, "kind": tags.get(kind_key, "")}
+
+    def _brand_point(self, geom, tags, brand):
+        """A brand shop mapped as an area stands at the point of its wall nearest its middle, pushed a metre
+        out, so that its signboard stands at the facade and not inside the building; a node where it is."""
+        if geom.geom_type == "Point":
+            at = geom
+        else:
+            middle = shapely.centroid(geom)
+            wall = nearest_points(geom.boundary, middle)[0]
+            if wall.equals_exact(middle, 1e-9):
+                wall = geom.representative_point()
+            dx, dy = wall.x - middle.x, wall.y - middle.y
+            away = (dx * dx + dy * dy) ** 0.5 or 1.0
+            at = Point(wall.x + dx / away, wall.y + dy / away)
+        self.layers.brands.append((at, self._brand_tags(tags, brand)))
+
     def node(self, n):
         self.seen["node"] += 1
         tags = n.tags
@@ -143,6 +172,9 @@ class Extractor(osmium.SimpleHandler):
         x, y = (float(v) for v in self.city.project(n.location.lon, n.location.lat))
         if not (self.west <= x <= self.east and self.south <= y <= self.north):
             return
+        brand = brands.of(tags)
+        if brand is not None:
+            self.layers.brands.append((Point(x, y), self._brand_tags(tags, brand)))
         found = place_kind(tags)
         if not found:
             return
@@ -175,12 +207,13 @@ class Extractor(osmium.SimpleHandler):
         tags = a.tags
         if not len(tags):
             return
+        brand = brands.of(tags)
         building = "building" in tags and tags["building"] != "no"
         road = tags.get("area") == "yes" and (tags.get("highway") in ROAD_KINDS or tags.get("place") == "square")
         water = is_water(tags)
         land = is_land(tags)
         found = place_kind(tags)
-        if not (building or road or water or land or found):
+        if not (building or road or water or land or found or brand):
             return
         try:
             geom = self._polygon(a)
@@ -190,6 +223,8 @@ class Extractor(osmium.SimpleHandler):
         if geom.is_empty or not self._in_region(geom):
             return
         L = self.layers
+        if brand is not None:
+            self._brand_point(geom, tags, brand)
         if building:
             L.buildings.append((geom, pick(tags, BUILDING_TAGS)))
         elif road:
@@ -208,9 +243,22 @@ def extract(city, path, log=print):
     ex = Extractor(city)
     # the area manager needs every node location; flex_mem keeps them in memory
     ex.apply_file(str(path), idx="flex_mem")
+    dedup_brands(ex.layers)
     ex.layers.meta = {"source": str(path), "seconds": round(time.time() - t0, 1), "seen": ex.seen, "dropped": ex.dropped}
-    log(f"read in {ex.layers.meta['seconds']} s: {ex.seen}, dropped {ex.dropped}")
+    log(f"read in {ex.layers.meta['seconds']} s: {ex.seen}, dropped {ex.dropped}; {len(ex.layers.brands)} brand shops")
     return ex.layers
+
+
+def dedup_brands(layers):
+    """One shop of a brand every 30 m: the door's node and the outline's facade often both carry the brand."""
+    seen, kept = set(), []
+    for at, tags in layers.brands:
+        cell = (tags["brand_id"], round(at.x / 30), round(at.y / 30))
+        if cell in seen:
+            continue
+        seen.add(cell)
+        kept.append((at, tags))
+    layers.brands = kept
 
 
 if __name__ == "__main__":
@@ -223,4 +271,5 @@ if __name__ == "__main__":
     layers.save(out)
     for name in ("buildings", "roads", "road_areas", "rail", "water", "water_lines", "land", "places"):
         print(f"{name:<12} {len(getattr(layers, name)):>8}")
+    print(f"{'brands':<12} {len(layers.brands):>8}")
     print("->", out, f"{out.stat().st_size / 1048576:.0f} MB")

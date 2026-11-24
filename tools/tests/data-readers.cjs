@@ -157,6 +157,18 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
       }
       trees += tr.count;
     }
+    if (t.BRND) {
+      assert.ok(lattice, 'a tile with brand shops has a height grid to read their ground from');
+      const shops = data.readBrands(t.BRND, (x, y) => Math.fround(surface(x, y)));
+      assert.equal(t.BRND.bytes.length, 4 + shops.count * 5);
+      const f = new Float32Array(shops.records.buffer, shops.records.byteOffset, shops.count * 4);
+      for (let k = 0; k < shops.count; k++) {
+        const x = f[k * 4], y = f[k * 4 + 1], z = f[k * 4 + 2];
+        assert.ok(x >= 0 && x <= index.tileSize && y >= 0 && y <= index.tileSize, 'brand shop inside its tile');
+        assert.ok(z > -50 && z < 1800 && Number.isFinite(z), 'brand shop height in range');
+        assert.ok(shops.records[k * 16 + 12] < index.palette.length, 'brand colour into the palette');
+      }
+    }
     if (t.PLCE) assert.ok(Array.isArray(data.readPlaces(t.PLCE)));
     if (t.PATH) {
       const lines = data.readPaths(t.PATH);
@@ -176,21 +188,25 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
       routes += lines.length;
     }
   }
-  for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
+  for (const id of ['TERR', 'BASE', 'BLDB', 'WATR', 'ROAD', 'LAND', 'TREE', 'PLCE', 'ROOF', 'PATH', 'BRND']) assert.ok(seen.has(id), `no sampled tile has ${id}`);
 
   // names.bin: the index the page searches by (pipeline/pixelcity/names.py), column by column, and then finding things by name
   const file = read('names.bin');
   assert.ok(file.NAME && file.LINE, 'names.bin has a NAME and a LINE section');
-  const { openNames, search, said, course, KINDS, LANDMARK, ROAD, BUILDING, WATER } = await import(path.join(root, 'app/src/world/names.js'));
+  const { openNames, search, said, course, KINDS, LANDMARK, ROAD, BUILDING, WATER, BRAND } = await import(path.join(root, 'app/src/world/names.js'));
   const book = openNames(file), rows = book.rows, things = rows.names.length;
   for (const column of ['kinds', 'x', 'y', 'z', 'label', 'size', 'box', 'line', 'landmark']) assert.equal(rows[column].length, things, `a ${column} for every thing`);
   assert.equal(rows.labels.length, new Set(rows.labels).size, 'every label once');
   assert.equal(file.LINE.bytes.length, book.points.length / 3 * 10, 'ten bytes a point of a course');
   const EDGE = 1000 + 2;                                  // things are kept this far outside the region (names.EDGE_M)
-  let drawn = 0, spans = 0;
+  let drawn = 0, spans = 0, brandShops = 0;
   for (let k = 0; k < things; k++) {
     assert.ok(rows.names[k].trim() === rows.names[k] && rows.names[k].length, `a name, trimmed: ${JSON.stringify(rows.names[k])}`);
-    assert.ok(Number.isInteger(rows.kinds[k]) && rows.kinds[k] >= 0 && rows.kinds[k] <= 5, 'kind 0..5');
+    assert.ok(Number.isInteger(rows.kinds[k]) && rows.kinds[k] >= 0 && rows.kinds[k] <= 6, 'kind 0..6');
+    if (rows.kinds[k] === BRAND) {
+      brandShops++;
+      assert.ok(rows.size[k] === 0 && !rows.line[k], 'a brand shop is a point');
+    }
     assert.ok(Number.isInteger(rows.label[k]) && rows.label[k] >= 0 && rows.label[k] < rows.labels.length, 'label into the list');
     assert.ok(rows.x[k] >= index.bounds[0] - EDGE && rows.x[k] <= index.bounds[2] + EDGE && rows.y[k] >= index.bounds[1] - EDGE && rows.y[k] <= index.bounds[3] + EDGE, `inside the region and its edge: ${rows.names[k]}`);
     assert.ok(rows.z[k] > -50 && rows.z[k] < 1800 && rows.size[k] >= 0, 'height and size in range');
@@ -264,9 +280,14 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
   const peoples = search(book, '人民路').filter(row => row.name === '人民路');
   assert.ok(peoples.length >= 2 && peoples.every(row => row.near), 'the streets called 人民路, each with the place it is in');
   assert.ok(search(book, '文三路').filter(row => row.name === '文三路').every(row => !row.near), 'the road and its station lie together: no word to tell them apart');
+  // the chain brands: found by the brand's name, and said to be what they are
+  const starbucks = search(book, '星巴克', 30).filter(row => row.kind === BRAND);
+  assert.ok(brandShops > 100, `${brandShops} brand shops in the index`);
+  assert.ok(starbucks.length >= 10, `the city answers “星巴克” with ${starbucks.length} shops of it`);
+  assert.ok(starbucks.every(row => row.near), 'a shop of one brand among many says where it is');
   console.log(`overview: grid ${grid.nx}x${grid.ny}, ${cells} massing cells, cover ${cover.nx}x${cover.ny} (${area(wet).toFixed(1)} km² of water), ${ribbons.indices.length / 3} ribbon triangles; ${overview.GRID.bytes.length + overview.MASS.bytes.length + overview.LCV.bytes.length + overview.URB.bytes.length + overview.RIBA.bytes.length} bytes`);
   console.log(`tiles: ${sample.length} sampled of ${files.length}, sections ${[...seen].sort().join(' ')}, ${buildings} buildings, ${rooftop} rooftop boxes, ${routes} routes, ${trees} trees`);
-  console.log(`names: ${things} things to find (${rows.sheets.length} sheets of water), ${spans} courses of ${drawn} points, ${rows.labels.length} labels, ${(book.bytes / 1e6).toFixed(1)} MB`);
+  console.log(`names: ${things} things to find (${rows.sheets.length} sheets of water, ${brandShops} brand shops), ${spans} courses of ${drawn} points, ${rows.labels.length} labels, ${(book.bytes / 1e6).toFixed(1)} MB`);
 })().catch(error => {
   console.error('DATA READERS FAILED:', error.message, (error.stack || '').split('\n').slice(1, 3).join(' | ').trim());
   process.exitCode = 1;

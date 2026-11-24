@@ -43,6 +43,9 @@ data/baked/<city>/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it co
         each cell's run starts (u32 per cell, and one more), then 7 bytes a tree: x, y relative to the
         tile (i16, 4 cm), species and kind (a byte: 3 bits each), crown radius in half-metres, seed (a
         byte each). The height is the ground's under it, read off TERR
+  BRND  the chain-brand shops of the tile (pixelcity/brands.py): count (u32), then 5 bytes each:
+        x, y relative to the tile (i16, 4 cm) and the palette index of the brand's colour. The height of
+        the ground under a signboard is read off TERR, as a tree's is
   PLCE  JSON: the named places of the tile: [name, kind key, kind, x, y]
   META  JSON
 
@@ -60,7 +63,7 @@ import time
 import numpy
 import shapely
 
-from . import compact, ground
+from . import brands, compact, ground
 from .city import MARGIN_M, PALETTE, TILE_M, of, tile_index
 from . import trees as tree_data
 from .bake import (
@@ -148,6 +151,17 @@ def mesh_section(vertices, indices, height_stored):
     records, ids, count = compact.ground_corners(vertices, height_stored)
     body, width = compact.indices(ids[indices], count)
     return struct.pack("<IIB", count, len(indices), width) + records + body
+
+
+def brands_section(shops, x0, y0, colour_index):
+    """The brand shops of one tile (pixelcity/brands.py): count (u32), then 5 bytes each: x, y relative to
+    the tile's corner (i16, 4 cm) and the palette index of the brand's colour. The height of the ground
+    under a board the page reads off TERR, as it does for a tree."""
+    rows = []
+    for geom, tags in shops:
+        xy = compact.i16([geom.x - x0, geom.y - y0], compact.XY_PER_M, "a brand shop's place in its tile")
+        rows.append(struct.pack("<hhB", int(xy[0]), int(xy[1]), colour_index[brands.colour(tags["brand_id"])]))
+    return struct.pack("<I", len(rows)) + b"".join(rows)
 
 
 def base_section(city, x0, y0, cover):
@@ -494,6 +508,21 @@ def bake(city, limit=None, log=print):
         tx, ty = tile_index(at.x, at.y)
         places.setdefault((tx, ty), []).append([name, tags.get("kind_key"), tags.get("kind"), round(at.x, 1), round(at.y, 1)])
 
+    # the chain-brand shops, by tile (brands.py): a signboard of the brand's own colour stands at each. A
+    # shop of the margin that the clamped edge tile's 16-bit corner cannot hold is left out: it stands in
+    # the dissolving edge, where nothing is drawn
+    brand_x = numpy.asarray([geom.x for geom, tags in osm.brands])
+    brand_y = numpy.asarray([geom.y for geom, tags in osm.brands])
+    btx = numpy.clip(numpy.floor(brand_x / TILE_M).astype(numpy.int64), tx0, tx0 + nx_tiles - 1)
+    bty = numpy.clip(numpy.floor(brand_y / TILE_M).astype(numpy.int64), ty0, ty0 + ny_tiles - 1)
+    holdable = (numpy.abs(brand_x - btx * TILE_M) <= 32767 / compact.XY_PER_M) & (numpy.abs(brand_y - bty * TILE_M) <= 32767 / compact.XY_PER_M)
+    if not holdable.all():
+        osm.brands = [shop for shop, keep in zip(osm.brands, holdable, strict=True) if keep]
+        brand_x, brand_y = brand_x[holdable], brand_y[holdable]
+        log(f"{int((~holdable).sum())} brand shops left out that no tile could hold")
+    brand_tile, brand_starts = group_by_tile(brand_x, brand_y, tx0, ty0, nx_tiles, ny_tiles)
+    log(f"brand shops: {len(osm.brands)}")
+
     # ---- the overview package ----
     city.baked.mkdir(parents=True, exist_ok=True)
     lcv, urb = overview_rasters(city, live, live_areas, ground_data, cover, bounds, height)
@@ -539,6 +568,9 @@ def bake(city, limit=None, log=print):
             trees_here = trees[tree_tile[tree_starts[k]:tree_starts[k + 1]]]
             if len(trees_here):
                 sections.append((b"TREE", tree_data.section(trees_here, x0, y0)))
+            brands_here = [osm.brands[j] for j in brand_tile[brand_starts[k]:brand_starts[k + 1]]]
+            if len(brands_here):
+                sections.append((b"BRND", brands_section(brands_here, x0, y0, colour_index)))
             if (tx + tx0, ty + ty0) in places:
                 sections.append((b"PLCE", json.dumps(places[(tx + tx0, ty + ty0)], ensure_ascii=False).encode("utf-8")))
             here = path_tile[path_starts[k]:path_starts[k + 1]]
