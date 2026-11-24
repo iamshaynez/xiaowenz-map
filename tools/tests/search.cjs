@@ -41,6 +41,9 @@ const state = page => page.evaluate(() => {
     found: app.found() ? app.found().title : null,
     note: note.hidden ? null : [document.getElementById('note-title').textContent, document.getElementById('note-text').textContent],
     noteOverReadout: !note.hidden && overlaps(rect('note'), rect('readout')),
+    // the tools' own boxes, button by button: the column's union box grows taller with every city on the list,
+    // and the phone's box to write in clears the buttons, not the column's extent
+    toolButtons: [...document.querySelectorAll('#tools button')].map(b => { const r = b.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }),
     boxes: { map: rect('c'), mark: rect('mark'), find: rect('find'), answers: rect('results'), tools: rect('tools') },
     frame: [app.camera.width, app.camera.height],
     overflow: document.scrollingElement.scrollWidth > innerWidth || document.scrollingElement.scrollHeight > innerHeight,
@@ -307,7 +310,7 @@ async function opened(browser, url, options = {}) {
     const p = phone.page;
     now = await state(p);
     const clear = (a, b) => a[2] <= b[0] || b[2] <= a[0] || a[3] <= b[1] || b[3] <= a[1];
-    check(now.boxes.find[2] - now.boxes.find[0] > 100 && now.boxes.find[2] <= 390 && clear(now.boxes.find, now.boxes.tools), 'the box to write in is on the phone\'s page, whole and clear of the tools at the top right');
+    check(now.boxes.find[2] - now.boxes.find[0] > 100 && now.boxes.find[2] <= 390 && now.toolButtons.every(b => clear(now.boxes.find, b)), 'the box to write in is on the phone\'s page, whole and clear of the tools at the top right');
     await p.tap('#find');
     await p.keyboard.type('西湖', { delay: 60 });
     now = await state(p);

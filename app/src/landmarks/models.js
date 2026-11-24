@@ -518,3 +518,174 @@ export function waveHall(c, { length = 500, depth = 110, sill = 40, crest = 100,
   }
   return k;
 }
+
+// 故宫: the compound of walls, gates and halls — nine hundred metres of red walls crowned in gold tiles,
+// seas of white marble terraces, and roofs of gold. The walls' 961 m by 753 m and the halls' measures are
+// the record's own (太和殿 is 64 m across, 37 m deep and 27 m tall on its own, standing on a three-tier
+// terrace 8.13 m high); the pavilions' detail follows the photographs. `angle` turns the whole compound:
+// the walls stand by the Ming surveyors, a degree or two off the map's north.
+export function forbiddenCity(c, { length = 961, width = 753, angle = 0 }) {
+  const k = new Kit();
+  const red = k.part(c.red, c.red, 8), gold = k.part(c.gold, c.gold), white = k.part(c.stone, c.stone, 4),
+        wood = k.part(c.wood, c.wood), cream = k.part(c.cream, c.cream, 8), slate = k.part(c.slate, c.slate);
+  const HX = length / 2, HY = width / 2, wallH = 9, wallT = 4, tileT = 1.6;
+
+  // a hall of red walls with a gold hipped roof; doubleEave adds the lower, wider eave at mid height
+  const hall = (x, y, z, w, d, wallH2, rise, doubleEave = false) => {
+    k.box(red, x, y, z, doubleEave ? w * 0.9 : w, doubleEave ? d * 0.9 : d, wallH2);
+    if (doubleEave) {
+      k.hipRoof(gold, x, y, z + wallH2, w, d * 0.94, rise * 0.55, true, Math.PI / 2);
+      k.box(red, x, y, z + wallH2 + rise * 0.55, w * 0.72, d * 0.7, rise * 0.45);
+      k.hipRoof(gold, x, y, z + wallH2 + rise, w * 0.8, d * 0.75, rise * 0.9, true, Math.PI / 2);
+    } else {
+      k.hipRoof(gold, x, y, z + wallH2, w, d * 0.94, rise, true, Math.PI / 2);
+    }
+  };
+  // a corner tower: three stacked eaves over a stone base, the tower the walls turn to
+  const cornerTower = (x, y) => {
+    k.box(white, x, y, 0, 12, 12, 3.5);
+    let z = 3.5, r = 7.5;
+    for (let i = 0; i < 3; i++) {
+      k.prism(red, x, y, z, z + 4.2, r * 0.62, 4);
+      k.ring(gold, x, y, r * 0.66, z + 4.2, r, z + 4.2 - 1.4, 4);
+      z += 4.2;
+      r *= 0.78;
+    }
+    k.prism(gold, x, y, z, z + 5, 0.6, 6);
+  };
+
+  // the four walls, red with a strip of gold tiles on top, and a tower at each corner
+  k.box(red, 0, -HY, 0, HX * 2 + wallT, wallT, wallH);
+  k.box(red, 0, HY, 0, HX * 2 + wallT, wallT, wallH);
+  k.box(red, -HX, 0, 0, wallT, HY * 2 + wallT, wallH);
+  k.box(red, HX, 0, 0, wallT, HY * 2 + wallT, wallH);
+  for (const y of [-HY, HY]) k.box(gold, 0, y, wallH, HX * 2 + wallT, wallT + 0.6, tileT);
+  for (const x of [-HX, HX]) k.box(gold, x, 0, wallH, wallT + 0.6, HY * 2 + wallT, tileT);
+  for (const [x, y] of [[-HX, -HY], [HX, -HY], [-HX, HY], [HX, HY]]) cornerTower(x, y);
+
+  // 午门, the south gate: a great platform with two wings reaching north, five pavilions on top
+  const gateY = -HY + wallT / 2, gateH = 24;
+  k.box(red, -HX + gateH * 0.6, gateY, 0, gateH * 1.4, width * 0.17, gateH);            // the platform, straddling the wall
+  k.box(red, -HX + gateH * 0.6 + 26, gateY - width * 0.062, 0, gateH * 0.7, width * 0.1, gateH * 0.42);   // the west wing
+  k.box(red, -HX + gateH * 0.6 + 26, gateY + width * 0.062, 0, gateH * 0.7, width * 0.1, gateH * 0.42);   // the east wing
+  k.prism(red, -HX + gateH * 0.6, gateY, gateH, gateH + 9, 14, 4);
+  k.ring(gold, -HX + gateH * 0.6, gateY, 9.5, gateH + 9, 17.5, gateH + 6.5, 4);
+  k.prism(gold, -HX + gateH * 0.6, gateY, gateH + 9, gateH + 12, 0.5, 6);
+  for (const side of [-1, 1]) {                                                          // the four pavilions of the wings
+    const x = -HX + gateH * 0.6 + 26, y = gateY + side * width * 0.088;
+    k.prism(red, x, y, gateH * 0.42, gateH * 0.42 + 6, 5.5, 4);
+    k.ring(gold, x, y, 4.4, gateH * 0.42 + 6, 7.6, gateH * 0.42 + 4.4, 4);
+  }
+
+  // 神武门, the north gate; 东华门 and 西华门, the side gates — lower platforms with a pavilion each
+  k.box(red, HX - gateH * 0.6, gateY, 0, gateH * 1.1, width * 0.14, gateH * 0.8);
+  k.prism(red, HX - gateH * 0.6, gateY, gateH * 0.8, gateH * 0.8 + 7, 10, 4);
+  k.ring(gold, HX - gateH * 0.6, gateY, 7, gateH * 0.8 + 7, 13, gateH * 0.8 + 4.8, 4);
+  for (const side of [-1, 1]) {
+    const x = side * (HX - wallT / 2);
+    k.box(red, x, 0, 0, gateH * 0.8, width * 0.1, gateH * 0.5);
+    k.prism(red, x, 0, gateH * 0.5, gateH * 0.5 + 5.5, 7, 4);
+    k.ring(gold, x, 0, 5, gateH * 0.5 + 5.5, 9.5, gateH * 0.5 + 3.6, 4);
+  }
+
+  // 太和门, the gate of the outer court, in front of the terraces
+  hall(-HX + gateH * 2.6, 0, 0, 58, 18, 17, 6);
+
+  // the three great halls on their mountains of white marble: three tiers, each a step narrower
+  const terraceX = -HX + gateH * 2.6 + 160;
+  k.box(white, terraceX, 0, 0, 230, 130, 2.7);
+  k.box(white, terraceX, 0, 2.7, 208, 112, 2.7);
+  k.box(white, terraceX, 0, 5.4, 186, 94, 2.7);
+  const zTerrace = 8.1;
+  hall(terraceX - 62, 0, zTerrace, 64, 37, 20, 9, true);          // 太和殿, the greatest hall
+  k.prism(gold, terraceX - 62, 0, zTerrace + 20 + 14.4, zTerrace + 20 + 17.4, 0.5, 6);
+  k.box(red, terraceX + 8, 0, zTerrace, 26, 26, 17);               // 中和殿, square, with a pyramidal cap
+  k.ring(gold, terraceX + 8, 0, 0, zTerrace + 17 + 8, 16.5, zTerrace + 17, 4);
+  k.prism(gold, terraceX + 8, 0, zTerrace + 17 + 8, zTerrace + 17 + 11, 0.5, 6);
+  hall(terraceX + 68, 0, zTerrace, 52, 30, 17, 8, true);           // 保和殿
+
+  // 乾清门, the gate into the inner court, low and wide
+  hall(terraceX + 145, 0, 0, 42, 13, 12, 5);
+
+  // the inner court: 乾清宫, 交泰殿 and 坤宁宫 in a row on one terrace
+  k.box(white, terraceX + 235, 0, 0, 185, 80, 2.7);
+  const zIn = 2.7;
+  hall(terraceX + 190, 0, zIn, 48, 26, 17, 8, true);               // 乾清宫
+  k.box(red, terraceX + 250, 0, zIn, 20, 20, 15);                   // 交泰殿
+  k.ring(gold, terraceX + 250, 0, 0, zIn + 15 + 7, 13.5, zIn + 15, 4);
+  k.prism(gold, terraceX + 250, 0, zIn + 15 + 7, zIn + 15 + 10, 0.4, 6);
+  hall(terraceX + 305, 0, zIn, 36, 22, 14, 7);                      // 坤宁宫
+
+  // the six courts of the east and west, two rows of three courtyard blocks each
+  for (const side of [-1, 1]) {
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 3; col++) {
+        const x = terraceX + 120 + col * 72, y = side * (95 + row * 105);
+        k.box(cream, x, y, 0, 44, 36, 7.5);
+        k.hipRoof(slate, x, y, 7.5, 44, 36, 4, true);
+      }
+    }
+  }
+
+  // the whole compound stands by the Ming surveyors: turn it to the walls' own bearing
+  if (angle) {
+    const cA = Math.cos(angle), sA = Math.sin(angle);
+    for (let i = 0; i < k.vertices.length; i += 6) {
+      const x = k.vertices[i], y = k.vertices[i + 1];
+      k.vertices[i] = x * cA - y * sA;
+      k.vertices[i + 1] = x * sA + y * cA;
+    }
+  }
+  return k;
+}
+
+// 祈年殿, the Hall of Prayer for Good Harvests: three drums of red under three eaves of blue glazed
+// tiles sweeping out and down, a round hall thirty metres across and thirty-eight metres tall on two
+// tiers of white marble. The measures are the record's own; the roofs' blue is the nearest tile in the
+// palette to the glazed 靛蓝.
+export function qiNianDian(c, { height = 38, diameter = 30 }) {
+  const k = new Kit();
+  const white = k.part(c.stone, c.stone, 4), red = k.part(c.red, c.red, 8), blue = k.part(c.verdigris, c.verdigris), gold = k.part(c.gold, c.gold);
+  k.prism(white, 0, 0, 0, 2.6, diameter * 0.75, 24);
+  k.prism(white, 0, 0, 2.6, 5.2, diameter * 0.6, 24);
+  const tiers = 3, each = (height - 5.2 - 5) / tiers;
+  let r = diameter / 2, z = 5.2;
+  for (let i = 0; i < tiers; i++) {
+    k.prism(red, 0, 0, z, z + each * 0.68, r * 0.5, 24);
+    k.ring(blue, 0, 0, r * 0.54, z + each * 0.68, r, z + each * 0.3, 24);
+    z += each * 0.68;
+    r *= 0.74;
+  }
+  k.ring(gold, 0, 0, 0, z + 4.5, r * 0.52, z, 24);
+  k.prism(gold, 0, 0, z + 4.5, z + 7.5, 0.4, 6);
+  return k;
+}
+
+// 天安门, the gate tower of the Imperial City: a deep platform of stone carrying a red hall with two
+// eaves of gold, over the passage the crowds walk through. The 66 m of the platform and its height are
+// the record's own; the pavilion's measures follow the photographs.
+export function gateTower(c, { width = 66, depth = 22, wallH = 13 }) {
+  const k = new Kit();
+  const white = k.part(c.stone, c.stone, 4), red = k.part(c.red, c.red, 8), gold = k.part(c.gold, c.gold);
+  k.box(white, 0, 0, 0, width, depth, wallH);
+  k.box(red, 0, 0, wallH, width * 0.82, depth * 0.82, 8);
+  k.hipRoof(gold, 0, 0, wallH + 8, width * 0.92, depth * 0.95, 3.2, true);
+  k.box(red, 0, 0, wallH + 8 + 3.2, width * 0.64, depth * 0.72, 4);
+  k.hipRoof(gold, 0, 0, wallH + 8 + 3.2 + 4, width * 0.76, depth * 0.86, 4.5, true);
+  return k;
+}
+
+// 国家大剧院, the National Centre for the Performing Arts: a titanium ellipsoid — a hundred and ten
+// steps of it, each a little narrower than the last — sitting in its pool of water. The 212 m of
+// length, 144 m of depth and 46 m of height are the record's own; the steps are the pixel map's way
+// of a smooth shell.
+export function eggHall(c, { width = 212, depth = 144, height = 46, steps = 14 }) {
+  const k = new Kit();
+  const glass = k.part(c.glass, c.glass, 5), metal = k.part(c.silver, c.silver);
+  for (let i = 0; i < steps; i++) {
+    const z = i * height / steps;
+    const t = z / height;
+    k.box(i % 2 ? glass : metal, 0, 0, z, width * Math.sqrt(1 - t * t), depth * Math.sqrt(1 - t * t), height / steps);
+  }
+  return k;
+}

@@ -1,0 +1,52 @@
+{
+ "id": "bj",
+ "name": "北京",
+ "en": "Beijing",
+ "subtitle": "主城区",
+ "bounds": [116.22, 39.78, 116.60, 40.06],
+ "epsg": 32650,
+ "origin": [430000, 4403000],
+ "sources": {
+  "_comment": "bounds 是主城区的经纬度：西、南、东、北（五环内外一带，西缘保住颐和园）。epsg 是投影（UTM 50N，中央经线 117°，单位米，北朝上），origin 是这个世界坐标的原点。sources 是四样原始数据：OSM 提取包的地址（Geofabrik 的中国包，全国一份，杭州成都已在用）；楼高数据集 3D-GloBFP 的四块瓦片和各自的下载地址（北京跨东经 116.25 与北纬 40.0 两条瓦片界，和上海一样是四块；有 files 表的瓦片管线自己取）；地形 Copernicus GLO-30 覆盖范围的两块（跨北纬 40 度线）；土地覆盖 ESA WorldCover 三度一块（N39E114 覆盖 39–42 度北、114–117 度东的北京）。来源与许可见 docs/DATA-SOURCES.md。",
+  "osm": "https://download.geofabrik.de/asia/china/china-latest.osm.pbf",
+  "buildings": {
+   "tile": ["2291", "2292", "2349", "2350"],
+   "url": "https://figshare.com/articles/dataset/3D-GloBFP_the_first_global_three-dimensional_building_footprint_dataset_PART_grid_ID_2300-2599_/28906499",
+   "files": {
+    "2291": "https://ndownloader.figshare.com/files/54101528",
+    "2292": "https://ndownloader.figshare.com/files/54101543",
+    "2349": "https://ndownloader.figshare.com/files/54106943",
+    "2350": "https://ndownloader.figshare.com/files/54107210"
+   }
+  },
+  "dem": ["N39_00_E116_00", "N40_00_E116_00"],
+  "landcover": "N39E114"
+ },
+ "look": {
+  "_comment": "这座城自己的规矩，画法上和别的城不一样的地方。historic：老街区，一圈一处（at 是圆心，radius 是半径，公里）；village 为 true 的圈里房子一律矮。modern：玻璃幕墙的商务区，圈内的高楼多按写字楼画。templeGrounds：寺庙用地，OSM 只标了寺庙、没标殿堂，圈内没有名字的轮廓按殿堂画。rivers：名字里带这些词的水道用江水的土黄色，其余标成“河”的按运河的青绿画。water：报告里量面积的那片水。这些圈是按知名地名画的，不是官方边界。",
+  "rivers": ["永定河", "潮白"],
+  "water": {"name": "什刹海", "at": [116.383, 39.942]},
+  "historic": [
+   {"at": [116.3970, 39.9170], "radius": 1.2, "village": true, "note": "紫禁城与筒子河一带"},
+   {"at": [116.3840, 39.9430], "radius": 0.8, "village": true, "note": "什刹海·钟鼓楼：银锭桥的胡同水岸"},
+   {"at": [116.3880, 39.9330], "radius": 0.5, "village": true, "note": "景山西麓的陟山门街一带"},
+   {"at": [116.4080, 39.9460], "radius": 0.5, "village": true, "note": "国子监·雍和宫的庙胡同"},
+   {"at": [116.3930, 39.8990], "radius": 0.5, "village": true, "note": "前门大街两侧的会馆胡同"}
+  ],
+  "modern": [
+   {"at": [116.4600, 39.9120], "radius": 1.2, "note": "国贸CBD：中国尊与银泰"},
+   {"at": [116.3960, 40.0040], "radius": 1.0, "note": "奥林匹克公园：鸟巢与水立方"},
+   {"at": [116.4540, 39.9360], "radius": 0.8, "note": "三里屯太古里"},
+   {"at": [116.3160, 39.9050], "radius": 0.8, "note": "中关村西大街一带"}
+  ],
+  "templeGrounds": [
+   {"at": [116.4170, 39.8830], "radius": 0.15, "note": "天坛祈年殿一带"},
+   {"at": [116.4165, 39.9490], "radius": 0.12, "note": "雍和宫"},
+   {"at": [116.3990, 39.9255], "radius": 0.10, "note": "景山万春亭一带"}
+  ]
+ },
+ "tour": {
+  "_comment": "导览：沿着地标表第一组的地标依次飞过去。label 是按钮上的字。没有这一项就不出导览按钮。",
+  "label": "中轴导览"
+ }
+}
