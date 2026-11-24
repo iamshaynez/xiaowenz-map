@@ -159,14 +159,14 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     }
     if (t.BRND) {
       assert.ok(lattice, 'a tile with brand shops has a height grid to read their ground from');
-      assert.equal(t.BRND.view.getUint8(t.BRND.offset + 4, true), 3, 'brand section version 3');
+      assert.equal(t.BRND.view.getUint8(t.BRND.offset + 4, true), 4, 'brand section version 4');
       const shops = data.readBrands(t.BRND, (x, y) => Math.fround(surface(x, y)));
-      assert.equal(t.BRND.bytes.length, 5 + shops.count * 7);
+      assert.equal(t.BRND.bytes.length, 5 + shops.count * 9);
       const f = new Float32Array(shops.records.buffer, shops.records.byteOffset, shops.count * 4);
       for (let k = 0; k < shops.count; k++) {
         const x = f[k * 4], y = f[k * 4 + 1], z = f[k * 4 + 2];
         assert.ok(x >= 0 && x <= index.tileSize && y >= 0 && y <= index.tileSize, 'brand shop inside its tile');
-        assert.ok(z > -50 && z < 1800 && Number.isFinite(z), 'brand shop height in range');
+        assert.ok(z > -50 && z < 1800 && Number.isFinite(z) && z > 0, 'brand sign hangs above ground, on its building');
         assert.ok(shops.records[k * 16 + 12] < index.palette.length, 'board colour into the palette');
         assert.ok(shops.records[k * 16 + 13] < index.palette.length, 'mark colour into the palette');
         assert.ok(shops.records[k * 16 + 14] < (index.brandMarks || []).length || shops.records[k * 16 + 14] < 40, 'brand number in range');

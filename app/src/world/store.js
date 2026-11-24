@@ -333,7 +333,7 @@ export class World {
     if (sections.PLCE) tile.places = readPlaces(sections.PLCE);
     if (sections.PATH) tile.paths = readPaths(sections.PATH);
     if (sections.BRND) {
-      const shops = readBrands(sections.BRND, (x, y) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y)));
+      const shops = readBrands(sections.BRND);
       if (shops.count) {
         tile.brands = shops;
         tile.brandMesh = assemble(gl, [

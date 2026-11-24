@@ -43,11 +43,11 @@ data/baked/<city>/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it co
         each cell's run starts (u32 per cell, and one more), then 7 bytes a tree: x, y relative to the
         tile (i16, 4 cm), species and kind (a byte: 3 bits each), crown radius in half-metres, seed (a
         byte each). The height is the ground's under it, read off TERR
-  BRND  the chain-brand shops of the tile (pixelcity/brands.py): count (u32), version (u8, 3), then
-        7 bytes each: x, y relative to the tile (i16, 4 cm), the palette index of the board's colour, of
-        the mark's colour, and the brand's number (the atlas of pixel logos, brandmarks.js, is in this
-        order; index.json carries it as `brandMarks`). The height of the ground under a signboard is read off
-        TERR, as a tree's is
+  BRND  the chain-brand shops of the tile (pixelcity/brands.py): count (u32), version (u8, 4), then
+        9 bytes each: x, y relative to the tile (i16, 4 cm), the height the board hangs at (i16, 2.5 cm —
+        the top of the building the shop stands in), the palette index of the board's colour, of the mark's
+        colour, and the brand's number (the atlas of pixel logos, brandmarks.js, is in this order;
+        index.json carries it as `brandMarks`).
   PLCE  JSON: the named places of the tile: [name, kind key, kind, x, y]
   META  JSON
 
@@ -155,20 +155,21 @@ def mesh_section(vertices, indices, height_stored):
     return struct.pack("<IIB", count, len(indices), width) + records + body
 
 
-def brands_section(shops, x0, y0, colour_index):
-    """The brand shops of one tile (pixelcity/brands.py): count (u32), version (u8, 3), then 7 bytes each:
-    x, y relative to the tile's corner (i16, 4 cm), the palette index of the board's colour, of the mark's
-    colour, and the brand's number (its place in brands.TABLE — the page's atlas of pixel logos,
-    app/src/landmarks/brandmarks.js, is laid out in the same order). The height of the ground under a board
-    the page reads off TERR, as it does for a tree. The version is there so that a page of one bake and
-    tiles of another pass each other by: the reader leaves the brands of a version it does not know out,
-    and no sign is drawn."""
+def brands_section(shops, bases, x0, y0, colour_index):
+    """The brand shops of one tile (pixelcity/brands.py): count (u32), version (u8, 4), then 9 bytes each:
+    x, y relative to the tile's corner (i16, 4 cm), the height the board hangs at (i16, 2.5 cm — the top of
+    the building the shop stands in, so that the sign rides the roofline and stays seen), and the palette
+    index of the board's colour, of the mark's colour, and the brand's number (its place in brands.TABLE —
+    the page's atlas of pixel logos, app/src/landmarks/brandmarks.js, is laid out in the same order). The
+    version is there so that a page of one bake and tiles of another pass each other by: the reader leaves
+    the brands of a version it does not know out, and no sign is drawn."""
     rows = []
-    for geom, tags in shops:
+    for (geom, tags), base in zip(shops, bases, strict=True):
         xy = compact.i16([geom.x - x0, geom.y - y0], compact.XY_PER_M, "a brand shop's place in its tile")
-        rows.append(struct.pack("<hhBBB", int(xy[0]), int(xy[1]), colour_index[brands.colour(tags["brand_id"])],
+        z = compact.i16([base], compact.Z_PER_M, "a brand shop's sign height")
+        rows.append(struct.pack("<hhhBBB", int(xy[0]), int(xy[1]), int(z[0]), colour_index[brands.colour(tags["brand_id"])],
                                 colour_index[brands.accent(tags["brand_id"])], brands.mark(tags["brand_id"])))
-    return struct.pack("<IB", len(rows), 3) + b"".join(rows)
+    return struct.pack("<IB", len(rows), 4) + b"".join(rows)
 
 
 def base_section(city, x0, y0, cover):
@@ -527,6 +528,14 @@ def bake(city, limit=None, log=print):
         osm.brands = [shop for shop, keep in zip(osm.brands, holdable, strict=True) if keep]
         brand_x, brand_y = brand_x[holdable], brand_y[holdable]
         log(f"{int((~holdable).sum())} brand shops left out that no tile could hold")
+    # each sign hangs on its own building: the nearest one's roofline, or ten metres up where the map has
+    # no building for it (a stand by the road)
+    brand_tree = shapely.STRtree(geoms)
+    idx, dist = brand_tree.query_nearest(shapely.points(brand_x, brand_y), max_distance=30.0)
+    hit = idx < len(geoms)                       # 30 米内没有楼的点，shapely 以越界哨兵应答
+    brand_top = numpy.full(len(brand_x), numpy.nan)
+    brand_top[idx[hit]] = props[idx[hit], 0] + props[idx[hit], 1]
+    brand_z = numpy.where(numpy.isnan(brand_top), height(brand_x, brand_y) + 10.0, brand_top)
     brand_tile, brand_starts = group_by_tile(brand_x, brand_y, tx0, ty0, nx_tiles, ny_tiles)
     log(f"brand shops: {len(osm.brands)}")
 
@@ -575,9 +584,9 @@ def bake(city, limit=None, log=print):
             trees_here = trees[tree_tile[tree_starts[k]:tree_starts[k + 1]]]
             if len(trees_here):
                 sections.append((b"TREE", tree_data.section(trees_here, x0, y0)))
-            brands_here = [osm.brands[j] for j in brand_tile[brand_starts[k]:brand_starts[k + 1]]]
-            if len(brands_here):
-                sections.append((b"BRND", brands_section(brands_here, x0, y0, colour_index)))
+            here_b = brand_tile[brand_starts[k]:brand_starts[k + 1]]
+            if len(here_b):
+                sections.append((b"BRND", brands_section([osm.brands[j] for j in here_b], brand_z[here_b], x0, y0, colour_index)))
             if (tx + tx0, ty + ty0) in places:
                 sections.append((b"PLCE", json.dumps(places[(tx + tx0, ty + ty0)], ensure_ascii=False).encode("utf-8")))
             here = path_tile[path_starts[k]:path_starts[k + 1]]
