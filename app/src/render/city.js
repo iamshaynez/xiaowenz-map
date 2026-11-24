@@ -10,6 +10,7 @@ import { BRAND_SHADERS } from '../gl/shaders-brands.js';
 import { SHADOW_SHADERS } from '../gl/shaders-shadow.js';
 import { LIFE_SHADERS } from '../gl/shaders-life.js';
 import { DEBUG_SHADERS } from '../gl/shaders-debug.js';
+import { brandAtlas } from '../landmarks/brandmarks.js';
 import { Traffic, TRAFFIC_COLOURS } from '../life/traffic.js';
 import { assemble, BOX_SCALE, DISTRICT_SCALE, LIFE_SCALE, ROOF_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE, UNIT_BOX } from '../world/store.js';
 import { CityCamera } from '../gl/city-camera.js';
@@ -25,7 +26,8 @@ const SHADOW_SIZE = 1024;                // the sun's picture, in texels
 export const SHADOW = [1.004, 0.834];
 const SHADOW_SLACK_M = 0.05;             // how much nearer the sun something must stand than a point to shade it
 const CAR_SCALE = 1.2, PERSON_SCALE = 5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
-const BRAND_SCALE = 0.5;               // from this zoom up a brand's signboard is drawn (a pixel is 2 m)
+const BRAND_SCALE = 0.8;               // from this zoom up a brand's flag is drawn (a pixel is 1.25 m), logo and all
+const BRAND_UNIT = 6;                  // the atlas texture's own unit (FIRST_FREE_UNIT and up are handed out per draw)
 const RECORD = 12;                        // floats per moving box, as traffic.js writes them
 const ISLAND_CORNER_M = 7000, ISLAND_BAND_M = 1500;
 
@@ -599,18 +601,24 @@ export class CityRenderer extends StyleRenderer {
     this.drawn.trees = runs.reduce((sum, run) => sum + run.count, 0);
   }
 
-  // the chain brands' signboards: one flat board of the brand's colour where each shop stands
-  drawBrands(tiles) {
+  // the chain brands' flags: each shop's board painted with its brand's pixel logo out of the atlas
+  drawBrands(tiles, { throughWalls = false } = {}) {
     const { gl, city } = this;
     const shops = tiles.filter(tile => tile.brandMesh);
     if (!shops.length) return;
+    if (!this.brandAtlas) this.brandAtlas = brandAtlas(gl);
     const brands = this.programs.brands.use();
     this.applyCamera(brands);
+    gl.activeTexture(gl.TEXTURE0 + BRAND_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.brandAtlas.texture);
+    brands.set('uMarks', BRAND_UNIT).set('uColumns', this.brandAtlas.columns);
+    if (throughWalls) gl.disable(gl.DEPTH_TEST);
     for (const tile of shops) {
       brands.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
       gl.bindVertexArray(tile.brandMesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, tile.brands.count);
     }
+    if (throughWalls) gl.enable(gl.DEPTH_TEST);
     this.drawn.brands = shops.reduce((sum, tile) => sum + tile.brands.count, 0);
   }
 }

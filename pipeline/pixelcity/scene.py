@@ -43,9 +43,11 @@ data/baked/<city>/tiles/b/<x>_<y>.bin: one file per 1 km tile, loaded when it co
         each cell's run starts (u32 per cell, and one more), then 7 bytes a tree: x, y relative to the
         tile (i16, 4 cm), species and kind (a byte: 3 bits each), crown radius in half-metres, seed (a
         byte each). The height is the ground's under it, read off TERR
-  BRND  the chain-brand shops of the tile (pixelcity/brands.py): count (u32), then 5 bytes each:
-        x, y relative to the tile (i16, 4 cm) and the palette index of the brand's colour. The height of
-        the ground under a signboard is read off TERR, as a tree's is
+  BRND  the chain-brand shops of the tile (pixelcity/brands.py): count (u32), version (u8, 3), then
+        7 bytes each: x, y relative to the tile (i16, 4 cm), the palette index of the board's colour, of
+        the mark's colour, and the brand's number (the atlas of pixel logos, brandmarks.js, is in this
+        order; index.json carries it as `brandMarks`). The height of the ground under a signboard is read off
+        TERR, as a tree's is
   PLCE  JSON: the named places of the tile: [name, kind key, kind, x, y]
   META  JSON
 
@@ -154,14 +156,19 @@ def mesh_section(vertices, indices, height_stored):
 
 
 def brands_section(shops, x0, y0, colour_index):
-    """The brand shops of one tile (pixelcity/brands.py): count (u32), then 5 bytes each: x, y relative to
-    the tile's corner (i16, 4 cm) and the palette index of the brand's colour. The height of the ground
-    under a board the page reads off TERR, as it does for a tree."""
+    """The brand shops of one tile (pixelcity/brands.py): count (u32), version (u8, 3), then 7 bytes each:
+    x, y relative to the tile's corner (i16, 4 cm), the palette index of the board's colour, of the mark's
+    colour, and the brand's number (its place in brands.TABLE — the page's atlas of pixel logos,
+    app/src/landmarks/brandmarks.js, is laid out in the same order). The height of the ground under a board
+    the page reads off TERR, as it does for a tree. The version is there so that a page of one bake and
+    tiles of another pass each other by: the reader leaves the brands of a version it does not know out,
+    and no sign is drawn."""
     rows = []
     for geom, tags in shops:
         xy = compact.i16([geom.x - x0, geom.y - y0], compact.XY_PER_M, "a brand shop's place in its tile")
-        rows.append(struct.pack("<hhB", int(xy[0]), int(xy[1]), colour_index[brands.colour(tags["brand_id"])]))
-    return struct.pack("<I", len(rows)) + b"".join(rows)
+        rows.append(struct.pack("<hhBBB", int(xy[0]), int(xy[1]), colour_index[brands.colour(tags["brand_id"])],
+                                colour_index[brands.accent(tags["brand_id"])], brands.mark(tags["brand_id"])))
+    return struct.pack("<IB", len(rows), 3) + b"".join(rows)
 
 
 def base_section(city, x0, y0, cover):
@@ -588,7 +595,7 @@ def bake(city, limit=None, log=print):
 
     index = {
         "tileSize": TILE_M, "ix0": tx0, "iy0": ty0, "format": FORMAT, "nx": nx_tiles, "ny": ny_tiles, "tilesBaked": made,
-        "palette": list(palette), "origin": [city.origin_e, city.origin_n], "epsg": city.epsg, "bounds": [west, south, east, north],
+        "palette": list(palette), "brandMarks": list(brands.TABLE), "origin": [city.origin_e, city.origin_n], "epsg": city.epsg, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
         "buildings": real, "leftOutOfWater": int(afloat.sum()), "repeatedOutlines": repeated, "rooftopProps": len(roof_rows),
         "inferredHeights": int((flags & FLAG_INFERRED_HEIGHT != 0).sum()), "villageCaps": int((flags & FLAG_VILLAGE_CAP != 0).sum()),
