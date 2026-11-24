@@ -101,7 +101,7 @@ export function createInterface(app) {
   // it (place); when the camera turns, that spot turns with the picture, so it is found again.
   function follow() {
     if (!anchor) return false;
-    const { x, y } = place(anchor, camera.pitch);
+    const { x, y } = place(anchor, camera.pitch, true);
     camera.x = x;
     camera.y = y;
     return true;
@@ -162,23 +162,26 @@ export function createInterface(app) {
   // Where to fly to for a landmark: a third closer than the table says, and with the landmark's
   // middle, not its foot, at the centre of the frame: the camera centre moves towards the viewer by as
   // much of the ground as the landmark's height takes up on the page.
-  function place(landmark, pitch = Math.PI / 6) {
+  function place(landmark, pitch = Math.PI / 6, keepYaw = false) {
     const focus = landmark.focus ?? 8;
     // the model stands on the ground (bedded into it as the renderer places it), so its middle is that much
     // above the sea; the ground's height is the bake's, good before the tile under it has loaded
     const height = (landmark.ground ?? 0) - (landmark.bed ?? 2) + focus;
     // where the middle of the frame lies from the landmark, in metres along the screen's two axes (across to
     // the right, up the page): nothing for most; a place whose view holds more than the landmark gives it in
-    // the table. v grows down the page, so both the offset and the height move the camera up the page.
+    // the table. The model's middle stands `height` up the page from its ground point (project draws the
+    // ground's far axis up the page), so the camera moves that much farther along it, plus the offset.
     // A landmark may hold a yaw of its own — its standard portrait: the camera stands on that side of it and
-    // the flight turns to look along it. The rest keep the direction the visitor was looking in.
+    // the flight turns to look along it. The rest keep the direction the visitor was looking in. When the
+    // map only follows (a pan or a turn), the visitor's yaw is kept even for a portrait: the standard shot
+    // is where a flight arrives, not where the visitor is held.
     const [du, up] = landmark.view.offset ?? [0, 0];
-    const dv = -up - height * Math.cos(pitch) / Math.sin(pitch);
+    const dv = up + height * Math.cos(pitch) / Math.sin(pitch);
     const portrait = landmark.view.yaw;
-    const yaw = portrait === undefined ? camera.yaw : portrait;
+    const yaw = portrait === undefined || keepYaw ? camera.yaw : portrait;
     const rx = (du + dv) * Math.SQRT1_2, ry = (dv - du) * Math.SQRT1_2;
     const pose = { x: landmark.x + rx * Math.cos(yaw) + ry * Math.sin(yaw), y: landmark.y - rx * Math.sin(yaw) + ry * Math.cos(yaw), scale: Math.min(4, landmark.view.scale * 1.3), pitch };
-    if (portrait !== undefined) pose.yaw = portrait;
+    if (portrait !== undefined && !keepYaw) pose.yaw = portrait;
     return pose;
   }
 
@@ -321,13 +324,13 @@ export function createInterface(app) {
     for (let k = 0; k < points.length; k += 3) {
       if (!Number.isFinite(points[k])) continue;                         // a break between two pieces of a course
       const { u, v } = camera.about(centre.x, centre.y, points[k], points[k + 1]);
-      const s = v * camera.sinPitch - points[k + 2] * camera.cosPitch;   // where it comes on the page, before the zoom
+      const s = -(v * camera.sinPitch + points[k + 2] * camera.cosPitch);   // where it comes on the page, before the zoom
       u0 = Math.min(u0, u); u1 = Math.max(u1, u); s0 = Math.min(s0, s); s1 = Math.max(s1, s);
     }
     const [least, most] = result.line ? [0.004, 1.6] : [0.25, 3];
     const scale = Math.min(most, Math.max(least, Math.min(0.86 * camera.width / (u1 - u0), 0.8 * camera.height / (s1 - s0))));
     // the middle of its extent, not of its own point, at the middle of the frame: the camera moves by that on the page's two axes
-    const du = (u0 + u1) / 2, dv = (s0 + s1) / 2 / camera.sinPitch;
+    const du = (u0 + u1) / 2, dv = -(s0 + s1) / 2 / camera.sinPitch;
     const rx = (du + dv) * Math.SQRT1_2, ry = (dv - du) * Math.SQRT1_2;
     return { x: centre.x + rx * camera.cos + ry * camera.sin, y: centre.y - rx * camera.sin + ry * camera.cos, scale };
   }
@@ -395,8 +398,8 @@ export function createInterface(app) {
     readout.textContent = `${tier} · 1 像素 ≈ ${size} · ${pending ? '载入中' : '就绪'}`;
     // which way is north on the page: the direction of the map's north, seen through the camera
     const a = camera.axes(0, 0), b = camera.axes(0, 1);
-    // 屏幕的 y 向下长（project() 里 v·sinPitch 加在 sy 上），所以北在画面上的投影 dy 不取负
-    const dx = b.u - a.u, dy = (b.v - a.v) * camera.sinPitch, length = Math.hypot(dx, dy) || 1;
+    // 北在画面上的方向：u 直接是屏幕横向，v 走 sy = -v·sinPitch（project），屏幕 y 向下长，故 dy 取负
+    const dx = b.u - a.u, dy = -(b.v - a.v) * camera.sinPitch, length = Math.hypot(dx, dy) || 1;
     compass.clearRect(0, 0, 44, 44);
     compass.strokeStyle = getComputedStyle(document.body).getPropertyValue('--muted');
     compass.fillStyle = getComputedStyle(document.body).getPropertyValue('--ink');

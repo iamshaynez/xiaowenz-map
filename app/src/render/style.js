@@ -10,13 +10,15 @@ export const NEAREST_DEPTH = 1000, FARTHEST_DEPTH = -1000;
 const EDGE_PX = 2.8; // shadeEdges() calls an edge where the depth jumps by 0.28 units, i.e. 2.8 pixels at 10 px per unit
 export const MODES = { plain: 0, rough: 1, gloss: 2, solid: 3 };
 
-// pixel-plays' project() in double precision, for things placed on the CPU (water streaks)
+// pixel-plays' project() in double precision, for things placed on the CPU (water streaks). One departure
+// from the reference: the ground's far axis runs up the page (the way the ground recedes towards the
+// horizon of a tilted view), not down it — the reference's tiny island read fine either way, a real city does not.
 export function project(cam, x, y, z, W, H) {
   const yawC = Math.cos(cam.yaw), yawS = Math.sin(cam.yaw), sinP = Math.sin(cam.pitch), cosP = Math.cos(cam.pitch);
   const rx = x * yawC - y * yawS, ry = x * yawS + y * yawC;
   const u = (rx - ry) / Math.SQRT2, v = (rx + ry) / Math.SQRT2;
   const OX = W / 2 + (cam.panX || 0), OY = H / 2 + (cam.originY || 0) * cam.scale / 10 + (cam.panY || 0);
-  return { sx: OX + u * cam.scale, sy: OY + (v * sinP - z * cosP) * cam.scale, d: v * cosP + z * sinP };
+  return { sx: OX + u * cam.scale, sy: OY - (v * sinP + z * cosP) * cam.scale, d: z * sinP - v * cosP };
 }
 
 export const toUnit = c => [c[0] / 255, c[1] / 255, c[2] / 255];

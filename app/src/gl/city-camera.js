@@ -41,13 +41,16 @@ export class CityCamera {
     return { u: (rx - ry) * SQRT1_2, v: (rx + ry) * SQRT1_2 };
   }
 
-  // -> { sx, sy } in low-resolution pixels from the top-left corner, and d: engine depth (larger is nearer)
+  // -> { sx, sy } in low-resolution pixels from the top-left corner, and d: engine depth (larger is nearer).
+  // The ground's v (the camera's far axis, the north-east diagonal at yaw 0) runs UP the page: the farther
+  // along it a point stands, the higher on the screen, the way the ground recedes towards the horizon of a
+  // tilted view. Heights still rise up the page, and the depth of the far axis runs the other way.
   project(x, y, z) {
     const { u, v } = this.axes(x, y);
     return {
       sx: this.width / 2 + u * this.scale,
-      sy: this.height / 2 + (v * this.sinPitch - z * this.cosPitch) * this.scale,
-      d: v * this.cosPitch + z * this.sinPitch,
+      sy: this.height / 2 - (v * this.sinPitch + z * this.cosPitch) * this.scale,
+      d: z * this.sinPitch - v * this.cosPitch,
     };
   }
 
@@ -58,24 +61,24 @@ export class CityCamera {
 
   // the same for another zoom, which is how the point under the cursor is kept in place
   unprojectAt(sx, sy, scale, z = 0) {
-    const u = (sx - this.width / 2) / scale, v = ((sy - this.height / 2) / scale + z * this.cosPitch) / this.sinPitch;
+    const u = (sx - this.width / 2) / scale, v = -(((sy - this.height / 2) / scale + z * this.cosPitch) / this.sinPitch);
     const rx = (u + v) * SQRT1_2, ry = (v - u) * SQRT1_2, c = this.cos, s = this.sin;
     return { x: this.x + rx * c + ry * s, y: this.y - rx * s + ry * c };
   }
 
   // screen position of the world origin, for shaders that project from absolute coordinates
   origin() {
-    const { u, v } = this.axes(0, 0);
-    return [this.width / 2 - u * this.scale, this.height / 2 - v * this.scale];
+    const { sx, sy } = this.project(0, 0, 0);
+    return [sx, sy];
   }
 
   // Engine depth is mapped linearly onto the depth buffer; the range is fitted to what this zoom can see.
-  // A screen point at height z lies at v = ((sy - H/2) / scale + z cos(pitch)) / sin(pitch), so the
+  // A screen point at height z lies at v = -((sy - H/2) / scale + z cos(pitch)) / sin(pitch), so the
   // farthest thing is the ground on the top row and the nearest is the top of the tallest building on
-  // the bottom row, which is farther along by 1 / sin(pitch) times its height in this measure.
+  // the bottom row, which stands sin(pitch) times its height nearer the camera in this measure.
   depthRange(tallest = 420) {
     const ground = this.height / (2 * this.scale * this.sinPitch) * this.cosPitch;   // depth of the ground on the top and bottom rows
-    return [ground + tallest / this.sinPitch, -ground];
+    return [ground + tallest * this.sinPitch, -ground];
   }
 
   // how much the depth changes per pixel row on a flat floor (the reference's GRADIENT_Y)
@@ -111,12 +114,12 @@ uniform vec2 uDepth;    // nearest and farthest engine depth
 vec3 project(vec3 q) {
   float rx = q.x * uCentre.z - q.y * uCentre.w, ry = q.x * uCentre.w + q.y * uCentre.z;
   float u = (rx - ry) * 0.7071067811865476, v = (rx + ry) * 0.7071067811865476;
-  return vec3(uFrame.x * 0.5 + u * uTilt.z, uFrame.y * 0.5 + (v * uTilt.x - q.z * uTilt.y) * uTilt.z, v * uTilt.y + q.z * uTilt.x);
+  return vec3(uFrame.x * 0.5 + u * uTilt.z, uFrame.y * 0.5 - (v * uTilt.x + q.z * uTilt.y) * uTilt.z, q.z * uTilt.x - v * uTilt.y);
 }
 float depthOf(float d) { return clamp((uDepth.x - d) / (uDepth.x - uDepth.y), 0.0, 1.0); }
 vec4 clip(vec3 s) { return vec4(s.x / uFrame.x * 2.0 - 1.0, 1.0 - s.y / uFrame.y * 2.0, depthOf(s.z), 1.0); }
 vec2 unproject(float sx, float sy, float z) {
-  float u = (sx - uFrame.x * 0.5) / uTilt.z, v = ((sy - uFrame.y * 0.5) / uTilt.z + z * uTilt.y) / uTilt.x;
+  float u = (sx - uFrame.x * 0.5) / uTilt.z, v = -(((sy - uFrame.y * 0.5) / uTilt.z + z * uTilt.y) / uTilt.x);
   return vec2((u + v) * 0.7071067811865476, (v - u) * 0.7071067811865476);
 }
 

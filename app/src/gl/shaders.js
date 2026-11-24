@@ -17,17 +17,17 @@ vec3 project(vec3 p) {
   float rx = p.x * uAngles.x - p.y * uAngles.y;
   float ry = p.x * uAngles.y + p.y * uAngles.x;
   float u = (rx - ry) * R2I, v = (rx + ry) * R2I;
-  return vec3(uOrigin.x + u * uView.w, uOrigin.y + (v * uAngles.z - p.z * uAngles.w) * uView.w, v * uAngles.w + p.z * uAngles.z);
+  return vec3(uOrigin.x + u * uView.w, uOrigin.y - (v * uAngles.z + p.z * uAngles.w) * uView.w, p.z * uAngles.z - v * uAngles.w);
 }
 // unproject(): world point under a screen position on the flat ground z = 0
 vec2 unproject(float sx, float sy) {
-  float u = (sx - uOrigin.x) / uView.w, v = (sy - uOrigin.y) / (uView.w * uAngles.z);
+  float u = (sx - uOrigin.x) / uView.w, v = -(sy - uOrigin.y) / (uView.w * uAngles.z);
   float rx = (u + v) * R2I, ry = (v - u) * R2I;
   return vec2(rx * uAngles.x + ry * uAngles.y, -rx * uAngles.y + ry * uAngles.x);
 }
 float groundDepth(vec2 w) {
   float rx = w.x * uAngles.x - w.y * uAngles.y, ry = w.x * uAngles.y + w.y * uAngles.x;
-  return (rx + ry) * R2I * uAngles.w;
+  return -(rx + ry) * R2I * uAngles.w;
 }
 float depthOf(float d) { return clamp((uDepth.x - d) / (uDepth.x - uDepth.y), 0.0, 1.0); }
 float depthToD(float z) { return uDepth.x - z * (uDepth.x - uDepth.y); }

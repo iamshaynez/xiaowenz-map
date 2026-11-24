@@ -36,14 +36,14 @@ const CASES = [
 
 // the camera's projection, as the app has it
 function unproject(cam, sx, sy) {
-  const u = (sx - W / 2) / cam.scale, v = ((sy - H / 2) / cam.scale) / Math.sin(cam.pitch);
+  const u = (sx - W / 2) / cam.scale, v = -(((sy - H / 2) / cam.scale) / Math.sin(cam.pitch));
   const rx = (u + v) * Math.SQRT1_2, ry = (v - u) * Math.SQRT1_2;
   return { x: cam.x + rx * Math.cos(cam.yaw) + ry * Math.sin(cam.yaw), y: cam.y - rx * Math.sin(cam.yaw) + ry * Math.cos(cam.yaw) };
 }
 function project(cam, x, y, z) {
   const dx = x - cam.x, dy = y - cam.y, rx = dx * Math.cos(cam.yaw) - dy * Math.sin(cam.yaw), ry = dx * Math.sin(cam.yaw) + dy * Math.cos(cam.yaw);
   const u = (rx - ry) * Math.SQRT1_2, v = (rx + ry) * Math.SQRT1_2;
-  return { sx: W / 2 + u * cam.scale, sy: H / 2 + (v * Math.sin(cam.pitch) - z * Math.cos(cam.pitch)) * cam.scale };
+  return { sx: W / 2 + u * cam.scale, sy: H / 2 - (v * Math.sin(cam.pitch) + z * Math.cos(cam.pitch)) * cam.scale };
 }
 
 // the sun in world axes for a camera: where the foot of a shadow moves per metre of height
@@ -195,7 +195,7 @@ async function main() {
     const tree = [{ x: 0, y: 0, z: 0, species: 0, radius: 5, seed: 7 }];
     const treeCamera = { x: 15, y: 0, yaw: 0, pitch: 30 * DEGREES, scale: 4 };
     const alone = await run({ camera: treeCamera, boxes: [], trees: tree });
-    const underTower = await run({ camera: treeCamera, boxes: [{ x0: -30, y0: -8, x1: -12, y1: 8, base: 0, top: 40 }], trees: tree });
+    const underTower = await run({ camera: treeCamera, boxes: [{ x0: -45, y0: -8, x1: -27, y1: 8, base: 0, top: 40 }], trees: tree });   // the tower stands far enough west that, seen from the south-west, it no longer fronts the crown, and its shade still reaches the tree
     for (const [name, result] of [['tree', alone], ['tree-in-shade', underTower]]) {
       check(result.glError === 0, `${name}: WebGL error ${result.glError}`);
       const report = checkTree(treeCamera, result.shadow, tree[0], decode(result.cls), decode(result.shaded), name === 'tree');

@@ -45,7 +45,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${PORT}/hz`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
     const ids = await page.evaluate(() => window.__city.landmarks.map(l => l.id));
-    const bounds = await page.evaluate(() => window.__city.index.bounds);
+    const bounds = await page.evaluate(() => window.__city.manifest.bounds);
     const seasons = await page.evaluate(() => window.__city.seasons);
 
     const sample = () => page.evaluate(() => {

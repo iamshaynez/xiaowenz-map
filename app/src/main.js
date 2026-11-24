@@ -307,7 +307,7 @@ async function boot() {
 
   // for tests and the console
   window.__city = {
-    camera, renderer, world, index, gl, ui,
+    camera, renderer, world, manifest: index, gl, ui,
     landmarks, city,
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things

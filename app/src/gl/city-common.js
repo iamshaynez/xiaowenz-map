@@ -17,12 +17,12 @@ uniform vec2 uDepth;    // nearest and farthest engine depth
 vec3 project(vec3 q) {
   float rx = q.x * uCentre.z - q.y * uCentre.w, ry = q.x * uCentre.w + q.y * uCentre.z;
   float u = (rx - ry) * 0.7071067811865476, v = (rx + ry) * 0.7071067811865476;
-  return vec3(uFrame.x * 0.5 + u * uTilt.z, uFrame.y * 0.5 + (v * uTilt.x - q.z * uTilt.y) * uTilt.z, v * uTilt.y + q.z * uTilt.x);
+  return vec3(uFrame.x * 0.5 + u * uTilt.z, uFrame.y * 0.5 - (v * uTilt.x + q.z * uTilt.y) * uTilt.z, q.z * uTilt.x - v * uTilt.y);
 }
 float depthOf(float d) { return clamp((uDepth.x - d) / (uDepth.x - uDepth.y), 0.0, 1.0); }
 vec4 clip(vec3 s) { return vec4(s.x / uFrame.x * 2.0 - 1.0, 1.0 - s.y / uFrame.y * 2.0, depthOf(s.z), 1.0); }
 vec2 unproject(float sx, float sy, float z) {
-  float u = (sx - uFrame.x * 0.5) / uTilt.z, v = ((sy - uFrame.y * 0.5) / uTilt.z + z * uTilt.y) / uTilt.x;
+  float u = (sx - uFrame.x * 0.5) / uTilt.z, v = -(((sy - uFrame.y * 0.5) / uTilt.z + z * uTilt.y) / uTilt.x);
   return vec2((u + v) * 0.7071067811865476, (v - u) * 0.7071067811865476);
 }
 
