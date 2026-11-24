@@ -185,16 +185,135 @@ export function pearlTower(c, { height = 468, lower = 50, upper = 45, capsule = 
     const a = 2 * Math.PI * i / 3, ux = Math.cos(a), uy = Math.sin(a);
     leaningPrism(k, concrete, [ux * 44, uy * 44, 0], [ux * 9, uy * 9, 62], 3.2);       // the slanted legs
   }
-  ball(k, glass, 0, 0, 49, lower / 2, 8, 16);                                          // the lower sphere
+  ball(k, glass, 0, 0, 49, lower / 2, 8, 24);                                          // the lower sphere
   for (let i = 0; i < 3; i++) {
     const p = Kit.corner(0, 0, 11, 1, 0, 2 * Math.PI * i / 3 + Math.PI / 6);
     k.prism(concrete, p[0], p[1], 55, 263, 4, 8);                                      // the three columns
   }
-  for (let i = 0; i < smalls; i++) ball(k, rose, 0, 0, 118 + i * 13, 6, 4, 10);        // the small balls
-  ball(k, glass, 0, 0, 279, upper / 2, 8, 16);                                         // the upper sphere
+  for (let i = 0; i < smalls; i++) ball(k, rose, 0, 0, 118 + i * 13, 6, 5, 12);        // the small balls
+  ball(k, glass, 0, 0, 279, upper / 2, 8, 24);                                         // the upper sphere
   k.prism(concrete, 0, 0, 295, 342, 3.2, 8);                                           // the mast below the capsule
-  ball(k, white, 0, 0, 350, capsule / 2, 5, 12);                                       // the capsule
+  ball(k, white, 0, 0, 350, capsule / 2, 6, 16);                                       // the capsule
   k.prism(metal, 0, 0, 358, height, 2.2, 6);                                           // the antenna
   k.cap(metal, 0, 0, height, 2.2, 6);
+  return k;
+}
+
+// The Waibaidu Bridge: a steel deck on stone piers, and over each of its two spans a through truss whose
+// top chord arcs like a bow. length runs along the map's x axis (the bake turns it the way the bridge is
+// mapped); the spans, the deck's height and the arcs' rise are the bridge's own as far as the record
+// gives, the posts' rhythm by manner.
+export function waibaidu(c, { length = 104, width = 18.5, deck = 6, rise = 9.5, spans = [52.4, 49.6] }) {
+  const k = new Kit();
+  const steel = k.part(c.steel, c.steel), walk = k.part(c.deck, c.steel), stone = k.part(c.stone, c.stone);
+  const half = width / 2 - 0.9;
+  k.box(walk, 0, 0, deck - 0.5, length, width, 0.5);                                   // the way across
+  for (const side of [-1, 1]) k.box(steel, 0, side * (half - 0.3), deck, length, 0.3, 1.1);   // the railings
+  let x = -length / 2;
+  const piers = [x];
+  for (const span of spans) {
+    const x0 = x, x1 = x + span; x = x1;
+    piers.push(x1);
+    const posts = Math.max(6, Math.round(span / 6.5));
+    for (const side of [-1, 1]) {
+      const y = side * half;
+      let prev = null;
+      for (let i = 0; i <= posts; i++) {
+        const t = i / posts, px = x0 + span * t, top = deck + 1.1 + rise * Math.sin(Math.PI * t);
+        if (i > 0) leaningPrism(k, steel, [prev.px, y, prev.top], [px, y, top], 0.45); // the arched top chord
+        k.box(steel, px, y, deck + 0.4, 0.45, 0.45, top - deck - 0.4);                 // the post, deck to chord
+        prev = { px, top };
+      }
+    }
+    for (let i = 1; i < posts; i++) {                                                  // struts tying the two trusses
+      const t = i / posts, px = x0 + span * t, top = deck + 1.1 + rise * Math.sin(Math.PI * t);
+      k.box(steel, px, 0, top, 0.45, half * 2 - 0.6, 0.45);
+    }
+  }
+  for (const px of piers) k.box(stone, px, 0, -2, 6.5, width + 1.5, deck + 2);         // the piers
+  return k;
+}
+
+// A flatiron: a slab that tapers to a rounded prow where the streets meet at an angle — the Huaihai Road
+// corner of the Normandie Apartments. A brick ground floor, cream galleries above, the prow round with a
+// railed balcony all the way round. length and prow follow the block; height and floors are the
+// building's own.
+export function flatiron(c, { length = 83, width = 19, prow = 14, height = 30, ground = 6, floors = 8 }) {
+  const k = new Kit();
+  const brick = k.part(c.brick, c.brick, 2), cream = k.part(c.cream, c.cream, 2), rail = k.part(c.concrete, c.cream);
+  const l = length / 2 - prow, hw = width / 2;
+  const pts = [[-l + 2, -hw], [-l, -hw], [-l, hw], [-l + 2, hw]];
+  for (let i = 1; i <= 8; i++) {                                                       // the rounded prow
+    const a = Math.PI / 2 - Math.PI * i / 8;
+    const w = hw * (0.62 + 0.38 * Math.sin(Math.abs(a)) / 1) * (0.72 + 0.28 * Math.sin(Math.abs(a)));
+    pts.push([l - prow + prow * Math.cos(a), hw * (0.62 + 0.38 * Math.sin(a))]);
+  }
+  pts.push([l - prow, -hw * 0.62]);
+  const floor = (z0, z1, part) => {
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, ml = Math.hypot(mx, my) || 1;
+      k.quad(part, [[a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1], [a[0], a[1], z1]], mx / ml, my / ml);
+    }
+    k.tri(part, [0, 0, z1], ...pts.map(p => [p[0], p[1], z1]), 0, 0);
+  };
+  floor(0, ground, brick);                                                             // the brick ground floor
+  floor(ground, height, cream);                                                        // the galleries above
+  const mid = height * 0.62;
+  for (let i = 0; i < pts.length; i++) {                                               // the prow's balcony rail
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, ml = Math.hypot(mx, my) || 1;
+    k.quad(rail, [[a[0], a[1], mid], [b[0], b[1], mid], [b[0], b[1], mid + 1.1], [a[0], a[1], mid + 1.1]], mx / ml, my / ml);
+  }
+  return k;
+}
+
+// A castle hall for the Yangshupu Waterworks: a long red-brick range with a jutting mid risalit and four
+// round turret towers with conical caps, after the manner of the 1880s buildings there. The real range's
+// measures are not published; these follow the photographs.
+export function castleHall(c, { length = 88, depth = 15, height = 17, turret = 7, turretHeight = 26 }) {
+  const k = new Kit();
+  const brick = k.part(c.brick, c.brick, 2), tile = k.part(c.tile, c.tile), cream = k.part(c.cream, c.cream, 2), metal = k.part(c.metal, c.metal);
+  k.box(brick, 0, 0, 0, length, depth, height);                                        // the main range
+  k.box(brick, 0, depth * 0.35, 0, length * 0.32, depth * 0.62, height + 3.5);         // the mid risalit
+  k.box(cream, 0, depth * 0.35, height + 3.5, length * 0.3, depth * 0.55, 2.2);        // its cornice
+  const at = [[-length / 2 + turret * 0.8, -depth / 2 + turret * 0.8], [length / 2 - turret * 0.8, -depth / 2 + turret * 0.8],
+              [-length / 2 + turret * 0.8, depth / 2 - turret * 0.8], [length / 2 - turret * 0.8, depth / 2 - turret * 0.8]];
+  for (const [tx, ty] of at) {
+    k.prism(brick, tx, ty, 0, turretHeight, turret / 2, 8);
+    k.ring(tile, tx, ty, 0, turretHeight + 6, turret / 2 + 1, turretHeight, 8);        // the conical cap
+    k.prism(metal, tx, ty, turretHeight + 6, turretHeight + 7.5, 0.35, 6);             // the flag mast
+  }
+  return k;
+}
+
+// The Crown of the China Art Museum: four great columns and a stack of red plates flaring out as they
+// rise — the dougong crown of the 2010 China Pavilion — over a low platform. The 63 m height and the
+// flaring are the building's own; the plates' count and their thin gaps are by manner.
+export function pavilionCrown(c, { height = 63, podium = 14, base = 96, top = 150, plates = 8, column = 16 }) {
+  const k = new Kit();
+  const red = k.part(c.red, c.red), deep = k.part(c.brick, c.brick, 2), grey = k.part(c.concrete, c.concrete);
+  k.box(deep, 0, 0, 0, top + 26, top - 10, podium);                                    // the platform (the data has it too; the crown clears it)
+  const z1 = height - 2.4, step = (z1 - podium) / plates;
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) k.box(grey, sx * base * 0.34, sy * base * 0.34, podium - 4, column, column, podium + 6);
+  for (let i = 0; i < plates; i++) {
+    const w = base + (top - base) * (i / (plates - 1));
+    k.box(red, 0, 0, podium + i * step, w, w, step * 0.72);
+  }
+  k.box(red, 0, 0, z1, top, top, 2.4);                                                 // the cap
+  return k;
+}
+
+// The Exhibition Centre's tower: a cream shaft in three tiers drawing in as it rises, a gilded cone and
+// the star on top. The 110 m to the star's tip is the record's own; the tiers' heights follow the
+// photographs.
+export function spireHall(c, { height = 110, tiers = [[42, 30], [72, 24], [92, 18]] }) {
+  const k = new Kit();
+  const cream = k.part(c.cream, c.cream, 2), gold = k.part(c.gold, c.gold);
+  let z = 0;
+  for (const [w, h] of tiers) { k.prism(cream, 0, 0, z, z + h, w / 2, 4); z += h; }
+  k.ring(gold, 0, 0, 0, height, tiers[tiers.length - 1][1] / 2 + 1.5, z, 4);           // the gilded cone
+  k.box(gold, 0, 0, height + 1.5, 2.4, 0.35, 2.4);                                     // the star, two crossed fins
+  k.box(gold, 0, 0, height + 1.5, 0.35, 2.4, 2.4);
   return k;
 }

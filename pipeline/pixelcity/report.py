@@ -252,7 +252,7 @@ def build(city, log=print):
     landmarks = json.loads((city.work / "landmarks.json").read_text(encoding="utf-8"))["landmarks"]
     def built(row):
         models = sorted({(item.get("kit") or {}).get("model") for item in [row, *row.get("parts", [])] if item.get("kit")} - {None})
-        names = {"pagoda": "塔", "pavilionTower": "楼阁", "archBridge": "石拱桥", "trussBridge": "桁架桥", "lotus": "体育场"}
+        names = {"pagoda": "塔", "pavilionTower": "楼阁", "archBridge": "石拱桥", "trussBridge": "桁架桥", "lotus": "体育场", "pearlTower": "东方明珠塔", "waibaidu": "钢桁拱桥", "flatiron": "船形大楼", "castleHall": "城堡楼", "pavilionCrown": "斗冠", "spireHall": "金顶展览塔"}
         return "、".join(names.get(m, m) for m in models) or "—"
     add(table(["编号", "名称", "组", "对应 OSM 里的要素", "手工模型"], [[r["id"], r["title"], r["group"], r["source"].replace("OpenStreetMap: ", ""), built(r)] for r in landmarks]))
     add("")
