@@ -395,7 +395,8 @@ export function createInterface(app) {
     readout.textContent = `${tier} · 1 像素 ≈ ${size} · ${pending ? '载入中' : '就绪'}`;
     // which way is north on the page: the direction of the map's north, seen through the camera
     const a = camera.axes(0, 0), b = camera.axes(0, 1);
-    const dx = b.u - a.u, dy = -(b.v - a.v) * camera.sinPitch, length = Math.hypot(dx, dy) || 1;
+    // 屏幕的 y 向下长（project() 里 v·sinPitch 加在 sy 上），所以北在画面上的投影 dy 不取负
+    const dx = b.u - a.u, dy = (b.v - a.v) * camera.sinPitch, length = Math.hypot(dx, dy) || 1;
     compass.clearRect(0, 0, 44, 44);
     compass.strokeStyle = getComputedStyle(document.body).getPropertyValue('--muted');
     compass.fillStyle = getComputedStyle(document.body).getPropertyValue('--ink');
