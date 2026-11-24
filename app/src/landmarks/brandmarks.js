@@ -29,24 +29,20 @@ export const BRAND_LOGOS = [
   { brand: 'miniso', board: 'brand_red', rgba: '1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/7Dws/+w8LP/kNCT/5DQk/+Q0JP/kNCT/7Dws/+w8LP/kNCT/7Dws/+w8LP/sPCz/7Dws/+Q0JP/kNCT/7Dws//SEfP/sPCz/7Dws/+w8LP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/8/Pz//Pz8/+Q0JP/kNCT/5DQk/+Q0JP/8/Pz//Ly0/+w8LP/8/Pz/9IR8//SEfP/8/Pz/7Dws/+Q0JP/sPCz//Pz8//SEfP/8vLT//Ly0/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk//z8/P/8/Pz/9IR8/+Q0JP/kNCT/9IR8//z8/P/8vLT/7Dws//z8/P/0hHz/9IR8//z8/P/8/Pz/7Dws/+w8LP/8/Pz/9IR8//y8tP/8vLT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT//Pz8//z8/P/8/Pz/7Dws/+w8LP/8/Pz//Pz8//y8tP/sPCz//Pz8//SEfP/0hHz//Pz8//z8/P/8vLT/7Dws//z8/P/0hHz//Ly0//y8tP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/8/Pz//Ly0//z8/P/0hHz/9IyE//z8/P/8/Pz//Ly0/+w8LP/8/Pz/9IR8//SEfP/8/Pz/9IR8//z8/P/8vLT//Pz8//SEfP/8vLT//Ly0/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk//z8/P/0jIT//Pz8//z8/P/8/Pz/9IR8//z8/P/8vLT/7Dws//z8/P/0hHz/9IR8//z8/P/kNCT/9JyU//z8/P/8/Pz/9IR8//y8tP/8vLT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT//Pz8//SMhP/0hHz//Pz8//y8tP/kNCT//Pz8//y8tP/sPCz//Pz8//SEfP/0hHz//Pz8/+Q0JP/kNCT//Ly0//z8/P/0hHz//Ly0//y8tP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/0pJz/9IR8/+Q0JP/0pJz/7Dws/+Q0JP/0nJT/9IyE/+w8LP/8vLT/9IR8/+w8LP/0pJz/5DQk/+Q0JP/kNCT/9KSc/+w8LP/0hHz/9JSM/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/kNCT/9IR8//SknP/0pJz/9IR8/+Q0JP/kNCT/9IR8//y8tP/0jIT/7Dws/+Q0JP/0hHz//Ly0/+w8LP/kNCT/9IyE//SknP/0pJz/9IyE/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk//SclP/8/Pz/9KSc//SknP/0hHz/5DQk//y8tP/8/Pz/9IyE//z8/P/8vLT/5DQk//SknP/8/Pz/7Dws/+Q0JP/0lIz//Ly0//y8tP/0nJT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT//Ly0//y8tP/kNCT/5DQk/+Q0JP/sPCz//Pz8//SEfP/kNCT/9IR8//z8/P/0hHz/5DQk/+w8LP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/0hHz//Pz8//z8/P/0hHz/5DQk//SEfP/8/Pz/7Dws/+Q0JP/sPCz//Pz8//SUjP/0hHz/9IR8/+Q0JP/kNCT/5DQk/+Q0JP/sPCz/9JSM/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+Q0JP/sPCz//Ly0//z8/P/8vLT/9IR8//z8/P/sPCz/5DQk/+w8LP/8/Pz/9IyE//SUjP/8vLT/5DQk/+Q0JP/kNCT/5DQk//SEfP/8vLT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/9KSc//z8/P/sPCz//Pz8//SEfP/kNCT/9IR8//z8/P/0hHz/7Dws//z8/P/sPCz/5DQk/+Q0JP/sPCz//Ly0//SUjP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/0jIT/9JSM//SUjP/8/Pz//Ly0/+Q0JP/8vLT//Pz8//SEfP/8/Pz//Ly0/+Q0JP/kNCT/9JyU//z8/P/0nJT/9JSM//y8tP/8vLT/7Dws/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk//SEfP/8vLT//Ly0//SUjP/sPCz/5DQk/+w8LP/0nJT//Ly0//SclP/sPCz/5DQk/+Q0JP/kNCT/9IR8//SknP/8vLT/9IR8/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/kNCT/9IR8//y8tP/0lIz/7Dws/+w8LP/8vLT/9JyU//SEfP/0nJT/5DQk//SMhP/8vLT//Ly0//SclP/kNCT/9IyE//SknP/8vLT/9IR8/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+w8LP/8vLT/9IyE//y8tP/sPCz/9JyU//y8tP/8vLT/9JyU//SclP/sPCz/9JSM//y8tP/8vLT/9KSc/+Q0JP/0nJT/9JSM//y8tP/0hHz/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/7Dws//SclP/8/Pz/9KSc//SEfP/0hHz//Ly0//y8tP/0nJT/9JyU//SEfP/8vLT//Ly0//y8tP/8vLT/7Dws//y8tP/0nJT//Ly0//y8tP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/0hHz/9KSc/+w8LP/sPCz/9JyU//SMhP/8vLT/9KSc//SEfP/0nJT/7Dws//SclP/8vLT//Ly0//SEfP/sPCz/9JSM//SknP/0pJz//Ly0/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/1Dws/+Q0JP/kNCT/5DQk/+Q0JP/0hHz/9KSc//SknP/0hHz/7Dws//SEfP/0hHz/7Dws//SEfP/sPCz/9IR8//SEfP/0hHz/9IR8/+w8LP/0nJT/9IR8//SUjP/0lIz/5DQk/+Q0JP/kNCT/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/UPCz/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/UPCz/1Dws/9Q8LP/UPCz/1Dws/9Q8LP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/+Q0JP/kNCT/5DQk/9Q8LP/UPCz/1Dws/w==' },
 ];
 
-// the atlas: every picture packed side by side, row 0 the top, nearest sampled. Column n of the atlas
-// is the logo of the n-th brand of pixelcity/brands.py's TABLE.
-export function brandAtlas(gl) {
-  const size = 32, columns = BRAND_LOGOS.length;
-  const rgba = new Uint8Array(size * size * columns * 4);
-  BRAND_LOGOS.forEach((logo, column) => {
-    const bin = atob(logo.rgba);
-    if (bin.length !== size * size * 4) throw new Error(`${logo.brand} 的招牌画不是 ${size}×${size}`);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    rgba.set(bytes, column * size * size * 4);
+// 每个品牌一张 32×32 的纹理，按 BRAND_LOGOS 的顺序（=品牌的编号）排好；绘制时按编号取用。
+export function brandTextures(gl) {
+  const size = 32;
+  const textures = BRAND_LOGOS.map((logo, i) => {
+    const bytes = Uint8Array.from(atob(logo.rgba), c => c.charCodeAt(0));
+    if (bytes.length !== size * size * 4) throw new Error(`${logo.brand} 的招牌画不是 ${size}×${size}`);
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return texture;
   });
-  const texture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size * columns, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return { texture, columns, size };
+  return { textures, count: textures.length };
 }

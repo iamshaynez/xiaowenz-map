@@ -335,11 +335,25 @@ export class World {
     if (sections.BRND) {
       const shops = readBrands(sections.BRND);
       if (shops.count) {
-        tile.brands = shops;
-        tile.brandMesh = assemble(gl, [
-          { data: UNIT_SQUARE, layout: [[0, 2]] },
-          { data: shops.records, stride: 16, layout: [[1, 3, gl.FLOAT, 0], [2, 4, gl.UNSIGNED_BYTE, 12]], divisor: 1 },
-        ]);
+        // 按品牌分组：每种品牌一次绘制、一张自己的招牌画
+        const byBrand = new Map();
+        for (let k = 0; k < shops.count; k++) {
+          const brand = shops.records[k * 16 + 14];
+          if (!byBrand.has(brand)) byBrand.set(brand, []);
+          byBrand.get(brand).push(shops.records.slice(k * 16, k * 16 + 16));
+        }
+        tile.brandDraws = [...byBrand.entries()].map(([brand, records]) => {
+          const flat = new Uint8Array(records.length * 16);
+          records.forEach((rec, i) => flat.set(rec, i * 16));
+          return {
+            brand,
+            mesh: assemble(gl, [
+              { data: UNIT_SQUARE, layout: [[0, 2]] },
+              { data: flat, stride: 16, layout: [[1, 3, gl.FLOAT, 0], [2, 4, gl.UNSIGNED_BYTE, 12]], divisor: 1 },
+            ]),
+            count: records.length,
+          };
+        });
       }
     }
     // how high and how low the tile reaches: what the sun's picture must hold
@@ -356,7 +370,7 @@ export class World {
     const gl = this.gl;
     release(gl, tile.buildings);
     release(gl, tile.roofs);
-    release(gl, tile.brandMesh);
+    (tile.brandDraws || []).forEach(draw => release(gl, draw.mesh));
     Object.values(tile.ground).forEach(mesh => release(gl, mesh));
     release(gl, tile.treeMesh);
     for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);

@@ -3,8 +3,8 @@
 Which brands count is said here, in one table for every city: the display name, how the map may call it
 (the map writes 麦当劳, McDonald's, 麦当劳(南京西路店) and, once in a while, only the branch's own name), what
 the shop is (the label the search shows), and how its signboard is painted — a board colour, an accent
-colour and a mark (a name in MARKS; the bake writes all three into the tile's BRND section and the page
-paints the mark over the board with them).
+colour and the brand's own number (the bake writes all three into the tile's BRND section; the page
+paints the brand's pixel logo, from its atlas, over the board with them).
 
 OpenStreetMap's China coverage of these is real but partial — about a third to a half of the shops there
 are (counted on the Zhejiang extract, 2026-11): enough to show where a brand is, not enough to find every
@@ -18,7 +18,7 @@ nothing that is a plain word of the language.
 import re
 
 # id: (display, aliases, category, colour, accent, mark). The category is the search's label (what names.py
-# shows); colour and accent are palette names (the board and the mark on it); the mark is a name in MARKS.
+# shows); colour and accent are palette names (the board and the mark on it); mark is the brand's number.
 TABLE = {
     "mcd":        ("麦当劳", ("麦当劳", "McDonald's", "麦咖啡", "McCafé"), "快餐店", "brand_red", "brand_gold", "arches"),
     "kfc":        ("肯德基", ("肯德基", "KFC", "K Pro", "柏赛奥"), "快餐店", "brand_red", "panel_white", "diag"),
@@ -44,12 +44,6 @@ TABLE = {
     "uniqlo":     ("优衣库", ("优衣库", "UNIQLO", "优衣库(UNIQLO)"), "服装店", "brand_red", "panel_white", "band"),
     "miniso":     ("名创优品", ("名创优品", "MINISO"), "杂货店", "brand_red", "panel_white", "disc"),
 }
-
-# the marks a signboard can carry, by name and number: what the page paints over the board in the accent
-# colour (shaders-brands.js). 8 brands share brand_red, so the mark is what tells them apart — 金拱门的双柱,
-# 肯德基的斜条纹, 优衣库的白横带.
-MARKS = {"none": 0, "disc": 1, "band": 2, "diag": 3, "stripes": 4, "ring": 5, "arches": 6}
-
 
 def mark(brand_id):
     """The brand's own number, its place in the table's order: what the tile's BRND section stores, and
@@ -87,9 +81,6 @@ def colour(brand_id):
 def accent(brand_id):
     return TABLE[brand_id][4]
 
-
-def mark(brand_id):
-    return MARKS[TABLE[brand_id][5]]
 
 
 def of(tags):

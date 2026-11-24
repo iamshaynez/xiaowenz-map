@@ -15,7 +15,7 @@ import numpy
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from pixelcity import city, sources
+from pixelcity import brands, city, sources
 
 CITY = city.load("hz")          # these tests are written against Hangzhou: its places, its names
 SAID = {"id": "x", "name": "X", "bounds": [0, 0, 1, 1], "epsg": 32651, "origin": [0, 0], "sources": {}}
@@ -163,6 +163,15 @@ class WhereTheRawDataLies(unittest.TestCase):
             with self.assertRaises(SystemExit) as stopped:
                 sources.covering(wider, "land cover", sources.landcover_tiles(wider), sources.cover_cell)
         self.assertIn("N27E120", stopped.exception.code)
+
+
+class BrandsTest(unittest.TestCase):
+    """品牌编号必须全表唯一连续——BRND 段的字节就是它；曾有一个旧版 mark（按形状字典）定义
+    排在后面把新定义覆盖，麦当劳挂上名创的红白格（D082 三补）。"""
+
+    def test_marks_are_unique_and_in_order(self):
+        marks = [brands.mark(brand) for brand in brands.TABLE]
+        self.assertEqual(sorted(marks), list(range(len(marks))))
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
 // The chain brands' signboards (pipeline/pixelcity/brands.py): a big board painted with the brand's own
-// 32×32 pixel logo — 金拱门、绿色的星巴克圆、肯德基的斜纹、优衣库的白条 — out of an atlas of hand-drawn
-// pictures (app/src/landmarks/brandmarks.js; the board is the logo's own background, so the quad is just
-// the picture held up). The bake hangs every board on the roofline of the shop's own building (the z of
-// aShop is that height, not the ground), high on the upper wall with its top edge over the parapet, so
-// that it stays seen over the streets. A billboard like a tree's crown: its size is in pixels, from
-// metres through the camera's scale. From far out it is under a pixel and is not drawn at all
-// (BRAND_SCALE in render/city.js). The board is oversized on purpose — 招牌要显眼，不真实没关系.
+// 32×32 pixel logo — 金拱门、绿色的星巴克圆、肯德基的斜纹、优衣库的白条 — out of the per-brand textures
+// built from app/src/landmarks/brandmarks.js. Each board is one brand's picture, whole. The bake hangs
+// every board on the roofline of the shop's own building (the z of aShop is that height, not the ground),
+// high on the upper wall with its top edge over the parapet, so that it stays seen over the streets. A
+// billboard like a tree's crown: its size is in pixels, from metres through the camera's scale. From far
+// out it is under a pixel and is not drawn at all (BRAND_SCALE in render/city.js). The board is oversized
+// on purpose — 招牌要显眼，不真实没关系.
 //
 // It takes no shadow and casts none. It casts none because at these sizes the shadow map's own blur is
 // wider than the board's thickness; it takes none because a sign hangs at the wall of a building that is
@@ -20,15 +20,13 @@ const FRAGMENT = PREFIX + CITY_CAMERA + CITY_PIXEL + TABLES + NOISE + MRT + ISLA
 export const BRAND_SHADERS = {
   brands: {
     vs: VERTEX + /* glsl */`
-layout(location = 0) in vec2 aCorner;   // the unit square
+layout(location = 0) in vec2 aCorner;   // the unit square — also the picture's own coordinates
 layout(location = 1) in vec3 aShop;     // x, y relative to the tile's corner; the height it hangs at
-layout(location = 2) in vec4 aLook;     // bytes: board colour, mark colour, brand number, spare
 uniform vec2 uOffset;                   // tile corner relative to the camera centre
 const vec3 BOARD = vec3(4.5, -7.0, 1.2); // half width, bottom edge, top edge, metres about the roofline
 out vec2 vPlace;                        // the foot of the board in world metres
-out vec2 vBox;                          // -1..1 across and up the board
+out vec2 vUV;                           // where in the brand's picture this pixel reads
 out float vDepth;
-flat out vec3 vLook;
 void main() {
   vec3 foot = vec3(aShop.xy + uOffset, aShop.z);
   vec3 s = project(vec3(foot.xy, foot.z + BOARD.z));               // the top edge, just over the parapet
@@ -38,25 +36,21 @@ void main() {
   vec2 extent = vec2(max(BOARD.x * uTilt.z, 0.75), tall * 0.5);
   vDepth = s.z;
   vPlace = foot.xy + uCentre.xy;
-  vLook = aLook.xyz;
-  vBox = aCorner;
+  vUV = vec2(0.5 + aCorner.x * 0.5, 0.5 - aCorner.y * 0.5);
   gl_Position = clip(vec3(centre + aCorner * extent, vDepth));
 }`,
     fs: FRAGMENT + /* glsl */`
-uniform sampler2D uMarks;               // the atlas of pixel logos, one 32×32 cell a brand
-uniform float uColumns;                 // how many brands the atlas holds
+uniform sampler2D uMark;                // this draw's brand picture, 32×32
 in vec2 vPlace;
-in vec2 vBox;
+in vec2 vUV;
 in float vDepth;
-flat in vec3 vLook;
 void main() {
   ivec2 ip = pixelIndex();
   if (!onIsland(vPlace, ip)) discard;
-  // the brand's picture, whole: the atlas cell is the sign's face, background and all, painted flat.
+  // the brand's picture, whole: it is the sign's face, background and all, painted flat.
   // A step darker at the rim, so that the flag reads as a thing put up rather than a patch of colour
-  vec2 uv = vec2((vLook.z + 0.5 + vBox.x * 0.5) / uColumns, 0.5 - vBox.y * 0.5);
-  vec3 color = texture(uMarks, uv).rgb;
-  if (abs(vBox.x) > 0.85) color *= 0.72;
+  vec3 color = texture(uMark, vUV).rgb;
+  if (vUV.x < 0.1 || vUV.x > 0.9) color *= 0.72;
   outColor = vec4(color, 1.0);
   outClass = vec4(0.0, 0.0, 0.0, 1.0);
   gl_FragDepth = depthOf(vDepth);

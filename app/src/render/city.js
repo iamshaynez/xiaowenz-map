@@ -10,7 +10,7 @@ import { BRAND_SHADERS } from '../gl/shaders-brands.js';
 import { SHADOW_SHADERS } from '../gl/shaders-shadow.js';
 import { LIFE_SHADERS } from '../gl/shaders-life.js';
 import { DEBUG_SHADERS } from '../gl/shaders-debug.js';
-import { brandAtlas } from '../landmarks/brandmarks.js';
+import { brandTextures } from '../landmarks/brandmarks.js';
 import { Traffic, TRAFFIC_COLOURS } from '../life/traffic.js';
 import { assemble, BOX_SCALE, DISTRICT_SCALE, LIFE_SCALE, ROOF_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE, UNIT_BOX } from '../world/store.js';
 import { CityCamera } from '../gl/city-camera.js';
@@ -601,24 +601,27 @@ export class CityRenderer extends StyleRenderer {
     this.drawn.trees = runs.reduce((sum, run) => sum + run.count, 0);
   }
 
-  // the chain brands' flags: each shop's board painted with its brand's pixel logo out of the atlas
+  // the chain brands' flags: each shop's board painted with its brand's own picture
   drawBrands(tiles, { throughWalls = false } = {}) {
     const { gl, city } = this;
-    const shops = tiles.filter(tile => tile.brandMesh);
+    const shops = tiles.filter(tile => tile.brandDraws);
     if (!shops.length) return;
-    if (!this.brandAtlas) this.brandAtlas = brandAtlas(gl);
+    if (!this.brandTextures) this.brandTextures = brandTextures(gl);
     const brands = this.programs.brands.use();
     this.applyCamera(brands);
-    gl.activeTexture(gl.TEXTURE0 + BRAND_UNIT);
-    gl.bindTexture(gl.TEXTURE_2D, this.brandAtlas.texture);
-    brands.set('uMarks', BRAND_UNIT).set('uColumns', this.brandAtlas.columns);
-    if (throughWalls) gl.disable(gl.DEPTH_TEST);
+    brands.set('uMark', BRAND_UNIT);
+    let drawn = 0;
     for (const tile of shops) {
-      brands.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
-      gl.bindVertexArray(tile.brandMesh.vao);
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, tile.brands.count);
+      for (const draw of tile.brandDraws) {
+        gl.activeTexture(gl.TEXTURE0 + BRAND_UNIT);
+        gl.bindTexture(gl.TEXTURE_2D, this.brandTextures.textures[draw.brand]);
+        brands.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(draw.mesh.vao);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, draw.count);
+        drawn += draw.count;
+      }
     }
     if (throughWalls) gl.enable(gl.DEPTH_TEST);
-    this.drawn.brands = shops.reduce((sum, tile) => sum + tile.brands.count, 0);
+    this.drawn.brands = drawn;
   }
 }
