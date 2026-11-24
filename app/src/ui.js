@@ -400,14 +400,22 @@ export function createInterface(app) {
     const a = camera.axes(0, 0), b = camera.axes(0, 1);
     // 北在画面上的方向：u 直接是屏幕横向，v 走 sy = -v·sinPitch（project），屏幕 y 向下长，故 dy 取负
     const dx = b.u - a.u, dy = -(b.v - a.v) * camera.sinPitch, length = Math.hypot(dx, dy) || 1;
+    const ux = dx / length, uy = dy / length;
     compass.clearRect(0, 0, 44, 44);
     compass.strokeStyle = getComputedStyle(document.body).getPropertyValue('--muted');
     compass.fillStyle = getComputedStyle(document.body).getPropertyValue('--ink');
     compass.lineWidth = 1;
     compass.beginPath();
-    compass.moveTo(22 - dx / length * 12, 22 - dy / length * 12);
-    compass.lineTo(22 + dx / length * 14, 22 + dy / length * 14);
+    compass.moveTo(22 - ux * 11, 22 - uy * 11);
+    compass.lineTo(22 + ux * 9, 22 + uy * 9);
     compass.stroke();
+    // an arrowhead on the north end: a bare line's two ends read either way
+    compass.beginPath();
+    compass.moveTo(22 + ux * 14, 22 + uy * 14);
+    compass.lineTo(22 + ux * 9 - uy * 4, 22 + uy * 9 + ux * 4);
+    compass.lineTo(22 + ux * 9 + uy * 4, 22 + uy * 9 - ux * 4);
+    compass.closePath();
+    compass.fill();
     compass.font = '600 12px ui-monospace, Menlo, monospace';
     compass.textAlign = 'center';
     compass.textBaseline = 'middle';

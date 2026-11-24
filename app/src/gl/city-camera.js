@@ -10,7 +10,7 @@ export class CityCamera {
   constructor() {
     this.x = 0;                          // centre, world metres
     this.y = 0;
-    this.yaw = 0;                        // radians, turns the world clockwise seen from above
+    this.yaw = 0;                        // radians; increasing it turns the world counter-clockwise seen from above
     this.pitch = Math.PI / 6;            // 30 degrees down, as the reference
     this.scale = 1;                      // pixels per metre
     this.ss = 2;                         // supersampling of the scene buffers

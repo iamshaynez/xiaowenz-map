@@ -75,7 +75,7 @@ async function run(browser, viewport, name) {
   await page.mouse.up({ button: 'right' });
   await page.evaluate(() => window.__city.settle(30000));
   const after = await pose(page);
-  const wantYaw = before.yaw - 240 * ACROSS, wantPitch = before.pitch + 60 * DOWN;
+  const wantYaw = before.yaw + 240 * ACROSS, wantPitch = before.pitch + 60 * DOWN;
   check(Math.abs(after.yaw - wantYaw) < 1e-6, `${name}: right drag: the view turns with the pointer (${(after.yaw - before.yaw).toFixed(3)} rad, expected ${(wantYaw - before.yaw).toFixed(3)})`);
   check(Math.abs(after.pitch - wantPitch) < 1e-6, `${name}: right drag: the view tilts with the pointer (${(after.pitch - before.pitch).toFixed(3)} rad, expected ${(wantPitch - before.pitch).toFixed(3)})`);
   check(after.x === before.x && after.y === before.y && after.scale === before.scale, `${name}: right drag: the map stays where it is`);

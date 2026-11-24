@@ -171,7 +171,7 @@ async function boot() {
         // turn the city, and tilt it with a pull up or down, by how far the hand moved on the page (CSS
         // pixels), whatever the size of a frame's pixel
         const across = (now.x - was.x) * pixelScale, down = (now.y - was.y) * pixelScale;
-        camera.yaw -= across * 0.006;
+        camera.yaw += across * 0.006;
         camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
         ui.follow();               // turns around the landmark last flown to, if there is one
       } else {
@@ -276,7 +276,7 @@ async function boot() {
       // gesture, so that a zoom whose anchor wobbles with the fingers does not leave the map shifted
       camera.zoomAt(x, y, camera.scale * state.distance / pinch.distance, height);
       const across = (state.x - pinch.x) * pixelScale, down = (state.y - pinch.y) * pixelScale;
-      camera.yaw -= across * 0.006;
+      camera.yaw += across * 0.006;
       camera.pitch = Math.min(1.45, Math.max(0.26, camera.pitch + down * 0.005));
       if (across || down) ui.follow();      // turns around the landmark last flown to, if there is any
       pinch = { ...state, height };
