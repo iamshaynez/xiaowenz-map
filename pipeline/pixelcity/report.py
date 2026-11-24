@@ -28,7 +28,7 @@ from .classify import (
 )
 from .ground import GROUND_COLOURS, Ground
 from .landmarks import cleared_around, cleared_mask
-from . import names
+from . import brands, names
 from .osm_extract import Layers
 from .scene import in_water, unholdable
 from .terrain import load as load_terrain
@@ -214,7 +214,7 @@ def build(city, log=print):
     add("## 名字\n")
     add("页面搜索用的就是这一份：`data/baked/<id>/names.bin`，由 `pixelcity/names.py` 从 OpenStreetMap 的名字生成（含边距的原始数字见下）。楼高数据集不带名字，所以由它补出来的轮廓搜不到。\n")
     columns, course = names.read(city.baked / "names.bin")
-    kind_names = {names.LANDMARK: f"地标（名录里的 {columns['kinds'].count(names.LANDMARK)} 处）", names.ROAD: "道路", names.RAIL: "铁路", names.BUILDING: "建筑", names.PLACE: "地点", names.WATER: "水域"}
+    kind_names = {names.LANDMARK: f"地标（名录里的 {columns['kinds'].count(names.LANDMARK)} 处）", names.ROAD: "道路", names.RAIL: "铁路", names.BUILDING: "建筑", names.PLACE: "地点", names.WATER: "水域", names.BRAND: f"品牌门店（{len(brands.TABLE)} 个品牌）"}
     kinds = Counter(columns["kinds"])
     add(table(["类别", "数量"], [[kind_names[k], f"{v:,}"] for k, v in sorted(kinds.items())]))
     add("")
@@ -223,6 +223,9 @@ def build(city, log=print):
     aliases = json.loads(alias_file.read_text(encoding="utf-8"))["aliases"] if alias_file else {}
     add(f"- 不同的名字 {len(borne):,} 个；其中 {len({columns['names'][int(k)] for k in columns['near']}):,} 个被相隔 1 公里以上的几样东西共用（两个镇各有一条“人民路”），候选里用最近的村、社区或街道区分。")
     add(f"- 别名 {len(aliases)} 条（`cities/<id>/aliases.json`），烘焙时逐条核对，指不到东西就停下。")
+    shop_brands = Counter(columns["labels"][columns["label"][k]] for k in range(len(columns["names"])) if columns["kinds"][k] == names.BRAND)
+    if shop_brands:
+        add(f"- 品牌门店 {sum(shop_brands.values()):,} 家（{'、'.join(f'{name} {n}' for name, n in shop_brands.most_common(8))} 等），来自 OSM 的品牌标注，覆盖不全；每家门口有一块品牌色的小招牌，深入到街区档才画。品牌表在 `pixelcity/brands.py`。")
     add(f"- 水面 {len(columns['sheets'])} 处：一条有名字的水道整个躺在一块没有名字的水面里时，这块水面认这条水道的名字，高亮画它的岸。")
     add(f"- 文件 {(city.baked / 'names.bin').stat().st_size / 1e6:.1f} MB，线路共 {len(course):,} 个点；页面打开三秒后取一次，搜索框先用上时就立刻取，不挡第一次出图。")
     add("")
@@ -233,7 +236,7 @@ def build(city, log=print):
         return sum(1 for _, tags in rows if tags.get("name"))
     add(table(["", "总数", "有名字", "不同的名字"], [[label, f"{len(rows):,}", f"{named(rows):,}", f"{len({t['name'] for _, t in rows if t.get('name')}):,}"]
                                                    for label, rows in (("道路（段）", osm.roads), ("建筑轮廓", osm.buildings), ("地点（点和平面上的地名）", osm.places), ("土地利用多边形", osm.land),
-                                                                       ("铁路（段）", osm.rail), ("水面多边形", osm.water), ("水道中心线（段）", osm.water_lines))]))
+                                                                       ("铁路（段）", osm.rail), ("水面多边形", osm.water), ("水道中心线（段）", osm.water_lines), ("品牌门店（点）", osm.brands))]))
     add("")
     add("路名看等级：\n")
     length, named_length = Counter(), Counter()
@@ -252,7 +255,7 @@ def build(city, log=print):
     landmarks = json.loads((city.work / "landmarks.json").read_text(encoding="utf-8"))["landmarks"]
     def built(row):
         models = sorted({(item.get("kit") or {}).get("model") for item in [row, *row.get("parts", [])] if item.get("kit")} - {None})
-        names = {"pagoda": "塔", "pavilionTower": "楼阁", "archBridge": "石拱桥", "trussBridge": "桁架桥", "lotus": "体育场", "pearlTower": "东方明珠塔", "waibaidu": "钢桁拱桥", "flatiron": "船形大楼", "castleHall": "城堡楼", "pavilionCrown": "斗冠", "spireHall": "金顶展览塔"}
+        names = {"pagoda": "塔", "pavilionTower": "楼阁", "archBridge": "石拱桥", "trussBridge": "桁架桥", "lotus": "体育场", "pearlTower": "东方明珠塔", "waibaidu": "钢桁拱桥", "flatiron": "船形大楼", "castleHall": "城堡楼", "pavilionCrown": "斗冠", "spireHall": "金顶展览塔", "openerTower": "开瓶器楼", "tierTower": "密檐塔楼", "archTheatre": "弧顶剧院", "domedHall": "穹角大楼", "gothicChurch": "双塔教堂", "globeHall": "金球"}
         return "、".join(names.get(m, m) for m in models) or "—"
     add(table(["编号", "名称", "组", "对应 OSM 里的要素", "手工模型"], [[r["id"], r["title"], r["group"], r["source"].replace("OpenStreetMap: ", ""), built(r)] for r in landmarks]))
     add("")

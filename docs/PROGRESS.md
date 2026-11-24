@@ -25,7 +25,8 @@
 - [x] 数据报告 `cities/sh/DATA-REPORT.md`（报告的说明文字这回改成了不说杭州的事，D068 说过的话兑现）。
 - [x] 第一轮验收图 25 张（`node tools/tests/city-views.cjs sh out/city-views/sh`，这个工具是新加的，给任何城拍"第一眼"）看过：外滩的全景、豫园的园子、龙华寺的殿堂院落都对；取景参数初调过一轮（外滩 1.1→0.45，陆家嘴的楼 0.9–1.2→0.5）。
 - [x] 手工模型七座（D078、D080）：东方明珠（你点名的）、龙华塔、外白渡桥、武康大楼、杨树浦水厂城堡楼、中华艺术宫、上海展览中心；地标有了自己的标准照（`view.yaw`，D079）。验收图 26 张，五张新的进了 `docs/REVIEW/sh-first-look/`。
-- [ ] **当前这一步：等你看过验收图和数据报告**。之后：浏览器测试里写死杭州字样的（`tour.cjs`、`smoke.cjs` 等）按城市参数化；上海发布（`npm run publish -- sh`，见 `deploy/README.md`）。
+- [x] 品牌门店层与手工模型六座（D082、D083，2026-11-24，两城一起做）：23 个品牌的门店可搜索（杭州 374 家、上海 1,709 家），街区档起每家门前一块招牌色小牌（瓦片新段 BRND）；新模型五座在上海（环球金融中心"开瓶器"、金茂、大剧院〔新地标，25→26 处〕、徐家汇天主堂、邮政总局）一座在杭州（国际会议中心"大金球"），两城 landmark-views 全过，data-readers/search/flight/smoke/cities 通过，管线测试 119 项通过，数据报告两城重出。验收图 `out/city-views/sh-brands`、`out/city-views/hz-brands`（未入 docs/REVIEW，等你看）。
+- [ ] **当前这一步：等你看过两城的验收图与数据报告；要不要提交、要不要发布（`npm run publish -- hz -- sh`、`npm run deploy`）由你定**——数据与页面都还没发线上，线上还是 25 处地标的版本（旧页面读不了新数据里没有的东西，但新页面读旧数据没问题，所以"先发数据后发页面"的次序不破）。
 - [ ] 杭州 `city.json` 加了 `files` 表（D073）：烘焙戳里的定义摘要变了，下次发布杭州会换一份清单，对象本身不变。
 
 需要续做的话：烘焙已齐（`data/baked/sh/bake.json` 在），`node serve.mjs` 开 <http://127.0.0.1:5300/sh> 就能看；重跑任何一步用 `python -m pixelcity.build_all --city sh --from <步>`。

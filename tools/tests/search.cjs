@@ -251,7 +251,8 @@ async function opened(browser, url, options = {}) {
     check((await inkPixels(page)).length === 0, 'nothing is drawn over a landmark of the list: its flight is the view of it');
     check(now.camera[2] > 1.5, `the view of the landmark is close (${now.camera[2].toFixed(2)} pixels a metre)`);
     result = await find(page, '大莲花');
-    check(result && result.landmark === '4-02', `大莲花 finds 奥体中心 by its alias (${result && result.name})`);
+    const aoti = await page.evaluate(() => window.__city.landmarks.find(l => l.title === '奥体中心').id);
+    check(result && result.landmark === aoti, `大莲花 finds 奥体中心 by its alias (${result && result.name})`);
     result = await find(page, '武林广场');
     check(result && result.label === '广场', `武林广场 is the square first (${result && result.label})`);
     result = await find(page, '武林广场站');

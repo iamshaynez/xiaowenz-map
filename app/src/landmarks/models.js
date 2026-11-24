@@ -317,3 +317,125 @@ export function spireHall(c, { height = 110, tiers = [[42, 30], [72, 24], [92, 1
   k.box(gold, 0, 0, height + 1.5, 0.35, 2.4, 2.4);
   return k;
 }
+
+// The Shanghai World Financial Centre: a shaft of grey glass drawing in as it rises, and at its head the
+// trapezoid aperture that earned it the name of a bottle opener — two horns with the sky between them,
+// each horn's top rising towards its own shoulder. The 492 m to the tip, the 58 m face and the crown
+// beginning about 417 m up are the tower's own; the aperture's width and the slope of the horns' tops
+// follow the photographs. Along the map's x axis the aperture shows as the gap it is; across it the two
+// horns pass for one.
+export function openerTower(c, { height = 492, width = 58, shaft = 417, top = 474, aperture = 22 }) {
+  const k = new Kit();
+  const glass = k.part(c.silver, c.silver, 5), dark = k.part(c.dark, c.silver, 5), metal = k.part(c.metal, c.metal);
+  const halfTop = width * 0.36, tiers = 6;
+  let z = 0;
+  for (let i = 0; i < tiers; i++) {
+    const w = width / 2 + (halfTop - width / 2) * (i + 1) / tiers;
+    k.prism(glass, 0, 0, z, z + shaft / tiers, w, 4);
+    z += shaft / tiers;
+  }
+  const d = width * 0.15, inner = top - 9, outer = top + 1;       // the horn's half depth; its sloping top
+  for (const side of [-1, 1]) {
+    const xi = side * aperture / 2, xo = side * halfTop;
+    for (const face of [-1, 1]) {                                                       // the two long walls
+      const y = face * d;
+      k.quad(glass, [[xi, y, shaft], [xo, y, shaft], [xo, y, outer], [xi, y, inner]], 0, face);
+    }
+    k.quad(glass, [[xo, -d, shaft], [xo, d, shaft], [xo, d, outer], [xo, -d, outer]], side, 0);       // the shoulder
+    k.quad(dark, [[xi, -d, shaft], [xi, d, shaft], [xi, d, inner], [xi, -d, inner]], -side, 0);       // into the aperture
+    k.quad(metal, [[xi, -d, inner], [xi, d, inner], [xo, d, outer], [xo, -d, outer]], 0, 0);          // the slope up to it
+  }
+  k.prism(metal, 0, 0, top + 1, height, 1.6, 6);
+  k.cap(metal, 0, 0, height, 1.6, 6);
+  return k;
+}
+
+// Jin Mao: a pale stone shaft that steps in tier by tier, pagoda-fashion, and ends in a spire. The 421 m
+// to the spire's tip is the tower's own; the count of the tiers and their heights follow the photographs.
+export function tierTower(c, { height = 421, width = 41, podium = 24, spire = 58, tiers = 9 }) {
+  const k = new Kit();
+  const stone = k.part(c.cream, c.cream, 4), glass = k.part(c.silver, c.silver, 5), metal = k.part(c.metal, c.metal);
+  k.box(stone, 0, 0, 0, width * 1.2, width * 1.2, podium * 0.4);
+  k.box(glass, 0, 0, podium * 0.4, width * 1.05, width * 1.05, podium * 0.6);
+  let z = podium, w = width;
+  const rise = (height - spire - podium) / tiers;
+  for (let i = 0; i < tiers; i++) {
+    k.prism(i % 2 ? glass : stone, 0, 0, z, z + rise, w / 2, 4);
+    z += rise;
+    w *= 0.87;
+  }
+  k.prism(metal, 0, 0, z, height, 1.4, 6);
+  k.cap(metal, 0, 0, height, 1.4, 6);
+  return k;
+}
+
+// The Grand Theatre: a glass hall under one white shell that sweeps up from its front edge to a crest
+// over the back, like a wave about to break. The 40 m the crest reaches and the glass footing are the
+// building's own; the shell's curve follows the photographs.
+export function archTheatre(c, { width = 110, depth = 68, height = 40, sill = 12, slices = 14 }) {
+  const k = new Kit();
+  const glass = k.part(c.glass, c.glass, 5), shell = k.part(c.white, c.white);
+  k.box(glass, 0, 0, 0, width, depth, sill + 1);
+  // the shell: a band of quads across the hall, its height an arc that starts at the front edge and
+  // crests two thirds of the way back; at the back a wall closes it down to the glass
+  const crest = 0.62;
+  const at = t => sill + (height - sill) * Math.pow(Math.sin(Math.PI * Math.min(t / crest, 1) / 2), 0.9);
+  for (let i = 0; i < slices; i++) {
+    const y0 = (i / slices - 0.5) * depth, y1 = ((i + 1) / slices - 0.5) * depth;
+    const h0 = at((i + 0.5) / slices), h1 = at((i + 1.5) / slices);
+    k.quad(shell, [[-width / 2, y0, h0], [width / 2, y0, h0], [width / 2, y1, h1], [-width / 2, y1, h1]], 0, 0);
+  }
+  k.quad(shell, [[-width / 2, depth / 2, sill], [width / 2, depth / 2, sill], [width / 2, depth / 2, at(1)], [-width / 2, depth / 2, at(1)]], 0, 1);
+  return k;
+}
+
+// The General Post Office: a long grey-stone range with a jutting middle and two green-bronze domes on
+// its face corners, after the manner of the 1924 building. The range's measures are not published; these
+// follow the photographs.
+export function domedHall(c, { length = 96, depth = 24, height = 26, dome = 10 }) {
+  const k = new Kit();
+  const stone = k.part(c.grey, c.grey, 4), cream = k.part(c.cream, c.cream, 4), verd = k.part(c.verdigris, c.verdigris), steel = k.part(c.steel, c.steel);
+  k.box(stone, 0, 0, 0, length, depth, height);
+  k.box(cream, 0, 0, height, length * 0.96, depth * 0.94, 2.0);                    // the cornice
+  k.box(stone, 0, depth * 0.3, 0, length * 0.3, depth * 0.6, height + 4);          // the middle, jutting
+  for (const side of [-1, 1]) {
+    const x = side * (length / 2 - dome), y = depth / 2 - dome * 0.7;
+    k.prism(stone, x, y, 0, height + 3, dome * 0.7, 8);                            // the corner drum
+    ball(k, verd, x, y, height + 5, dome * 0.62, 4, 12);                            // the dome, half of it sunk in the drum
+    k.prism(steel, x, y, height + 5 + dome * 0.62, height + 7 + dome * 0.62, 0.3, 6);
+  }
+  return k;
+}
+
+// The Basilica of St Ignatius: a grey-stone hall with a steep gable, a transept, and two square towers
+// whose pinnacles carry the 59 m the church is known by. The towers' height is the record's own; the
+// nave's measures follow the photographs.
+export function gothicChurch(c, { length = 66, width = 26, nave = 18, tower = 38, spire = 21, towerWidth = 9 }) {
+  const k = new Kit();
+  const stone = k.part(c.grey, c.grey, 4), slate = k.part(c.slate, c.slate), cross = k.part(c.dark, c.dark);
+  k.box(stone, -length * 0.1, 0, 0, length * 0.8, width, nave);
+  k.hipRoof(slate, -length * 0.1, 0, nave, length * 0.8, width, width * 0.3, false);
+  k.box(stone, 0, 0, 0, width * 0.8, width * 1.6, nave * 0.85);                    // the transept
+  k.hipRoof(slate, 0, 0, nave * 0.85, width * 0.8, width * 1.6, width * 0.22, true);
+  for (const side of [-1, 1]) {
+    const x = length * 0.35, y = side * (width / 2 - towerWidth / 2 - 0.5);
+    k.prism(stone, x, y, 0, tower, towerWidth / 2, 4);
+    k.ring(slate, x, y, 0.4, tower + spire, towerWidth / 2 + 0.8, tower, 4);       // the pinnacle
+    k.box(cross, x, y, tower + spire, 0.4, 0.4, 1.6);
+    k.box(cross, x, y, tower + spire + 1.0, 1.6, 0.35, 0.4);
+  }
+  return k;
+}
+
+// Hangzhou's International Conference Centre: a great gilded ball seated in a round podium, the "golden
+// ball" of the Qianjiang new town. The 90 m it stands and the ball's bulk follow the photographs; no
+// measures of it are published.
+export function globeHall(c, { height = 90, globe = 52, podium = 30 }) {
+  const k = new Kit();
+  const stone = k.part(c.grey, c.grey, 4), gold = k.part(c.gold, c.gold), glass = k.part(c.glass, c.glass, 5);
+  k.prism(stone, 0, 0, 0, 8, podium, 16);
+  k.prism(glass, 0, 0, 8, 15, podium * 0.8, 16);
+  ball(k, gold, 0, 0, 15 + globe * 0.42, globe / 2, 8, 20);
+  k.prism(gold, 0, 0, 15 + globe * 0.42 + globe / 2, height, 2.0, 6);
+  return k;
+}

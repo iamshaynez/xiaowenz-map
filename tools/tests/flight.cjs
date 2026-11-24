@@ -64,7 +64,8 @@ const TILE = /\/tiles\/b\//;
     await settle();
 
     // ---- across the city: the flight that used to ask for 92 tiles --------------------------------------------
-    const { fresh: across, view: olympic, left } = await flown('4-02');
+    const olympicId = await page.evaluate(() => window.__city.landmarks.find(l => l.title === '奥体中心').id);
+    const { fresh: across, view: olympic, left } = await flown(olympicId);
     check(across.length <= olympic * 1.5 + 4, `a flight across the city asks for about what the destination's view holds (${across.length} tiles for a view of ${olympic}; it used to ask for 92)`);
     check(left <= 2, `the destination's tiles are almost all on the card when the flight ends (${left} still on their way)`);
 

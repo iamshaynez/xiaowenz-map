@@ -5,7 +5,7 @@
 // block of flats that the bake should have cleared). A landmark that is a place, drawn from the map, has
 // nothing to redraw; for those the view is checked to be full, not white.
 //
-// Usage: NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs
+// Usage: NODE_PATH="$(npm root -g)" node tools/tests/landmark-views.cjs [city]
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const path = require('path');
@@ -13,6 +13,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '../..');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 5396;
+const CITY = process.argv[2] || 'hz';
 const SIDES = [0, 2 * Math.PI / 3, 4 * Math.PI / 3];
 
 const failures = [];
@@ -25,10 +26,12 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 // painted in its own colours. It was not, for a while: the buildings' shader read every wall as the first
 // colour of the table (D048)
 const KIT_COLOURS = ['stone_pale', 'tile_dark', 'whitewash_aged', 'wood_dark', 'metal_pale', 'temple_red', 'paving', 'metal_dark', 'rail',
-  'concrete_pale', 'panel_white', 'pitch'];
+  'concrete_pale', 'panel_white', 'pitch', 'concrete_grey', 'gild', 'glass_blue', 'glass_teal', 'tile_slate', 'window_dark', 'brick_red', 'plaster_cream'];
 const OWN_COLOUR_SHARE = 0.25;
-const LINEAR = ['1-05', '2-03'];            // the causeway's six bridges, and the pagoda with a kilometre and a half of steel bridge
-const BUILT_LEAST = { '1-05': 60, '2-03': 800 };     // the pagoda is small in a view that holds the bridge too
+// per city: the landmarks whose view is deliberately not centred (a causeway runs across it; the Pearl's
+// standard shot stands aside on the Bund), and the least pixels a small built landmark has to show
+const LINEAR = { hz: ['1-05', '2-03'], sh: ['1-05'] };
+const BUILT_LEAST = { hz: { '1-05': 60, '2-03': 800 }, sh: {} };
 const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
 
 (async () => {
@@ -38,7 +41,7 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
   try {
     for (let i = 0; i < 50; i++) {
       try {
-        if ((await fetch(`http://127.0.0.1:${PORT}/hz`)).ok) break;
+        if ((await fetch(`http://127.0.0.1:${PORT}/${CITY}`)).ok) break;
       } catch {
         // not up yet
       }
@@ -49,7 +52,7 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
     const errors = [];
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-    await page.goto(`http://127.0.0.1:${PORT}/hz`);
+    await page.goto(`http://127.0.0.1:${PORT}/${CITY}`);
     await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
     const ids = await page.evaluate(() => window.__city.landmarks.map(l => l.id));
 
@@ -122,7 +125,7 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
         check(clicks.every(m => m.cover >= PLACE_COVER), `${id}: the middle of the view is a place, not white (${clicks.map(m => `${(100 * m.cover).toFixed(0)}%`).join(', ')})`);
         continue;
       }
-      const least = BUILT_LEAST[id] ?? 1500, centred = m => LINEAR.includes(id) || Math.hypot(...m.centre) <= OFF_CENTRE_PX;
+      const least = BUILT_LEAST[CITY][id] ?? 1500, centred = m => LINEAR[CITY].includes(id) || Math.hypot(...m.centre) <= OFF_CENTRE_PX;
       const good = clicks.filter(m => m.seen >= least && m.seen >= m.all * SEEN_SHARE && m.centre && centred(m)).length;
       check(good >= 2, `${id}: seen from ${good} of 3 sides (needs 2): ${clicks.map(m => `${m.seen}/${m.all} at ${m.centre}`).join(', ')}`);
       const painted = clicks.filter(m => m.own >= OWN_COLOUR_SHARE).length;

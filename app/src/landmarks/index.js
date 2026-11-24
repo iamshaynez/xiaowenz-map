@@ -9,7 +9,8 @@ import * as models from './models.js';
 const BED = { archBridge: 0, trussBridge: 0 };
 const ROLES = { stone: 'stone_pale', tile: 'tile_dark', wall: 'whitewash_aged', wood: 'wood_dark', metal: 'metal_pale', red: 'temple_red', path: 'paving',
   steel: 'metal_dark', deck: 'rail', concrete: 'concrete_pale', white: 'panel_white', grass: 'pitch', glass: 'glass_blue', rose: 'plaster_rose',
-  brick: 'brick_red', cream: 'plaster_cream', gold: 'gild' };
+  brick: 'brick_red', cream: 'plaster_cream', gold: 'gild', grey: 'concrete_grey', silver: 'metal_pale', dark: 'window_dark',
+  slate: 'tile_slate', verdigris: 'glass_teal' };
 
 // -> the list, each landmark with `parts`: what is built by hand for it, itself and its dependents, as
 //    [{ title, x, y, reach, top, mesh, props }], x and y in world metres
