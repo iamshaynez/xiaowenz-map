@@ -6,7 +6,7 @@ import { DISTRICT_SCALE, LIFE_SCALE, World } from './world/store.js';
 import { CHANNELS, cityAsked, openCity, openCities } from './world/source.js';
 import { DATA_ORIGIN } from './config.js';
 import { buildLandmarks } from './landmarks/index.js';
-import { BRAND_LOGOS, setPaletteColours } from './landmarks/brandmarks.js';
+import { BRAND_LOGOS } from './landmarks/brandmarks.js';
 import { createInterface } from './ui.js';
 
 const MAX_WIDTH = 960, MAX_HEIGHT = 540;   // the frame at the middle pixel size; finer and coarser sizes scale it
@@ -58,9 +58,8 @@ async function boot() {
   const names = index.palette.slice();
   for (const name of Object.keys(colours)) if (!names.includes(name)) names.push(name);
   renderer.palette.seat(names.map(name => colours[name]));
-  // the brands' pixel logos are painted in the same colours; the bake's list of brands and the atlas's
-  // must agree, brand for brand, or a shop would wear another's sign
-  setPaletteColours(colours);
+  // the brands' pixel logos are drawn from the references by tools/bake/brand_logos.mjs; the bake's
+  // list of brands and the atlas's must agree, brand for brand, or a shop would wear another's sign
   const bakedBrands = index.brandMarks || [];
   if (bakedBrands.length && bakedBrands.some((brand, k) => BRAND_LOGOS[k]?.brand !== brand)) {
     throw new Error('烘焙的品牌表和页面的招牌画对不上，请更新页面（brandMarks 与 brandmarks.js）');
