@@ -1,0 +1,49 @@
+{
+ "id": "cd",
+ "name": "成都",
+ "en": "Chengdu",
+ "subtitle": "主城区",
+ "bounds": [103.80, 30.40, 104.32, 30.80],
+ "epsg": 32648,
+ "origin": [380000, 3360000],
+ "sources": {
+  "_comment": "bounds 是主城区的经纬度：西、南、东、北。epsg 是投影（这里用的是 UTM 48N，中央经线 105° 恰过成都，单位米，北朝上），origin 是这个世界坐标的原点。sources 是四样原始数据：OSM 提取包的地址（Geofabrik 的中国包，全国一份）；楼高数据集 3D-GloBFP 的一块瓦片和它的下载地址（有 files 表的瓦片管线自己取）；地形 Copernicus GLO-30 覆盖范围的两块（主城跨东经 103.75 的瓦片界？不跨——103.8-0.03=103.77，仍在 103.75–105.0 这块里，两块是因为跨了东经 104 度线）；土地覆盖 ESA WorldCover 三度一块（N30E102 覆盖 30–33 度北、102–105 度东的成都）。来源与许可见 docs/DATA-SOURCES.md。",
+  "osm": "https://download.geofabrik.de/asia/china/china-latest.osm.pbf",
+  "buildings": {
+   "tile": "2181",
+   "url": "https://figshare.com/articles/dataset/_/28879733",
+   "files": {"2181": "https://ndownloader.figshare.com/files/54098807"}
+  },
+  "dem": ["N30_00_E103_00", "N30_00_E104_00"],
+  "landcover": "N30E102"
+ },
+ "look": {
+  "_comment": "这座城自己的规矩，画法上和别的城不一样的地方。historic：老街区，一圈一处（at 是圆心，radius 是半径，公里）；village 为 true 的圈里房子一律矮（数据集给的楼高在老街区不可信）。modern：玻璃幕墙的商务区，圈内的高楼多按写字楼画。templeGrounds：寺庙用地，OSM 只标了寺庙、没标殿堂，圈内没有名字的轮廓按殿堂画。rivers：名字里带这些词的水道用江水的土黄色，其余标成“河”的按运河的青绿画。water：报告里量面积的那片水。这些圈是按知名地名画的，不是官方边界。",
+  "rivers": ["锦江", "府河", "南河"],
+  "water": {"name": "锦江", "at": [104.078, 30.635]},
+  "historic": [
+   {"at": [104.0525, 30.6650], "radius": 0.5, "village": true, "note": "宽窄巷子：清代满城遗下的三条巷子"},
+   {"at": [104.0558, 30.6590], "radius": 0.4, "village": true, "note": "人民公园·祠堂街：老城的核心"},
+   {"at": [104.0440, 30.6443], "radius": 0.55, "village": true, "note": "武侯祠·锦里：三国圣地与仿古街"},
+   {"at": [104.0262, 30.6585], "radius": 0.75, "village": true, "note": "杜甫草堂·浣花溪：西郊的林盘"},
+   {"at": [104.0385, 30.6593], "radius": 0.4, "village": true, "note": "青羊宫·琴台路：道观与仿古街"},
+   {"at": [104.0735, 30.6740], "radius": 0.45, "village": true, "note": "文殊院：佛寺与坊巷"}
+  ],
+  "modern": [
+   {"at": [104.0810, 30.6570], "radius": 0.9, "note": "春熙路·太古里·IFS：商业心脏"},
+   {"at": [104.0655, 30.6590], "radius": 0.8, "note": "天府广场·骡马市"},
+   {"at": [104.0645, 30.5450], "radius": 1.3, "note": "金融城·软件园：天府大道两侧的塔楼"},
+   {"at": [104.0660, 30.5750], "radius": 1.0, "note": "环球中心·大源"}
+  ],
+  "templeGrounds": [
+   {"at": [104.0735, 30.6735], "radius": 0.12, "note": "文殊院"},
+   {"at": [104.0857, 30.6525], "radius": 0.10, "note": "大慈寺"},
+   {"at": [104.0445, 30.6448], "radius": 0.12, "note": "武侯祠"},
+   {"at": [104.0388, 30.6593], "radius": 0.10, "note": "青羊宫"}
+  ]
+ },
+ "tour": {
+  "_comment": "导览：沿着地标表第一组的地标依次飞过去。label 是按钮上的字。没有这一项就不出导览按钮。",
+  "label": "古城导览"
+ }
+}

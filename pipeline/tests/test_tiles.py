@@ -85,7 +85,9 @@ class ARegionOfTwoTiles(unittest.TestCase):
         x0, y0, nx, ny, cell = terrain.grid_bounds(self.city)
         lon, lat = self.city.unproject(numpy.tile(x0 + (numpy.arange(nx) + 0.5) * cell, ny), numpy.repeat(y0 + (numpy.arange(ny) + 0.5) * cell, nx))
         lon, lat = lon.reshape(ny, nx), lat.reshape(ny, nx)
-        self.assertLessEqual(float(numpy.abs(metres - lat * 1000).max()), 1.5)
+        # the build rebases the city onto its lowest ground (a page fits a city of any elevation), so the
+        # expected field is the synthetic one minus its minimum
+        self.assertLessEqual(float(numpy.abs(metres - (lat * 1000 - (lat * 1000).min())).max()), 1.5)
 
     def test_the_land_cover_is_read_from_the_tile_that_covers_each_square(self):
         classes, x0, y0, step = landcover.world_grid(self.city, self.city.bounds(), log=QUIET)

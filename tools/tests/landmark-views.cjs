@@ -30,8 +30,8 @@ const KIT_COLOURS = ['stone_pale', 'tile_dark', 'whitewash_aged', 'wood_dark', '
 const OWN_COLOUR_SHARE = 0.25;
 // per city: the landmarks whose view is deliberately not centred (a causeway runs across it; the Pearl's
 // standard shot stands aside on the Bund), and the least pixels a small built landmark has to show
-const LINEAR = { hz: ['1-05', '2-03'], sh: ['1-05'] };
-const BUILT_LEAST = { hz: { '1-05': 60, '2-03': 800 }, sh: {} };
+const LINEAR = { hz: ['1-05', '2-03'], sh: ['1-05'], cd: [] };
+const BUILT_LEAST = { hz: { '1-05': 60, '2-03': 800 }, sh: {}, cd: { '2-02': 250 } };   // 2-02 崇丽阁: a small pagoda in a big park
 const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
 
 (async () => {

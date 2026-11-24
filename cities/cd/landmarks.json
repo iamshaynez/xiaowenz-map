@@ -1,0 +1,338 @@
+{
+ "_comment": "成都的地标。每一处：在 OSM 的哪一层里按名字找哪个要素（tag 用来在同名的要素里挑，可省），用哪个模型、多大（kit，可省：那里不搭东西，只飞过去看），模型周围多少米内画的楼让位（clear），飞到那里时的像素比例（view.scale；offset 是取景时画面中心离它的位置，米，向右、向上），一句话（note）。parts 是跟着它一起搭的，写法相同。名称逐条对着 OSM 提取核过（places 命中地铁站的不用：天府广场用站区多边形，它的位置就是广场；文殊院、青羊宫取 land 层的景区轮廓；望江楼在数据里叫崇丽阁）。坐标由管线从 OSM 查出来，这里不写。要加一处，在这里添一行，重跑 `python -m pixelcity.build_all --city cd --only landmarks`。",
+ "groups": [
+  "古城",
+  "水绿",
+  "现代"
+ ],
+ "landmarks": [
+  {
+   "title": "天府广场",
+   "group": "古城",
+   "layer": "places",
+   "name": "天府广场",
+   "view": {
+    "scale": 1.4
+   },
+   "note": "城市原点：太极图样的广场，地铁一、二号线在此交汇。"
+  },
+  {
+   "title": "宽窄巷子",
+   "group": "古城",
+   "layer": "roads",
+   "name": "宽巷子",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "view": {
+    "scale": 0.9
+   },
+   "note": "清代满城遗下的三条巷子：宽巷子、窄巷子、井巷子。",
+   "parts": [
+    {
+     "title": "窄巷子",
+     "layer": "roads",
+     "name": "窄巷子",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "view": {
+      "scale": 1.2
+     }
+    },
+    {
+     "title": "井巷子",
+     "layer": "roads",
+     "name": "井巷子",
+     "tag": [
+      "highway",
+      "pedestrian"
+     ],
+     "view": {
+      "scale": 1.2
+     }
+    }
+   ]
+  },
+  {
+   "title": "武侯祠·锦里",
+   "group": "古城",
+   "layer": "land",
+   "name": "武侯祠",
+   "tag": [
+    "amenity",
+    "place_of_worship"
+   ],
+   "view": {
+    "scale": 0.9
+   },
+   "note": "君臣合祀的祠庙，红墙夹道；东边一墙之隔是锦里仿古街。",
+   "parts": [
+    {
+     "title": "锦里",
+     "layer": "places",
+     "name": "锦里",
+     "tag": [
+      "tourism",
+      "attraction"
+     ],
+     "view": {
+      "scale": 1.2
+     }
+    }
+   ]
+  },
+  {
+   "title": "杜甫草堂",
+   "group": "古城",
+   "layer": "land",
+   "name": "杜甫草堂",
+   "tag": [
+    "leisure",
+    "park"
+   ],
+   "view": {
+    "scale": 0.8
+   },
+   "note": "浣花溪畔的茅屋旧址，园林把诗史裹在竹林里。"
+  },
+  {
+   "title": "文殊院",
+   "group": "古城",
+   "layer": "land",
+   "name": "文殊院",
+   "tag": [
+    "tourism",
+    "attraction"
+   ],
+   "view": {
+    "scale": 1.1
+   },
+   "note": "川西四大丛林之一，院外是香火气与茶馆气的坊巷。"
+  },
+  {
+   "title": "青羊宫",
+   "group": "古城",
+   "layer": "land",
+   "name": "青羊宫",
+   "tag": [
+    "tourism",
+    "attraction"
+   ],
+   "view": {
+    "scale": 1.2
+   },
+   "note": "西南第一道观，双角铜羊卧在殿前。"
+  },
+  {
+   "title": "人民公园",
+   "group": "古城",
+   "layer": "land",
+   "name": "人民公园",
+   "tag": [
+    "leisure",
+    "park"
+   ],
+   "view": {
+    "scale": 1.1
+   },
+   "note": "鹤鸣茶社的盖碗茶，辛亥秋保路死事纪念碑立在园中。"
+  },
+  {
+   "title": "安顺廊桥·九眼桥",
+   "group": "水绿",
+   "layer": "roads",
+   "name": "安顺廊桥",
+   "view": {
+    "scale": 1.6
+   },
+   "note": "锦江上的廊桥，桥上有廊有亭；往上游是夜生活聚集的九眼桥。",
+   "kit": {
+    "model": "corridorBridge",
+    "length": 79,
+    "width": 10
+   },
+   "clear": 12,
+   "parts": [
+    {
+     "title": "九眼桥",
+     "layer": "roads",
+     "name": "九眼桥",
+     "tag": [
+      "bridge",
+      "yes"
+     ],
+     "kit": {
+      "model": "archBridge",
+      "length": 120,
+      "width": 20,
+      "rise": 3,
+      "arches": [
+       [
+        0.1,
+        0.26
+       ],
+       [
+        0.4,
+        0.56
+       ],
+       [
+        0.72,
+        0.9
+       ]
+      ]
+     },
+     "clear": 9
+    }
+   ]
+  },
+  {
+   "title": "望江楼·崇丽阁",
+   "group": "水绿",
+   "layer": "buildings",
+   "name": "崇丽阁",
+   "kit": {
+    "model": "pagoda",
+    "storeys": 4,
+    "width": 12,
+    "storeyHeight": 6.2,
+    "sides": 4,
+    "platform": 1.5
+   },
+   "clear": 25,
+   "view": {
+    "scale": 1.5
+   },
+   "note": "锦江边的竹园，纪念薛涛；园北江畔的崇丽阁是成都的门槛。",
+   "parts": [
+    {
+     "title": "望江楼公园",
+     "layer": "land",
+     "name": "望江楼公园",
+     "tag": [
+      "leisure",
+      "park"
+     ],
+     "view": {
+      "scale": 0.8
+     }
+    }
+   ]
+  },
+  {
+   "title": "浣花溪公园",
+   "group": "水绿",
+   "layer": "land",
+   "name": "浣花溪公园",
+   "tag": [
+    "leisure",
+    "park"
+   ],
+   "view": {
+    "scale": 0.6
+   },
+   "note": "清水河弯出的绿心，杜甫草堂在它的北缘。"
+  },
+  {
+   "title": "春熙路·太古里",
+   "group": "现代",
+   "layer": "roads",
+   "name": "春熙路",
+   "tag": [
+    "highway",
+    "pedestrian"
+   ],
+   "view": {
+    "scale": 0.8
+   },
+   "note": "百年商脉上的步行街，IFS 的熊猫翻在楼顶，太古里的川西院落间是玻璃幕墙。"
+  },
+  {
+   "title": "环球中心",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "新世纪环球中心",
+   "tag": [
+    "building",
+    "commercial"
+   ],
+   "view": {
+    "scale": 0.18
+   },
+   "note": "世界上最大的单体建筑之一：五百米长的波浪顶下有商场、泳池与人工海滩。",
+   "kit": {
+    "model": "waveHall",
+    "length": 500,
+    "depth": 150,
+    "sill": 40,
+    "crest": 100,
+    "waves": 6
+   },
+   "clear": 80
+  },
+  {
+   "title": "东方希望天祥广场",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "东方希望天祥广场",
+   "view": {
+    "scale": 0.9
+   },
+   "note": "金融城天际线里最高的已命名塔楼，二百一十九米。"
+  },
+  {
+   "title": "天府熊猫塔",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "天府熊猫塔",
+   "tag": [
+    "tourism",
+    "attraction"
+   ],
+   "view": {
+    "scale": 1.0
+   },
+   "note": "猛追湾畔的三百三十九米电视塔，塔身爬着熊猫的传说。"
+  },
+  {
+   "title": "成都东站",
+   "group": "现代",
+   "layer": "buildings",
+   "name": "成都东站",
+   "tag": [
+    "building",
+    "train_station"
+   ],
+   "view": {
+    "scale": 0.3
+   },
+   "note": "东客站，川西民居的坡顶盖在站房上。"
+  },
+  {
+   "title": "东安湖公园",
+   "group": "现代",
+   "layer": "land",
+   "name": "东安湖公园",
+   "tag": [
+    "leisure",
+    "park"
+   ],
+   "view": {
+    "scale": 0.5
+   },
+   "note": "大运会的湖畔场馆群，东侧的飞碟是主体育场。",
+   "parts": [
+    {
+     "title": "东安湖大剧院",
+     "layer": "buildings",
+     "name": "东安湖大剧院",
+     "view": {
+      "scale": 1.4
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -439,3 +439,82 @@ export function globeHall(c, { height = 90, globe = 52, podium = 30 }) {
   k.prism(gold, 0, 0, 15 + globe * 0.42 + globe / 2, height, 2.0, 6);
   return k;
 }
+
+// Chengdu's Anshun bridge: a stone arch bridge carrying a wooden gallery the length of its deck, with a
+// two-storey pavilion standing at its middle and a small perch at each bank. The 70 m and two arches
+// follow the bridge as mapped; the gallery's measures are by manner of the Sichuan covered bridges.
+export function corridorBridge(c, { length = 70, width = 10, rise = 3.2, gallery = 3.2 }) {
+  const k = new Kit();
+  const stone = k.part(c.stone, c.stone), deck = k.part(c.path, c.stone), wood = k.part(c.wood, c.wood), tiles = k.part(c.slate, c.slate),
+        red = k.part(c.red, c.red), woodRoof = k.part(c.slate, c.slate), gold = k.part(c.gold, c.gold);
+  const half = width / 2;
+  const deckAt = t => rise * (1 - (2 * t - 1) * (2 * t - 1));
+  const arch = (t, a, b) => { const mid = (a + b) / 2, halfW = (b - a) / 2, q = (t - mid) / halfW; return deckAt(mid) * 0.9 * Math.sqrt(Math.max(0, 1 - q * q)); };
+  const under = t => Math.max(t > 0.18 && t < 0.46 ? arch(t, 0.18, 0.46) : 0, t > 0.54 && t < 0.82 ? arch(t, 0.54, 0.82) : 0);
+  const segs = 32;
+  for (let i = 0; i < segs; i++) {
+    const t0 = i / segs, t1 = (i + 1) / segs, x0 = (t0 - 0.5) * length, x1 = (t1 - 0.5) * length;
+    const d0 = deckAt(t0), d1 = deckAt(t1), u0 = under(t0), u1 = under(t1);
+    k.quad(deck, [[x0, -half, d0], [x1, -half, d1], [x1, half, d1], [x0, half, d0]], 0, 0);
+    for (const side of [-1, 1]) {
+      const y = side * half;
+      k.quad(stone, side < 0 ? [[x0, y, u0], [x1, y, u1], [x1, y, d1], [x0, y, d0]] : [[x0, y, d0], [x1, y, d1], [x1, y, u1], [x0, y, u0]], 0, side);
+    }
+  }
+  // the gallery, from the first perch to the last: wooden walls and a slate gable roof following the arc
+  const g0 = 0.05, g1 = 0.95, gSegs = 20;
+  for (let i = 0; i < gSegs; i++) {
+    const t0 = g0 + (g1 - g0) * i / gSegs, t1 = g0 + (g1 - g0) * (i + 1) / gSegs;
+    const x0 = (t0 - 0.5) * length, x1 = (t1 - 0.5) * length;
+    const b0 = deckAt(t0), b1 = deckAt(t1), r0 = b0 + gallery, r1 = b1 + gallery;
+    const ridge0 = b0 + gallery + 1.6, ridge1 = b1 + gallery + 1.6;
+    for (const side of [-1, 1]) {
+      const y = side * (half - 0.6);
+      k.quad(wood, [[x0, y, b0], [x1, y, b1], [x1, y, r1], [x0, y, r0]], 0, side);
+      k.quad(woodRoof, [[x0, y, r0], [x1, y, r1], [x1, y - side * 1.2, ridge1], [x0, y - side * 1.2, ridge0]], side * 0.8, side * 0.4);
+    }
+    k.quad(woodRoof, [[x0, -half + 1.2, ridge0], [x1, -half + 1.2, ridge0], [x1, half - 1.2, ridge1], [x0, half - 1.2, ridge1]], 0, 0);
+    for (const side of [-1, 1]) {                       // the gable at each segment's start: the triangle between eave and ridge
+      const y = side * (half - 0.6), yi = side * (half - 1.2);
+      k.tri(wood, [x0, y, r0], [x0, yi, ridge0], [x0, y, ridge0], side, 0);
+    }
+  }
+  // the pavilion at the middle, two storeys of red columns under flying eaves, and a perch at each bank
+  const mid = deckAt(0.5);
+  k.prism(red, 0, 0, mid + gallery, mid + gallery + 3.6, 5.6, 4);
+  k.ring(tiles, 0, 0, 4.4, mid + gallery + 3.6, 7.4, mid + gallery + 2.6, 4);
+  k.prism(red, 0, 0, mid + gallery + 3.6 + 0.9, mid + gallery + 3.6 + 4.5, 4.4, 4);
+  k.ring(tiles, 0, 0, 3.2, mid + gallery + 3.6 + 4.5 + 1.4, 6.6, mid + gallery + 3.6 + 4.5, 4);
+  k.prism(gold, 0, 0, mid + gallery + 3.6 + 5.4, mid + gallery + 3.6 + 7.4, 0.5, 6);
+  for (const t of [g0, g1]) {
+    const x = (t - 0.5) * length, b = deckAt(t);
+    k.prism(stone, x, 0, b + gallery, b + gallery + 2.2, half - 0.8, 4);
+    k.ring(tiles, x, 0, half - 1.4, b + gallery + 2.2 + 1.2, half - 0.4, b + gallery + 2.2, 4);
+  }
+  return k;
+}
+
+// The New Century Global Centre: five hundred metres of hall under a roof that rolls like the sea it
+// keeps indoors — six swells from a forty-metre eave to hundred-metre crests. The length, depth and the
+// wave's reach are the building's own; the count of the swells follows the photographs.
+export function waveHall(c, { length = 500, depth = 110, sill = 40, crest = 100, waves = 6, segments = 60 }) {
+  const k = new Kit();
+  const glass = k.part(c.glass, c.glass, 5), roof = k.part(c.silver, c.silver), metal = k.part(c.metal, c.metal);
+  const amp = crest - sill;
+  const at = t => sill + amp * 0.5 * (1 - Math.cos(2 * Math.PI * waves * t));
+  for (let i = 0; i < segments; i++) {
+    const t0 = i / segments, t1 = (i + 1) / segments, x0 = (t0 - 0.5) * length, x1 = (t1 - 0.5) * length;
+    const h0 = at(t0), h1 = at(t1);
+    k.quad(roof, [[x0, -depth / 2, h0], [x1, -depth / 2, h1], [x1, depth / 2, h1], [x0, depth / 2, h0]], 0, 0);
+    for (const side of [-1, 1]) {
+      const y = side * depth / 2;
+      k.quad(glass, [[x0, y, 0], [x1, y, 0], [x1, y, h1], [x0, y, h0]], 0, side);
+    }
+  }
+  for (const end of [-1, 1]) {
+    const x = end * length / 2, h = at(end < 0 ? 0 : 1);
+    k.quad(glass, [[x, -depth / 2, 0], [x, depth / 2, 0], [x, depth / 2, h], [x, -depth / 2, h]], -end, 0);
+    k.box(metal, x, 0, h - 4, 2, depth * 0.7, 2.5);
+  }
+  return k;
+}

@@ -119,7 +119,11 @@ def build(city, paths=None, log=print):
     voids = int(numpy.isnan(grid).sum())
     grid = _fill(grid)
     metres = numpy.clip(numpy.rint(grid), NODATA + 1, 32767).astype(numpy.int16)[::-1]  # row 0 is the northernmost
-    log(f"terrain: {len(pieces)} tile{'s' if len(pieces) != 1 else ''} read, {nx} x {ny} cells of {cell:.0f} m, {metres.min()}..{metres.max()} m, {voids} void cells filled from neighbours")
+    # 城市不必在海边：把整幅地形减去它的最低点，让地面回到 0 米附近。楼群、树、桥、名字的高度都
+    # 从这幅格子上来，会跟着一起降；页面的深度窗口假定地面在 0 米附近，i16 的高度格（2.5 厘米一格，
+    # 819 米封顶）也装不下高原的绝对海拔——成都平原就有五百米。
+    metres -= int(metres.min())
+    log(f"terrain: {len(pieces)} tile{'s' if len(pieces) != 1 else ''} read, {nx} x {ny} cells of {cell:.0f} m, {metres.min()}..{metres.max()} m (rebased to the lowest ground), {voids} void cells filled from neighbours")
     return metres
 
 
