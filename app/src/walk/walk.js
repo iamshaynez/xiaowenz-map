@@ -38,6 +38,28 @@ function linePoint(tile, line, s) {
   return { x: tile.x0 + pts[0], y: tile.y0 + pts[1], z: pts[2], tx: 1, ty: 0 };
 }
 
+// a tile's collision raster as a little canvas, for the minimap's blocks of buildings and water
+function solidCanvas(tile) {
+  if (tile.solidCanvas) return tile.solidCanvas;
+  const n = tile.solid.n;
+  const cv = document.createElement('canvas');
+  cv.width = n;
+  cv.height = n;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(n, n);
+  const bytes = tile.solid.bytes;
+  for (let i = 0; i < bytes.length; i++) {
+    const o = i * 4;
+    img.data[o] = 213;
+    img.data[o + 1] = 208;
+    img.data[o + 2] = 197;
+    img.data[o + 3] = bytes[i] ? 255 : 0;
+  }
+  ctx.putImageData(img, 0, 0);
+  tile.solidCanvas = cv;
+  return cv;
+}
+
 export class Walk {
   constructor({ camera, world, renderer, keys }) {
     this.camera = camera;
@@ -53,6 +75,8 @@ export class Walk {
     this.stickHome = null;
     this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
     this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
+    this.mapCanvas = document.getElementById('minimap');
+    this.mapCtx = this.mapCanvas?.getContext('2d') ?? null;
     renderer.walk = this;
   }
 
@@ -122,6 +146,83 @@ export class Walk {
     if (this.driving) this.driveTick(dt, keys);
     else this.walkTick(dt, keys);
     this.hudRoad();
+    this.drawMinimap();
+  }
+
+  // ---- the minimap ------------------------------------------------------------------------------------------
+  // 左下角的小地图：随行进方向转，路面按等级画线，建筑与水面是淡灰的块（碰撞栅格的画法），中央是
+  // 玩家的箭头和视野锥，图缘标着北。驾驶时也一样，箭头随车头转
+  drawMinimap() {
+    const el = this.mapCanvas, ctx = this.mapCtx;
+    if (!el || !ctx) return;
+    const W = el.width, H = el.height, anchorY = H - 22;
+    const f = this.camera.walkForward();
+    const rot = -Math.PI / 2 - Math.atan2(f.y, f.x);
+    const k = 0.3;                                   // pixels per metre: the map holds some 300 m across
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#efece4';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.clip();
+    ctx.translate(W / 2, anchorY);
+    ctx.rotate(rot);
+    ctx.scale(k, k);
+    ctx.translate(-this.player.x, -this.player.y);
+    // 建筑与水：碰撞栅格画成淡灰的块
+    const { index } = this.world, size = index.tileSize;
+    const tx0 = Math.floor(this.player.x / size) - index.ix0, ty0 = Math.floor(this.player.y / size) - index.iy0;
+    ctx.imageSmoothingEnabled = false;
+    for (let ty = ty0 - 1; ty <= ty0 + 1; ty++) for (let tx = tx0 - 1; tx <= tx0 + 1; tx++) {
+      const tile = this.world.tiles.get(`${tx}_${ty}`);
+      if (tile?.solid) ctx.drawImage(solidCanvas(tile), tile.x0, tile.y0, size, size);
+    }
+    // 路面：等级越高线越宽越深
+    const STYLE = { 5: ['#43403a', 8], 6: ['#43403a', 7], 7: ['#7d786e', 4.5], 8: ['#7d786e', 3.6], 9: ['#b5afa2', 2.6], 10: ['#b5afa2', 2.6] };
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let ty = ty0 - 1; ty <= ty0 + 1; ty++) for (let tx = tx0 - 1; tx <= tx0 + 1; tx++) {
+      const tile = this.world.tiles.get(`${tx}_${ty}`);
+      if (!tile?.paths) continue;
+      for (const line of tile.paths) {
+        const st = STYLE[line.cls];
+        if (!st) continue;
+        ctx.strokeStyle = st[0];
+        ctx.lineWidth = st[1];
+        ctx.beginPath();
+        const pts = line.points;
+        ctx.moveTo(tile.x0 + pts[0], tile.y0 + pts[1]);
+        for (let i = 4; i < pts.length; i += 4) ctx.lineTo(tile.x0 + pts[i], tile.y0 + pts[i + 1]);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    // 玩家的箭头与视野锥，还有图缘的北
+    ctx.save();
+    ctx.translate(W / 2, anchorY);
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = '#1c1b19';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, 34, -Math.PI / 2 - 0.45, -Math.PI / 2 + 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -7.5);
+    ctx.lineTo(5, 5.5);
+    ctx.lineTo(0, 2.6);
+    ctx.lineTo(-5, 5.5);
+    ctx.closePath();
+    ctx.fill();
+    const north = { x: -Math.sin(rot), y: Math.cos(rot) };
+    ctx.fillStyle = '#1c1b19';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('北', W / 2 + north.x * (Math.min(W, H) / 2 - 12), anchorY + north.y * (Math.min(W, H) / 2 - 12));
+    ctx.restore();
   }
 
   walkTick(dt, keys) {
