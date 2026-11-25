@@ -20,6 +20,24 @@ const DRAG_SENS = 0.0042;    // the same for a held drag (touch, or a mouse with
 
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 
+// the world point and direction of a PATH line at a distance from its start (points: x, y, z, distance,
+// tile-relative; the answer in world metres)
+function linePoint(tile, line, s) {
+  const pts = line.points, n = pts.length / 4;
+  for (let i = 0; i < n - 1; i++) {
+    const a = i * 4, b = a + 4;
+    if (s <= pts[b + 3] || i === n - 2) {
+      const from = pts[a + 3], to = pts[b + 3];
+      const t = to > from ? clamp((s - from) / (to - from), 0, 1) : 0;
+      const dx = pts[b] - pts[a], dy = pts[b + 1] - pts[a + 1];
+      const len = Math.hypot(dx, dy);
+      return { x: tile.x0 + pts[a] + dx * t, y: tile.y0 + pts[a + 1] + dy * t, z: pts[a + 2] + (pts[b + 2] - pts[a + 2]) * t,
+        tx: len > 1e-6 ? dx / len : 1, ty: len > 1e-6 ? dy / len : 0 };
+    }
+  }
+  return { x: tile.x0 + pts[0], y: tile.y0 + pts[1], z: pts[2], tx: 1, ty: 0 };
+}
+
 export class Walk {
   constructor({ camera, world, renderer, keys }) {
     this.camera = camera;
@@ -115,21 +133,73 @@ export class Walk {
     if (keys.has('d') || keys.has('arrowright')) { mx += r.x; my += r.y; }
     if (this.stick) { mx += r.x * this.stick.x + f.x * this.stick.y; my += r.y * this.stick.x + f.y * this.stick.y; }
     const length = Math.hypot(mx, my);
+    const ground0 = this.world.groundAt(this.player.x, this.player.y);
+    const elevated = this.player.z > ground0 + 1.5;
     if (length > 0) {
       mx /= length; my /= length;
       const speed = (keys.has('shift') ? RUN_SPEED : WALK_SPEED) * this.speedScale;
-      let nx = this.player.x + mx * speed * dt, ny = this.player.y + my * speed * dt;
-      // the walls: a step is taken only onto free ground, sliding along what blocks it
-      const solid = this.world.solidAt(nx, ny);
-      if (solid) {
-        if (!this.world.solidAt(nx, this.player.y)) ny = this.player.y;
-        else if (!this.world.solidAt(this.player.x, ny)) nx = this.player.x;
-        else { nx = this.player.x; ny = this.player.y; }
+      // 在高处（引桥、桥面、人行桥）的人跟着身边的那条线走：线怎么弯人怎么走，线给高度，走出线
+      // 的廊道就是下桥。地面上的行走不贴线，还是自由的
+      const onDeckLine = elevated && this.onLine;
+      if (onDeckLine) {
+        const L = this.onLine;
+        const along = mx * L.tx + my * L.ty;
+        const across = mx * L.ty - my * L.tx;
+        if (Math.abs(across) > 0.72) {
+          this.onLine = null;                      // 往桥外走：下桥
+        } else {
+          const lane = Math.max(1.2, L.width * 0.5);
+          L.lateral = clamp(L.lateral + across * speed * dt * 0.8, -lane, lane);
+          L.s = clamp(L.s + along * speed * dt, 0, L.length);
+          const p = linePoint(L.tile, L.line, L.s);
+          this.player.x = p.x + p.ty * L.lateral;
+          this.player.y = p.y - p.tx * L.lateral;
+          this.player.z = p.z;
+          this.player.heading = Math.atan2(p.ty * (along >= 0 ? 1 : -1), p.tx * (along >= 0 ? 1 : -1));
+          this.player.moving = true;
+          // 线走到了头：接上前面最近的另一条（高度相配的），不然就是桥尾了
+          if (L.s <= 0.1 || L.s >= L.length - 0.1) {
+            const ahead = this.world.roadsNear(this.player.x + p.tx * (along >= 0 ? 6 : -6), this.player.y + p.ty * (along >= 0 ? 6 : -6),
+              10, [5, 6, 7, 8, 9, 10], L.line, this.player.z);
+            if (ahead) {
+              L.tile = ahead.tile; L.line = ahead.line; L.s = ahead.s; L.tx = ahead.tx; L.ty = ahead.ty; L.length = ahead.line.length;
+            } else {
+              this.onLine = null;
+            }
+          }
+        }
       }
-      this.player.moving = nx !== this.player.x || ny !== this.player.y;
-      this.player.x = nx; this.player.y = ny;
-      this.player.z = this.world.groundAt(nx, ny);
-      if (this.player.moving) this.player.heading = Math.atan2(my, mx);
+      if (!(elevated && this.onLine)) {
+        let nx = this.player.x + mx * speed * dt, ny = this.player.y + my * speed * dt;
+        // the walls: a step is taken only onto free ground, sliding along what blocks it. On a deck the
+        // ground below is not underfoot, so its buildings and water do not block
+        const solid = elevated ? 0 : this.world.solidAt(nx, ny);
+        if (solid) {
+          if (!this.world.solidAt(nx, this.player.y)) ny = this.player.y;
+          else if (!this.world.solidAt(this.player.x, ny)) nx = this.player.x;
+          else { nx = this.player.x; ny = this.player.y; }
+        }
+        this.player.moving = nx !== this.player.x || ny !== this.player.y;
+        this.player.x = nx; this.player.y = ny;
+        // 上桥的路：走到一条高度相配的线边（引桥的落地端、台阶、人行桥），人就搭上它
+        let z = elevated ? this.player.z : this.world.groundAt(nx, ny);
+        const near = this.world.roadsNear(nx, ny, elevated ? 3 : 2.2, [5, 6, 7, 8, 9, 10], null, this.player.z);
+        if (near && Math.abs(near.z - this.player.z) < 2.5) {
+          z = Math.max(z, near.z);
+          // 搭线只搭"高高在上的线"——引桥、桥面、人行桥；地面上的路不收编自由的步行
+          const lineIsUp = near.z > this.world.groundAt(near.x, near.y) + 0.6;
+          if (elevated || lineIsUp) {
+            const dx = this.player.x - near.x, dy = this.player.y - near.y;
+            this.onLine = { tile: near.tile, line: near.line, s: near.s, lateral: clamp(dx * near.ty - dy * near.tx, -2, 2),
+              tx: near.tx, ty: near.ty, length: near.line.length, width: near.line.width };
+          }
+        } else if (elevated && !near) {
+          this.onLine = null;                        // 桥沿走空了：落回地面
+          z = this.world.groundAt(nx, ny);
+        }
+        this.player.z = z;
+        if (this.player.moving) this.player.heading = Math.atan2(my, mx);
+      }
     } else {
       this.player.moving = false;
     }
