@@ -4,19 +4,24 @@
 //   驾驶  在路上按 E 上一辆车，沿路网（瓦片的 PATH 线）街机式开，走高架随其剖面，再按 E 下车。
 // 玩家不是特别的渲染：他就是交通系统（life/traffic.js）里的一个行人，开车时是一辆车。
 //
-// 操控：WASD/方向键 走或开 · Shift 跑 · 拖动 环顾（触屏左半边是摇杆）· E 上/下车 · G 或 Esc 回地图。
+// 操控：WASD/方向键 走或开 · Shift 跑 · 点击画面锁鼠标看四周 · E 上/下车 · G 或 Esc 回地图。
+// 触屏（手机版 GTA 的手势）：左半边按住出摇杆，推到底是跑；右半边拖动看四周；右下圆钮上/下车，
+// 上缘一条工具条管速度、镜头和退出。每根手指各司其职（main.js 按指派活），摇杆和看四周同时进行。
 
 const WALK_SPEED = 4.5;      // metres a second at a brisk walk
 const RUN_SPEED = 9;
-const STICK_RANGE = 55;      // frame pixels a touch joystick spans
+const STICK_RANGE = 62;      // page pixels a touch joystick spans
+const STICK_DEAD = 0.12;     // how far the knob must leave home before the player stirs
+const STICK_RUN = 0.9;       // pushed this far, the walker breaks into a run
 const EYE_HEIGHT = 1.7;      // the walking camera's height at the player
 const CAR_ACCEL = 7, CAR_BRAKE = 13, CAR_DRAG = 2.2;
 const CAR_REVERSE = 6;
 const CAR_TOP = { 5: 15, 6: 12.5, 7: 10, 8: 9, 9: 7, 10: 6 };   // by class of road, metres a second
 const CAR_STEER = 1.9;       // radians a second at full lock and city speed
+const CAR_LOOK_BACK = 2.4;   // how fast the driving view eases back to the car's own heading
 const CHASE_BACK = 10.5, CHASE_UP = 4.4;                        // the driving camera, metres
 const LOOK_SENS = 0.0028;    // radians of view per pixel of mouse travel (pointer locked)
-const DRAG_SENS = 0.0042;    // the same for a held drag (touch, or a mouse without pointer lock)
+const DRAG_SENS = 0.005;     // the same for a held drag (touch, or a mouse without pointer lock)
 
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 
@@ -72,13 +77,18 @@ export class Walk {
     this.player = { x: 0, y: 0, z: 0, heading: 0, moving: false };
     this.car = null;               // { tile, line, s, lateral, speed }
     this.stick = null;             // the touch joystick, x right and y forward, in -1..1
-    this.stickHome = null;
+    this.stickHome = null;         // where the thumb came down, in page pixels
+    this.carLook = { yaw: 0, pitch: 0.24 };   // at the wheel, how far the dragged view strays from the car's own; it eases home when let go
+    this.lookHeld = 0;             // how many fingers (or a held mouse) are looking around right now
+    this.coarse = matchMedia('(pointer: coarse)').matches;   // a phone or a tablet: the words and the sizes say so
     this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
     this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
     this.cycle = 0;                // the walk cycle: legs and arms swing with it
     this.step = 0;                 // 0 standing, 1 walking, eased between
     this.mapCanvas = document.getElementById('minimap');
     this.mapCtx = this.mapCanvas?.getContext('2d') ?? null;
+    this.stickEl = document.getElementById('stick');
+    this.stickKnob = document.getElementById('stickknob');
     renderer.walk = this;
   }
 
@@ -114,7 +124,11 @@ export class Walk {
     camera.pitch = 0.42;
     document.body.classList.add('walking');
     document.getElementById('walkhud').hidden = false;
-    this.hud('WASD 走 · Shift 跑 · 滚轮/+- 调速 · 点击画面锁定鼠标看四周 · Esc 解锁');
+    const back = document.getElementById('walkback');
+    if (back) back.textContent = this.coarse ? '退出' : '退出 Esc';
+    this.hud(this.coarse
+      ? '左半边按住 出摇杆 · 推到底是跑 · 右半边拖动 看四周'
+      : 'WASD 走 · Shift 跑 · 滚轮/+- 调速 · 点击画面锁定鼠标看四周 · Esc 解锁');
     return true;
   }
 
@@ -129,6 +143,9 @@ export class Walk {
     this.active = false;
     this.driving = false;
     this.car = null;
+    this.endStick();
+    this.lookHeld = 0;
+    this.carLook = { yaw: 0, pitch: 0.24 };
     camera.walking = false;
     Object.assign(camera, this.saved);
     document.body.classList.remove('walking');
@@ -240,7 +257,9 @@ export class Walk {
     const elevated = this.player.z > ground0 + 1.5;
     if (length > 0) {
       mx /= length; my /= length;
-      const speed = (keys.has('shift') ? RUN_SPEED : WALK_SPEED) * this.speedScale;
+      // 推满摇杆（或按着 Shift）就是跑：手机上没有多余的指头去按快慢键
+      const run = keys.has('shift') || (this.stick && Math.hypot(this.stick.x, this.stick.y) > STICK_RUN);
+      const speed = (run ? RUN_SPEED : WALK_SPEED) * this.speedScale;
       // 在高处（引桥、桥面、人行桥）的人跟着身边的那条线走：线怎么弯人怎么走，线给高度，走出线
       // 的廊道就是下桥。地面上的行走不贴线，还是自由的
       const onDeckLine = elevated && this.onLine;
@@ -283,7 +302,7 @@ export class Walk {
           else { nx = this.player.x; ny = this.player.y; }
         }
       this.player.moving = nx !== this.player.x || ny !== this.player.y;
-      if (this.player.moving) this.cycle += dt * (keys.has('shift') ? 12 : 7.5);
+      if (this.player.moving) this.cycle += dt * (keys.has('shift') || (this.stick && Math.hypot(this.stick.x, this.stick.y) > STICK_RUN) ? 12 : 7.5);
       this.step += ((this.player.moving ? 1 : 0) - this.step) * Math.min(1, dt * 9);
       this.player.x = nx; this.player.y = ny;
         // 上桥的路：走到一条高度相配的线边（引桥的落地端、台阶、人行桥），人就搭上它
@@ -330,9 +349,10 @@ export class Walk {
     if (!near) { this.hud('附近没有路，走近一点再上车'); return false; }
     this.car = { x: near.x, y: near.y, z: near.z, heading: Math.atan2(near.ty, near.tx), speed: 0, cls: near.line.cls };
     this.driving = true;
+    this.carLook = { yaw: 0, pitch: 0.24 };
     this.player.x = near.x; this.player.y = near.y; this.player.z = near.z;
-    this.hud('W/S 油门刹车 · A/D 转向 · E 下车');
-    document.getElementById('drive').textContent = '下车 E';
+    this.hud(this.coarse ? '左摇杆 推上油门 · 左右转向 · 右半边拖动 看四周' : 'W/S 油门刹车 · A/D 转向 · E 下车');
+    document.getElementById('action').textContent = '下车';
     return true;
   }
 
@@ -347,23 +367,26 @@ export class Walk {
     this.player.heading = this.car.heading;
     this.driving = false;
     this.car = null;
+    this.carLook = { yaw: 0, pitch: 0.24 };
     this.camera.pitch = 0.42;
-    document.getElementById('drive').textContent = '上车 E';
-    this.hud('WASD 走 · E 上车');
+    document.getElementById('action').textContent = '上车';
+    this.hud(this.coarse ? '左半边摇杆 走 · 圆钮上车' : 'WASD 走 · E 上车');
   }
 
   // one moment at the wheel: the car owns its heading (steering turns it, reversing turns the other
   // way), the road only guides it — the nearest line gives the height, decks keep the car in their
-  // corridor, and buildings and water block it like they block a walker
+  // corridor, and buildings and water block it like they block a walker. The stick drives it like a
+  // dial: how far the thumb leans is how much throttle and how much lock (a phone has no keys)
   driveTick(dt, keys) {
-    const car = this.car, camera = this.camera;
-    const forward = keys.has('w') || keys.has('arrowup') || (this.stick && this.stick.y > 0.2);
-    const back = keys.has('s') || keys.has('arrowdown') || (this.stick && this.stick.y < -0.2);
-    const steer = (keys.has('a') || keys.has('arrowleft') || (this.stick && this.stick.x < -0.2) ? -1 : 0)
-      + (keys.has('d') || keys.has('arrowright') || (this.stick && this.stick.x > 0.2) ? 1 : 0);
+    const car = this.car, camera = this.camera, s = this.stick;
+    const throttle = s ? Math.max(0, s.y) : 0, brake = s ? Math.max(0, -s.y) : 0;
+    const keyFwd = keys.has('w') || keys.has('arrowup'), keyBack = keys.has('s') || keys.has('arrowdown');
+    const forward = keyFwd || throttle > 0, back = keyBack || brake > 0;
+    let steer = (keys.has('a') || keys.has('arrowleft') ? -1 : 0) + (keys.has('d') || keys.has('arrowright') ? 1 : 0);
+    if (!steer && s && Math.abs(s.x) > STICK_DEAD) steer = clamp(s.x * 1.5, -1, 1);
     const top = Math.min(45, (CAR_TOP[car.cls] ?? 10) * this.speedScale);
-    if (forward) car.speed = Math.min(top, car.speed + CAR_ACCEL * dt);
-    else if (back) car.speed = Math.max(-CAR_REVERSE, car.speed - CAR_BRAKE * dt);
+    if (forward) car.speed = Math.min(top, car.speed + CAR_ACCEL * (keyFwd ? 1 : Math.max(0.3, throttle)) * dt);
+    else if (back) car.speed = Math.max(-CAR_REVERSE, car.speed - CAR_BRAKE * (keyBack ? 1 : Math.max(0.3, brake)) * dt);
     else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), CAR_DRAG * dt);
     // turning needs way on, tightens at city speed and softens on the fast road; in reverse it swaps sides
     const grip = clamp(Math.abs(car.speed) / 6, 0, 1) / (1 + Math.abs(car.speed) / 20);
@@ -396,9 +419,16 @@ export class Walk {
     car.x = nx; car.y = ny; car.z = z;
     this.player.x = nx; this.player.y = ny; this.player.z = z;
     this.player.heading = car.heading;
-    // the chase: an eye behind the boot, looking the way the car points
-    camera.yaw = camera.constructor.yawOf(hx, hy);
-    camera.pitch = 0.24;
+    // the chase: an eye behind the boot, looking the way the car points — unless a dragged view strays
+    // from it (a touch that is still down, or a locked mouse), in which case a released touch's stray
+    // eases back home while a locked mouse keeps the view where its hand left it
+    const held = this.lookHeld > 0 || document.pointerLockElement === this.renderer.gl.canvas;
+    if (!held) {
+      this.carLook.yaw *= Math.exp(-dt * CAR_LOOK_BACK);
+      this.carLook.pitch += (0.24 - this.carLook.pitch) * Math.min(1, dt * CAR_LOOK_BACK);
+    }
+    camera.yaw = camera.constructor.yawOf(hx, hy) + this.carLook.yaw;
+    camera.pitch = this.carLook.pitch;
     const f = camera.walkForward();
     camera.x = nx - f.x * CHASE_BACK;
     camera.y = ny - f.y * CHASE_BACK;
@@ -458,10 +488,16 @@ export class Walk {
 
   // ---- input -------------------------------------------------------------------------------------------------
 
-  // the view follows the mouse: right turns right, down looks down
+  // the locked mouse's view: right turns right, down looks down. At the wheel the stray is remembered
+  // (like the touch drag's) and holds while the pointer stays locked; on foot the view itself turns
   look(dx, dy) {
-    this.camera.yaw += dx * LOOK_SENS;
-    this.camera.pitch = clamp(this.camera.pitch + dy * LOOK_SENS, -0.9, 1.35);
+    if (this.driving) {
+      this.carLook.yaw += dx * LOOK_SENS;
+      this.carLook.pitch = clamp(this.carLook.pitch + dy * LOOK_SENS, -0.3, 1.2);
+    } else {
+      this.camera.yaw += dx * LOOK_SENS;
+      this.camera.pitch = clamp(this.camera.pitch + dy * LOOK_SENS, -0.9, 1.35);
+    }
   }
 
   // the pace: a turn of the wheel or a press of +/− multiplies it
@@ -478,6 +514,14 @@ export class Walk {
     this.hud();
   }
 
+  // a phone has no wheel and no +/−: one button walks the pace round the same ladder, and wraps
+  speedCycle() {
+    const steps = [0.5, 1, 1.5, 2, 3, 4, 6];
+    const at = steps.findIndex(v => v >= this.speedScale - 1e-6);
+    this.speedScale = steps[(at + 1) % steps.length];
+    this.hud();
+  }
+
   // the camera's stand behind the player, 2 to 6 metres
   camDistStep(farther) {
     const steps = [2, 2.5, 3, 3.5, 4, 5, 6];
@@ -487,27 +531,53 @@ export class Walk {
     this.hud();
   }
 
-  // a drag on the canvas of the walking view: on the left of the screen a touch joystick (mode 'stick',
-  // x and y the pointer's place), anywhere else a look around (dx, dy its motion since the last report)
-  beginDrag(mode, x, y) {
-    this.stickHome = mode === 'stick' ? { x, y } : null;
-    if (mode === 'look') this.stick = null;
+  // a touch on the left of the screen: the ring comes to the thumb, and how far the knob is pushed from
+  // home is how the player walks or the car drives (x right, y forward, in -1..1, with a dead zone)
+  beginStick(x, y) {
+    this.stickHome = { x, y };
+    this.stick = { x: 0, y: 0 };
+    if (this.stickEl) {
+      this.stickEl.hidden = false;
+      this.stickEl.style.left = `${x}px`;
+      this.stickEl.style.top = `${y}px`;
+      this.setKnob(0, 0);
+    }
   }
 
-  drag(mode, x, y, dx, dy) {
-    if (mode === 'stick') {
-      if (!this.stickHome) this.stickHome = { x, y };
-      this.stick = {
-        x: clamp((x - this.stickHome.x) / STICK_RANGE, -1, 1),
-        y: clamp((this.stickHome.y - y) / STICK_RANGE, -1, 1),
-      };
+  moveStick(x, y) {
+    if (!this.stickHome) return;
+    let dx = x - this.stickHome.x, dy = y - this.stickHome.y;
+    const d = Math.hypot(dx, dy);
+    if (d > STICK_RANGE) { dx *= STICK_RANGE / d; dy *= STICK_RANGE / d; }
+    this.setKnob(dx, dy);
+    let sx = dx / STICK_RANGE, sy = -dy / STICK_RANGE;
+    if (Math.hypot(sx, sy) < STICK_DEAD) { sx = 0; sy = 0; }
+    this.stick = { x: sx, y: sy };
+  }
+
+  endStick() {
+    this.stick = null;
+    this.stickHome = null;
+    if (this.stickEl) this.stickEl.hidden = true;
+  }
+
+  setKnob(dx, dy) {
+    if (this.stickKnob) this.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  // a touch anywhere else (or a held mouse without a pointer lock) looks around: on foot the view itself
+  // turns, at the wheel the stray is remembered and eases back to the car's own heading on release
+  beginLook() { this.lookHeld++; }
+  endLook() { this.lookHeld = Math.max(0, this.lookHeld - 1); }
+  lookBy(dx, dy) {
+    if (this.driving) {
+      this.carLook.yaw += dx * DRAG_SENS;
+      this.carLook.pitch = clamp(this.carLook.pitch + dy * DRAG_SENS, -0.3, 1.2);
     } else {
       this.camera.yaw += dx * DRAG_SENS;
       this.camera.pitch = clamp(this.camera.pitch + dy * DRAG_SENS, -0.9, 1.35);
     }
   }
-
-  endDrag() { this.stick = null; this.stickHome = null; }
 
   // a key that is not held movement: E takes or leaves a car
   key(key) {
@@ -522,16 +592,18 @@ export class Walk {
   hud(text) {
     this.hudText = text ?? this.hudText ?? '';
     const el = document.getElementById('walkhint');
-    if (el) el.textContent = `${this.hudText} · 速度 ×${this.speedScale.toFixed(1)} · 镜头 ${this.camDist.toFixed(1)} 米`;
+    if (el) el.textContent = this.hudText;
+    const chip = document.getElementById('speedcycle');
+    if (chip) chip.textContent = `速度 ×${this.speedScale.toFixed(1)}`;
   }
 
-  // the drive button says what it would do from here, and says nothing while it cannot
+  // the round button says what it would do from here, and asks for nothing while it cannot
   hudRoad() {
     if (this.driving) return;
-    const button = document.getElementById('drive');
+    const button = document.getElementById('action');
     if (!button) return;
     const near = this.world.roadsNear(this.player.x, this.player.y, 45);
     button.disabled = !near;
-    button.textContent = '上车 E';
+    if (!button.textContent) button.textContent = '上车';
   }
 }

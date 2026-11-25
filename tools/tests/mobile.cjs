@@ -123,6 +123,86 @@ async function run(browser, device, name) {
   const season = await page.evaluate(() => document.body.dataset.season);
   check(season === 'winter', name + ': the winter button works');
   await page.screenshot({ path: path.join(outDir, `${name}-winter.png`) });
+
+  // 走进城市（手机版 GTA 的手势）：左半边摇杆走人推满跑，右半边拖动看四周，双指各司其职同时进行，
+  // 右下的圆钮上车；驾驶时摇杆推上是油门、左右是转向，松手视线自己回正
+  const entered = await page.evaluate(() => {
+    const app = window.__city, walk = app.walk;
+    let ok = walk.toggle();
+    if (!ok) {
+      const p = app.camera.unproject(app.camera.width / 2, app.camera.height / 2);
+      const near = app.world.roadsNear(p.x, p.y, 400);
+      ok = near ? walk.enterAt(near.x, near.y) : false;
+    }
+    return ok && walk.active;
+  });
+  check(entered, `${name}: 走进城市在触屏上落得了脚`);
+  if (entered) {
+    await page.evaluate(() => window.__city.settle(20000));
+    await wait(400);
+    const stickAt = { x: 70, y: info.viewport[1] - 220 };
+    // 一根拇指：按下出摇杆，推到头跑起来
+    const who0 = await page.evaluate(() => ({ ...window.__city.walk.player }));
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stickAt.x, y: stickAt.y }] });
+    await wait(80);
+    check(await page.evaluate(() => !document.getElementById('stick').hidden), `${name}: 摇杆随拇指出现在按下处`);
+    for (let k = 1; k <= 6; k++) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: stickAt.x, y: stickAt.y - 62 * k / 6 }] });
+      await wait(40);
+    }
+    await wait(700);
+    const walked = await page.evaluate(({ x0, y0 }) => Math.hypot(window.__city.walk.player.x - x0, window.__city.walk.player.y - y0), { x0: who0.x, y0: who0.y });
+    check(walked > 1.5, `${name}: 摇杆推满跑起来（${walked.toFixed(1)} 米/0.9 秒）`);
+    // 双指：拇指按着摇杆，另一指在右半边拖动看四周——两条同时进行
+    const yaw0 = await page.evaluate(() => window.__city.camera.yaw);
+    const lookAt = { x: info.viewport[0] * 0.72, y: info.viewport[1] * 0.4 };
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stickAt.x, y: stickAt.y - 62, id: 1 }, { x: lookAt.x, y: lookAt.y, id: 2 }] });
+    for (let k = 1; k <= 6; k++) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: stickAt.x, y: stickAt.y - 62, id: 1 }, { x: lookAt.x + 34 * k / 6, y: lookAt.y - 6 * k / 6, id: 2 }],
+      });
+      await wait(40);
+    }
+    await wait(600);
+    const both = await page.evaluate(({ x0, y0, yaw }) => ({
+      moved: Math.hypot(window.__city.walk.player.x - x0, window.__city.walk.player.y - y0),
+      yawDelta: window.__city.camera.yaw - yaw,
+      stickAlive: !!window.__city.walk.stick,
+    }), { x0: who0.x, y0: who0.y, yaw: yaw0 });
+    check(both.moved > 0.8, `${name}: 摇杆按住时人还在走（又走了 ${both.moved.toFixed(1)} 米）`);
+    check(Math.abs(both.yawDelta) > 0.1, `${name}: 右边拖动看四周（视线转了 ${both.yawDelta.toFixed(2)} 弧度）`);
+    check(both.stickAlive, `${name}: 双指并行摇杆不丢`);
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await wait(80);
+    check(await page.evaluate(() => document.getElementById('stick').hidden && !window.__city.walk.stick), `${name}: 松手摇杆收起`);
+    // 圆钮上车，摇杆驾驶，圆钮下车（落在离路太远的地方就先挪到路边）
+    await page.evaluate(() => {
+      const app = window.__city, walk = app.walk;
+      walk.hudRoad();
+      if (document.getElementById('action').disabled) {
+        const near = app.world.roadsNear(walk.player.x, walk.player.y, 150);
+        if (near) { walk.player.x = near.x; walk.player.y = near.y; walk.player.z = near.z; }
+        walk.hudRoad();
+      }
+    });
+    await page.click('#action');
+    check(await page.evaluate(() => window.__city.walk.driving), `${name}: 圆钮上车`);
+    const before = await page.evaluate(() => ({ ...window.__city.walk.player }));
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stickAt.x, y: stickAt.y }] });
+    for (let k = 1; k <= 6; k++) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: stickAt.x, y: stickAt.y - 62 * k / 6 }] });
+      await wait(40);
+    }
+    await wait(900);
+    const drove = await page.evaluate(({ x0, y0 }) => ({ far: Math.hypot(window.__city.walk.player.x - x0, window.__city.walk.player.y - y0), speed: window.__city.walk.car.speed }), { x0: before.x, y0: before.y });
+    check(drove.far > 2, `${name}: 摇杆推上开车（${drove.far.toFixed(0)} 米，时速表 ${drove.speed.toFixed(1)}）`);
+    await page.screenshot({ path: path.join(outDir, `${name}-drive.png`) });
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.click('#action');
+    check(await page.evaluate(() => !window.__city.walk.driving), `${name}: 圆钮下车`);
+    await page.screenshot({ path: path.join(outDir, `${name}-walk.png`) });
+  }
   check(errors.length === 0, `${name}: no errors (${errors.slice(0, 3).join(' | ')})`);
   console.log(name.padEnd(10), JSON.stringify({ viewport: info.viewport, frame: info.frame, shown: info.shown, yaw: +after.yaw.toFixed(2), zoom: +zoomed.toFixed(2) }));
   await context.close();

@@ -130,11 +130,20 @@ async function boot() {
   let pinch = null;            // two fingers: how far apart they were when the gesture was last applied, their middle, and what is drawn under it
   let drag = null;             // one pointer holding the canvas: whether it turns the view, and the height of what it took hold of
   let wheelZoom = null;        // a turn of the wheel not yet applied: where the cursor is, and by how much to zoom
+  // walking and driving: each finger works its own job (手机版 GTA 的手势). One holds the joystick on the
+  // left of the screen, the others look around by drag; a mouse is its own look, beside the pointer lock
+  const walkRoles = new Map();     // a pointer id -> 'stick' or 'look'
+  const walkLast = new Map();      // a pointer id -> where that finger last was, in page pixels
   // a pointer's position in the frame's own pixels. The canvas shows each of them as pixelScale CSS pixels,
-  // and the camera works in the frame's pixels.
+  // and the camera works in the frame's pixels. The walking touch controls want page pixels instead (the
+  // joystick's ring and its range are drawn at the size of a finger, whatever the frame's pixel is).
   const toFrame = e => {
     const box = canvas.getBoundingClientRect();
     return { x: (e.clientX - box.left) * width / box.width, y: (e.clientY - box.top) * height / box.height };
+  };
+  const toPage = e => {
+    const box = canvas.getBoundingClientRect();
+    return { x: e.clientX - box.left, y: e.clientY - box.top, w: box.width };
   };
   // the height of what is drawn at a point of the frame: what a zoom holds on to. Where nothing is drawn
   // yet (tiles on their way, the white outside the island) it is the ground from the overview's grid.
@@ -150,20 +159,24 @@ async function boot() {
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== 0) e.preventDefault();          // no middle-click autoscroll, nothing else the browser does with a button
     canvas.focus({ preventScroll: true });
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch { }   // a pointer the browser has let go of cannot be held (and tests' synthetic ones never were)
     const at = toFrame(e);
     pointers.set(e.pointerId, at);
     if (walk.active) {
-      // walking: a mouse is locked to the view (the browser hands the raw motion over, Esc unlocks it);
-      // a touch drives the view by drag, and the left of the screen holds the joystick
+      // walking: a mouse is locked to the view (the browser hands the raw motion over, Esc unlocks it) and
+      // its drag looks too, for when the lock is refused. A touch takes a job by where it came down — the
+      // left of the screen holds the joystick (one at a time; a second thumb there looks instead), anywhere
+      // else looks around — and the two go on at once
       if (e.pointerType === 'mouse' && !document.pointerLockElement && canvas.requestPointerLock) {
         const locked = canvas.requestPointerLock();
         if (locked && locked.catch) locked.catch(() => {});
-        return;
       }
-      const mode = at.x < width * 0.3 && e.pointerType !== 'mouse' ? 'stick' : 'look';
-      drag = { walk: mode };
-      walk.beginDrag(mode, at.x, at.y);
+      const page = toPage(e);
+      const role = page.x < page.w * 0.45 && e.pointerType !== 'mouse' && !walk.stick ? 'stick' : 'look';
+      walkRoles.set(e.pointerId, role);
+      walkLast.set(e.pointerId, page);
+      if (role === 'stick') walk.beginStick(page.x, page.y);
+      else walk.beginLook();
       return;
     }
     if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(at) };
@@ -184,8 +197,13 @@ async function boot() {
     const was = pointers.get(e.pointerId), now = toFrame(e);
     pointers.set(e.pointerId, now);
     if (walk.active) {
-      // with the mouse locked in, the view is already driven by the raw mousemove above
-      if (drag?.walk && document.pointerLockElement !== canvas) walk.drag(drag.walk, now.x, now.y, (now.x - was.x) * pixelScale, (now.y - was.y) * pixelScale);
+      // each finger works the job it took on the way down; with the mouse locked in, the raw mousemove
+      // above is already driving the view
+      const last = walkLast.get(e.pointerId), page = toPage(e);
+      walkLast.set(e.pointerId, page);
+      const role = walkRoles.get(e.pointerId);
+      if (role === 'stick') walk.moveStick(page.x, page.y);
+      else if (role === 'look' && document.pointerLockElement !== canvas) walk.lookBy(page.x - last.x, page.y - last.y);
       dirty = true;
       return;
     }
@@ -216,7 +234,13 @@ async function boot() {
   const release = e => {
     pointers.delete(e.pointerId);
     pinch = null;
-    if (walk.active) walk.endDrag();
+    // only the finger that is leaving lays its own job down: the stick thumb stays where it was even as
+    // the looking one goes home
+    const role = walkRoles.get(e.pointerId);
+    if (role === 'stick') walk.endStick();
+    else if (role === 'look') walk.endLook();
+    walkRoles.delete(e.pointerId);
+    walkLast.delete(e.pointerId);
     drag = null;
   };
   canvas.addEventListener('pointerup', release);
@@ -323,8 +347,10 @@ async function boot() {
       setTimeout(() => { walkgo.textContent = '走进城市 G'; }, 1600);
     }
   });
-  const drive = document.getElementById('drive');
+  const drive = document.getElementById('action');
   if (drive) drive.addEventListener('click', () => walk.key('e'));
+  const speedcycle = document.getElementById('speedcycle');
+  if (speedcycle) speedcycle.addEventListener('click', () => walk.speedCycle());
   const camcloser = document.getElementById('camcloser');
   if (camcloser) camcloser.addEventListener('click', () => walk.camDistStep(false));
   const camfarther = document.getElementById('camfarther');
