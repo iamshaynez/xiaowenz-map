@@ -36,7 +36,7 @@ void main() {
   vec2 extent = vec2(max(BOARD.x * uTilt.z, 0.75), tall * 0.5);
   vDepth = s.z;
   vPlace = foot.xy + uCentre.xy;
-  vUV = vec2(0.5 + aCorner.x * 0.5, 0.5 - aCorner.y * 0.5);
+  vUV = vec2(0.5 + aCorner.x * 0.5, 0.5 + aCorner.y * 0.5);   // 板的上沿(aCorner.y=-1)读图的首行——图集的首行是图的顶
   gl_Position = clip(vec3(centre + aCorner * extent, vDepth));
 }`,
     fs: FRAGMENT + /* glsl */`
