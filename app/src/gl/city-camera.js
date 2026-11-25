@@ -16,6 +16,36 @@ export class CityCamera {
     this.ss = 2;                         // supersampling of the scene buffers
     this.width = 960;                    // low-resolution frame
     this.height = 540;
+    // Walking: the camera is a perspective eye at (x, y, eyeZ), looking along yaw and down by pitch.
+    // scale keeps its map meaning nowhere; the shaders take the eye from uWalk instead.
+    this.walking = false;
+    this.eyeZ = 0;                       // the eye's height above the map's zero
+    this.fov = 0.45;                     // tan of half the vertical field of view
+    this.near = 0.6;                     // metres
+    this.far = 1500;
+    this.textureScale = 22;              // pixels per metre for the close-in textures while walking
+  }
+
+  // the direction on the ground that runs up the screen, and the one that runs to the right: unit vectors
+  walkForward() {
+    const k = Math.SQRT1_2, c = this.cos, s = this.sin;
+    return { x: (c + s) * k, y: (c - s) * k };
+  }
+
+  walkRight() {
+    const k = Math.SQRT1_2, c = this.cos, s = this.sin;
+    return { x: (c + s) * k, y: (s - c) * k };
+  }
+
+  // where the eye stands (walking), for the shaders and the tile arithmetic
+  eye() {
+    return { x: this.x, y: this.y, z: this.eyeZ };
+  }
+
+  // the yaw that looks along a world direction (x, y)
+  static yawOf(x, y) {
+    const k = Math.SQRT1_2;
+    return Math.atan2((x - y) * k, (x + y) * k);
   }
 
   get cos() { return Math.cos(this.yaw); }
@@ -70,6 +100,29 @@ export class CityCamera {
   origin() {
     const { sx, sy } = this.project(0, 0, 0);
     return [sx, sy];
+  }
+
+  // ---- walking view ------------------------------------------------------------------------------------------
+  // a world point on the screen (low-resolution pixels) and its metres ahead of the eye; null behind the eye
+  projectWalk(x, y, z) {
+    const dz = z - this.eyeZ, dx = x - this.x, dy = y - this.y, c = this.cos, s = this.sin;
+    const rx = dx * c - dy * s, ry = dx * s + dy * c;
+    const u = (rx - ry) * SQRT1_2, v = (rx + ry) * SQRT1_2;
+    const ahead = v * this.cosPitch - dz * this.sinPitch;
+    if (ahead < this.near) return null;
+    const f = this.height / 2 / this.fov, aspect = this.width / this.height;
+    return { sx: this.width / 2 + (u / ahead) * f / aspect, sy: this.height / 2 - ((v * this.sinPitch + dz * this.cosPitch) / ahead) * f, ahead };
+  }
+
+  // the point on the ground that a screen position looks at (walking): the eye's ray against the map's zero
+  unprojectWalk(sx, sy) {
+    const nx = (sx - this.width / 2) / (this.width / 2), ny = (this.height / 2 - sy) / (this.height / 2);
+    const du = nx * this.fov * (this.width / this.height), dUp = ny * this.fov;
+    const dv = this.cosPitch + dUp * this.sinPitch, dz = -this.sinPitch + dUp * this.cosPitch;
+    const rx = (du + dv) * SQRT1_2, ry = (dv - du) * SQRT1_2, c = this.cos, s = this.sin;
+    const dirX = rx * c + ry * s, dirY = -rx * s + ry * c;
+    const t = Math.abs(dz) < 1e-6 ? 1 : -this.eyeZ / dz;
+    return { x: this.x + dirX * t, y: this.y + dirY * t, dirX, dirY, dz };
   }
 
   // Engine depth is mapped linearly onto the depth buffer; the range is fitted to what this zoom can see.

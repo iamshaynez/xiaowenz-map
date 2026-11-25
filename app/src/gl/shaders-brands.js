@@ -30,14 +30,15 @@ out float vDepth;
 void main() {
   vec3 foot = vec3(aShop.xy + uOffset, aShop.z);
   vec3 s = project(vec3(foot.xy, foot.z + BOARD.z));               // the top edge, just over the parapet
-  float up = uTilt.y * uTilt.z;                                   // pixels per metre of height
+  float ppm = pixelsPerMetre(s);                                   // pixels that a metre here takes up
+  float up = uTilt.y * ppm;                                        // pixels per metre of height
   float tall = max((BOARD.z - BOARD.y) * up, 2.0);
-  vec2 centre = vec2(s.x, s.y + tall * 0.5);                       // +y is down the screen: below the top
-  vec2 extent = vec2(max(BOARD.x * uTilt.z, 0.75), tall * 0.5);
+  vec2 centre = toPixels(s) + vec2(0.0, tall * 0.5);               // +y is down the screen: below the top
+  vec2 extent = vec2(max(BOARD.x * ppm, 0.75), tall * 0.5);
   vDepth = s.z;
   vPlace = foot.xy + uCentre.xy;
   vUV = vec2(0.5 + aCorner.x * 0.5, 0.5 + aCorner.y * 0.5);   // 板的上沿(aCorner.y=-1)读图的首行——图集的首行是图的顶
-  gl_Position = clip(vec3(centre + aCorner * extent, vDepth));
+  gl_Position = clipPixels(vec3(centre + aCorner * extent, vDepth));
 }`,
     fs: FRAGMENT + /* glsl */`
 uniform sampler2D uMark;                // this draw's brand picture, 32×32

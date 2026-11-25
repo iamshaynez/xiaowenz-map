@@ -120,17 +120,28 @@ export class Traffic {
     this.people = 0;
     this.drawn = { cars: 0, boats: 0, people: 0 };
     const { W, H, scale } = frame;
-    const halfU = W / (2 * scale), halfV = H / (2 * scale * camera.sinPitch);
     this.camera = camera;
-    this.margin = { u: halfU + 30, v: halfV + 40 };
+    if (camera.walking) {
+      // walking: what moves is what stands within half a kilometre of the eye
+      this.margin = { radius: 550 };
+    } else {
+      const halfU = W / (2 * scale), halfV = H / (2 * scale * camera.sinPitch);
+      this.margin = { u: halfU + 30, v: halfV + 40 };
+    }
     for (const tile of tiles) {
       const lines = tile.paths;
       if (!lines) continue;
       for (let n = 0; n < lines.length; n++) {
         const line = lines[n];
         // a line is drawn whole from its tile, so it is worth a look if it comes near the frame at all
-        const c = camera.axes(tile.x0 + line.cx, tile.y0 + line.cy);
-        if (Math.abs(c.u) > halfU + line.reach || Math.abs(c.v) > halfV + line.reach / camera.sinPitch) continue;
+        if (camera.walking) {
+          const d = Math.hypot(tile.x0 + line.cx - camera.x, tile.y0 + line.cy - camera.y);
+          if (d > this.margin.radius + line.reach) continue;
+        } else {
+          const c = camera.axes(tile.x0 + line.cx, tile.y0 + line.cy);
+          const halfU = W / (2 * scale), halfV = H / (2 * scale * camera.sinPitch);
+          if (Math.abs(c.u) > halfU + line.reach || Math.abs(c.v) > halfV + line.reach / camera.sinPitch) continue;
+        }
         const street = STREETS[line.cls], water = WATERS[line.cls];
         if (street && which.cars) this.flow(line, n, street, time, tile, colours, 0.2, true);
         if (water && which.boats && (line.cls !== LAKE || which.lake)) this.flow(line, n, water, time, tile, colours, line.cls === LAKE ? 0.2 : 0, false);
@@ -145,6 +156,7 @@ export class Traffic {
 
   // whether a point of the world (metres) is in the frame or just outside it
   near(x, y) {
+    if (this.camera.walking) return Math.hypot(x - this.camera.x, y - this.camera.y) <= this.margin.radius;
     const c = this.camera.axes(x, y);
     return Math.abs(c.u) <= this.margin.u && Math.abs(c.v) <= this.margin.v;
   }

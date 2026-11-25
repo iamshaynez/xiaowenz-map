@@ -7,20 +7,57 @@
 // together and nothing is left floating at the edge.
 
 // World: metres, x east, y north, z up. `project` takes metres relative to the camera centre and returns
-// screen pixels in the low-resolution frame (from the top-left corner) and engine depth (larger is nearer).
+// screen pixels in the low-resolution frame (from the top-left corner) and engine depth. In the map's
+// view the depth is larger for what is nearer; in the walking view it is metres ahead of the eye, smaller
+// for what is nearer, and project() gives the point pre-multiplied by that depth for clip().
 export const CITY_CAMERA = /* glsl */`
-uniform vec4 uCentre;   // camera centre x, y in world metres; cos(yaw), sin(yaw)
+uniform vec4 uCentre;   // camera centre (walking: the eye) x, y in world metres; cos(yaw), sin(yaw)
 uniform vec4 uTilt;     // sin(pitch), cos(pitch), pixels per metre, supersampling
 uniform vec2 uFrame;    // width and height of the low-resolution frame
 uniform vec2 uDepth;    // nearest and farthest engine depth
+uniform vec4 uWalk;     // walking view: 1, tan of half the field of view, the eye's height above the map's zero, 0
 
 vec3 project(vec3 q) {
   float rx = q.x * uCentre.z - q.y * uCentre.w, ry = q.x * uCentre.w + q.y * uCentre.z;
   float u = (rx - ry) * 0.7071067811865476, v = (rx + ry) * 0.7071067811865476;
+  if (uWalk.x > 0.5) {
+    // the eye looks along the view axis and downwards by the pitch: up and ahead are the point on those
+    // two axes, the frame of view is the screen, and what is nearer writes a nearer depth. What stands
+    // behind the eye goes out with a negative depth, and the GPU clips it there; the coordinates are
+    // carried pre-multiplied by the depth, so the near-zero division stays finite.
+    float pz = q.z - uWalk.z;
+    float ahead = v * uTilt.y - pz * uTilt.x;
+    float safe = abs(ahead) < 1e-4 ? (ahead < 0.0 ? -1e-4 : 1e-4) : ahead;
+    float nx = u / (safe * uWalk.y * uFrame.x / uFrame.y);
+    float ny = (v * uTilt.x + pz * uTilt.y) / (safe * uWalk.y);
+    return vec3(nx * safe, ny * safe, safe);
+  }
   return vec3(uFrame.x * 0.5 + u * uTilt.z, uFrame.y * 0.5 - (v * uTilt.x + q.z * uTilt.y) * uTilt.z, q.z * uTilt.x - v * uTilt.y);
 }
 float depthOf(float d) { return clamp((uDepth.x - d) / (uDepth.x - uDepth.y), 0.0, 1.0); }
-vec4 clip(vec3 s) { return vec4(s.x / uFrame.x * 2.0 - 1.0, 1.0 - s.y / uFrame.y * 2.0, depthOf(s.z), 1.0); }
+vec4 clip(vec3 s) {
+  if (uWalk.x > 0.5) return vec4(s.x, s.y, 0.0, s.z);   // s.z rides along as the clip's own w; the depth is written per fragment
+  return vec4(s.x / uFrame.x * 2.0 - 1.0, 1.0 - s.y / uFrame.y * 2.0, depthOf(s.z), 1.0);
+}
+// project()'s answer in low-resolution pixels (billboards live in pixels), in either view
+vec2 toPixels(vec3 s) {
+  if (uWalk.x < 0.5) return s.xy;
+  return vec2((s.x / s.z + 1.0) * 0.5 * uFrame.x, (0.5 - 0.5 * (s.y / s.z)) * uFrame.y);
+}
+// pixels that a metre at the projected point takes up, in either view. The walking view wants the point
+// itself (its z is the metres ahead), for a metre far away is fewer pixels than a metre at hand.
+float pixelsPerMetre(vec3 s) {
+  return uWalk.x > 0.5 ? (uFrame.y * 0.5 / uWalk.y) / max(s.z, 0.05) : uTilt.z;
+}
+// the clip position of a billboard built in pixels, in either view. In the walking view a billboard whose
+// centre stood behind the eye (a negative depth) is sent wholly away.
+vec4 clipPixels(vec3 s) {
+  if (uWalk.x > 0.5) {
+    if (s.z < 0.05) return vec4(0.0, 0.0, 2.0, 1.0);
+    return vec4(s.x / uFrame.x * 2.0 - 1.0, 1.0 - s.y / uFrame.y * 2.0, 0.0, 1.0);
+  }
+  return clip(s);
+}
 vec2 unproject(float sx, float sy, float z) {
   float u = (sx - uFrame.x * 0.5) / uTilt.z, v = -(((sy - uFrame.y * 0.5) / uTilt.z + z * uTilt.y) / uTilt.x);
   return vec2((u + v) * 0.7071067811865476, (v - u) * 0.7071067811865476);

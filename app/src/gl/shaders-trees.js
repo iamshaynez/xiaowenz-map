@@ -60,21 +60,23 @@ void main() {
   vRadius = radius;
   if (uPart == 0) {
     vec3 s = project(vCrown);
-    vec2 size = SHAPE[species] * max(radius * uTilt.z, 0.75) * (1.0 + 0.15 * uDetail);
-    s.xy += vec2(round(gust * 0.9 * (0.5 + 0.5 * uDetail)), round(gust * 0.3));   // whole pixels, as the reference moves its leaves
-    vCentre = s.xy;
+    vec2 size = SHAPE[species] * max(radius * pixelsPerMetre(s), 0.75) * (1.0 + 0.15 * uDetail);
+    vec2 centre = toPixels(s) + vec2(round(gust * 0.9 * (0.5 + 0.5 * uDetail)), round(gust * 0.3));   // whole pixels, as the reference moves its leaves
+    vCentre = centre;
     vHalf = size;
     vDepth = s.z;
   } else {
-    float top = ground.y - lift * uTilt.y * uTilt.z;
-    vCentre = vec2(ground.x, (ground.y + top) * 0.5);
-    vHalf = vec2(max(radius * 0.09 * uTilt.z, 0.75), max((ground.y - top) * 0.5, 0.5));
+    vec2 at = toPixels(ground);
+    float ppm = pixelsPerMetre(ground);
+    float top = at.y - lift * uTilt.y * ppm;
+    vCentre = vec2(at.x, (at.y + top) * 0.5);
+    vHalf = vec2(max(radius * 0.09 * ppm, 0.75), max((at.y - top) * 0.5, 0.5));
     vDepth = ground.z;
   }
   vSpecies = aLook.x;
   vSeed = seed;
   vPlace = foot.xy + uCentre.xy;
-  gl_Position = clip(vec3(vCentre + aCorner * vHalf, vDepth));
+  gl_Position = clipPixels(vec3(vCentre + aCorner * vHalf, vDepth));
 }
 `,
     fs: FRAGMENT + TREE_SPECIES + /* glsl */`

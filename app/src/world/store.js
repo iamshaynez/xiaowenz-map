@@ -12,6 +12,7 @@ export const LIFE_SCALE = 0.3;           // from this zoom up boats are drawn; c
 export const ROOF_SCALE = 0.6;          // from this zoom up what stands on flat roofs is drawn; farther out it is under a pixel
 export const TALLEST = 420;             // metres; anything higher would be a surprise
 const CAPACITY = 300;                   // tiles kept on the GPU
+const SOLID_CELL_M = 5;                 // the collision raster's square, in metres (the walking view)
 
 // ---- meshes and textures ----------------------------------------------------------------------------------------
 export function gridMesh(gl, nx, ny) {
@@ -133,6 +134,48 @@ export const UNIT_BOX = unitBox();
 // a square from -1 to 1, as a strip of four vertices
 export const UNIT_SQUARE = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 
+// The walking view's collision raster of one tile: a byte per SOLID_CELL_M square, 1 where a walker or a
+// car cannot be — inside a building, or on open water. The buildings come as their district-tier mesh,
+// whose roofs cover each building's own ground (a wall's normal is a full unit vector and casts no area);
+// the water as its ground mesh, whose every triangle is water.
+function solidRaster(size, buildings, water) {
+  const n = Math.ceil(size / SOLID_CELL_M);
+  const bytes = new Uint8Array(n * n);
+  const fill = (ax, ay, bx, by, cx, cy) => {
+    const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (Math.abs(area) < 1e-9) return;
+    const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx) / SOLID_CELL_M)), maxX = Math.min(n - 1, Math.floor(Math.max(ax, bx, cx) / SOLID_CELL_M));
+    const minY = Math.max(0, Math.floor(Math.min(ay, by, cy) / SOLID_CELL_M)), maxY = Math.min(n - 1, Math.floor(Math.max(ay, by, cy) / SOLID_CELL_M));
+    for (let row = minY; row <= maxY; row++) {
+      const py = (row + 0.5) * SOLID_CELL_M;
+      for (let col = minX; col <= maxX; col++) {
+        const px = (col + 0.5) * SOLID_CELL_M;
+        const w0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+        const w1 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
+        const w2 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
+        if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) bytes[row * n + col] = 1;
+      }
+    }
+  };
+  const mark = (vertices, indices, stride, wanted) => {
+    for (let k = 0; k + 2 < indices.length; k += 3) {
+      const a = indices[k] * stride, b = indices[k + 1] * stride, c = indices[k + 2] * stride;
+      if (wanted && !wanted(a, b, c, vertices)) continue;
+      fill(vertices[a], vertices[a + 1], vertices[b], vertices[b + 1], vertices[c], vertices[c + 1]);
+    }
+  };
+  if (buildings && buildings.indices.length) {
+    const v = buildings.vertices, props = buildings.props;
+    mark(v, buildings.indices, 6, (a, b, c, verts) => {
+      if (props && props[verts[a + 5] * 9 + 8] >= 32) return false;   // a landmark built by hand stands here instead
+      const nx = verts[a + 3], ny = verts[a + 4];
+      return nx * nx + ny * ny < 0.9;   // a roof, flat or pitched: a wall projects to a line, not an area
+    });
+  }
+  if (water && water.indices.length) mark(water.vertices, water.indices, 5, null);
+  return { n, cell: SOLID_CELL_M, bytes };
+}
+
 export class World {
   constructor(gl, index, city) {
     this.gl = gl;
@@ -218,6 +261,82 @@ export class World {
     return out.sort((a, b) => a.distance - b.distance);
   }
 
+  // the tiles within a radius of a point (the walking view's camera), nearest first
+  visibleAround(camera, radius) {
+    const { index } = this;
+    const size = index.tileSize;
+    const tx0 = Math.floor(camera.x / size) - index.ix0, ty0 = Math.floor(camera.y / size) - index.iy0;
+    const span = Math.ceil(radius / size);
+    const out = [];
+    for (let ty = Math.max(0, ty0 - span); ty <= Math.min(index.ny - 1, ty0 + span); ty++) {
+      for (let tx = Math.max(0, tx0 - span); tx <= Math.min(index.nx - 1, tx0 + span); tx++) {
+        const x0 = (index.ix0 + tx) * size, y0 = (index.iy0 + ty) * size;
+        const nearestX = Math.max(x0, Math.min(camera.x, x0 + size)), nearestY = Math.max(y0, Math.min(camera.y, y0 + size));
+        const distance = Math.hypot(nearestX - camera.x, nearestY - camera.y);
+        if (distance > radius) continue;
+        out.push({ tx, ty, x0, y0, distance: Math.hypot(x0 + size / 2 - camera.x, y0 + size / 2 - camera.y) });
+      }
+    }
+    return out.sort((a, b) => a.distance - b.distance);
+  }
+
+  // the tile that holds a point of the world, or null
+  tileAt(x, y) {
+    const { index } = this, size = index.tileSize;
+    const tx = Math.floor(x / size) - index.ix0, ty = Math.floor(y / size) - index.iy0;
+    return this.tiles.get(`${tx}_${ty}`) ?? null;
+  }
+
+  // 1 where a walker or a car cannot go: inside a building, or on open water. Read off the tile's
+  // collision raster (SOLID_CELL_M squares), which buildTile fills from the buildings' roofs and the water.
+  solidAt(x, y) {
+    const tile = this.tileAt(x, y);
+    const raster = tile?.solid;
+    if (!raster) return 0;
+    const col = Math.floor((x - tile.x0) / SOLID_CELL_M), row = Math.floor((y - tile.y0) / SOLID_CELL_M);
+    if (col < 0 || row < 0 || col >= raster.n || row >= raster.n) return 0;
+    return raster.bytes[row * raster.n + col];
+  }
+
+  // the nearest walkable line of the road network to a point (the walking view's roads to drive on):
+  // -> { tile, line, s, x, y, z, tx, ty } at the nearest point of the nearest line, or null.
+  // `exclude` leaves one line out (the one a car has just run off the end of).
+  roadsNear(x, y, radius = 60, classes = [5, 6, 7, 8, 9, 10], exclude = null) {
+    const { index } = this, size = index.tileSize;
+    const tx0 = Math.floor(x / size) - index.ix0, ty0 = Math.floor(y / size) - index.iy0;
+    const span = Math.ceil(radius / size) + 1;
+    let best = null;
+    const test = (tile, line) => {
+      if (line === exclude || !classes.includes(line.cls)) return;
+      const pts = line.points, n = pts.length / 4;
+      for (let i = 0; i < n - 1; i++) {
+        const a = i * 4, b = a + 4;
+        const ax = tile.x0 + pts[a], ay = tile.y0 + pts[a + 1], bx = tile.x0 + pts[b], by = tile.y0 + pts[b + 1];
+        const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (len2 || 1)));
+        const px = ax + dx * t, py = ay + dy * t;
+        const d = Math.hypot(px - x, py - y);
+        if (d < radius && (!best || d < best.d)) {
+          const tx = len2 > 1e-6 ? dx / Math.sqrt(len2) : 1, ty = len2 > 1e-6 ? dy / Math.sqrt(len2) : 0;
+          const s = pts[a + 3] + (pts[b + 3] - pts[a + 3]) * t;
+          best = { tile, line, s, x: px, y: py, z: pts[a + 2] + (pts[b + 2] - pts[a + 2]) * t, tx, ty, d };
+        }
+      }
+    };
+    for (let ty = Math.max(0, ty0 - span); ty <= Math.min(index.ny - 1, ty0 + span); ty++) {
+      for (let tx = Math.max(0, tx0 - span); tx <= Math.min(index.nx - 1, tx0 + span); tx++) {
+        const tile = this.tiles.get(`${tx}_${ty}`);
+        if (!tile?.paths) continue;
+        for (const line of tile.paths) {
+          const cx = tile.x0 + line.cx, cy = tile.y0 + line.cy;
+          if (Math.hypot(cx - x, cy - y) > line.reach + radius) continue;
+          test(tile, line);
+        }
+      }
+    }
+    return best;
+  }
+
   // start fetching what is missing, a few at a time
   // the tiles a pose of the camera can see, nearest first: the destination of a flight, while it is on its way.
   // A pose is the camera's { x, y, scale, pitch, yaw }; the frame's size and the projecting come from the camera.
@@ -286,6 +405,7 @@ export class World {
     const gl = this.gl;
     const size = this.index.tileSize;
     const tile = { key, x0: (this.index.ix0 + tx) * size, y0: (this.index.iy0 + ty) * size, used: ++this.clock };
+    const buildings = sections.BLDB ? readBuildings(sections.BLDB) : null;
     if (sections.TERR) {
       // the tile's grid, and the wider lattice around it that the height of the ground beyond the tile is read from
       tile.lattice = readGrid(sections.TERR);
@@ -299,12 +419,9 @@ export class World {
       }
     }
     if (sections.BASE) tile.base = byteTexture(gl, 32, 32, readBase(sections.BASE));
-    if (sections.BLDB) {
-      const buildings = readBuildings(sections.BLDB);
-      if (buildings.indices.length) {
-        tile.buildings = assemble(gl, [{ data: buildings.vertices, layout: [[0, 3], [1, 2], [2, 1]] }], buildings.indices);
-        tile.props = floatTexture(gl, 9, buildings.buildings, buildings.props);
-      }
+    if (buildings && buildings.indices.length) {
+      tile.buildings = assemble(gl, [{ data: buildings.vertices, layout: [[0, 3], [1, 2], [2, 1]] }], buildings.indices);
+      tile.props = floatTexture(gl, 9, buildings.buildings, buildings.props);
     }
     if (sections.ROOF) {
       const boxes = readBoxes(sections.ROOF);
@@ -314,12 +431,17 @@ export class World {
       }
     }
     tile.ground = {};
+    let waterMesh = null;
     for (const [name, id] of [['water', 'WATR'], ['road', 'ROAD'], ['land', 'LAND'], ['deck', 'DECK']]) {
       if (!sections[id]) continue;
       // water, roads and land lie on the ground, a lift above it by their class; a deck keeps the height it was given
       const mesh = readMesh(sections[id], id === 'DECK' ? null : (x, y, cls) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y) + (this.lifts[cls] ?? 0.02)));
+      if (id === 'WATR') waterMesh = mesh;
       if (mesh.indices.length) tile.ground[name] = assemble(gl, [{ data: mesh.vertices, layout: [[0, 3], [1, 1], [2, 1]] }], mesh.indices);
     }
+    // where a walker cannot go: the buildings' roofs laid on a coarse grid, and the open water. The water's
+    // own mesh carries heights the raster does not want, so it is read once more flat of them.
+    tile.solid = solidRaster(size, buildings, waterMesh ?? (sections.WATR ? readMesh(sections.WATR, () => 0) : null));
     if (sections.TREE) {
       const trees = readTrees(sections.TREE, (x, y) => Math.fround(tile.surfaceAt(tile.x0 + x, tile.y0 + y)));
       if (trees.count) {

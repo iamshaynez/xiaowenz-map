@@ -108,14 +108,16 @@ export class CityRenderer extends StyleRenderer {
   // While the sun's picture is being drawn it must not be bound as a texture (see castShadows).
   applyCamera(prog, { shadowMap = true } = {}) {
     const { gl, W, H, SS } = this, c = this.city;
-    const [near, far] = c.depthRange(TALLEST);
+    const walking = this.walkActive();
+    const [near, far] = walking ? [c.near, c.far] : c.depthRange(TALLEST);
     this.depthRange = [near, far];
     prog.set('uView', [W, H, SS, c.scale])
       .set('uAngles', [c.cos, c.sin, c.sinPitch, c.cosPitch])
       .set('uOrigin', c.origin())
       .set('uDepth', [near, far])
       .set('uCentre', [c.x, c.y, c.cos, c.sin])
-      .set('uTilt', [c.sinPitch, c.cosPitch, c.scale, SS])
+      .set('uTilt', [c.sinPitch, c.cosPitch, walking ? c.textureScale : c.scale, SS])
+      .set('uWalk', walking ? [1, c.fov, c.eyeZ, 0] : [0, 0, 0, 0])
       .set('uFrame', [W, H])
       .set('uIsland', this.island)
       .set('uIsland2', this.island2)
@@ -164,14 +166,17 @@ export class CityRenderer extends StyleRenderer {
   render(world, { edges = true, shadows = true } = {}) {
     const { gl, frame, city } = this;
     this.frames = (this.frames || 0) + 1;
-    const district = city.scale >= DISTRICT_SCALE;
-    const tiles = district && world.overview ? this.visibleTiles(world) : [];
+    const walking = this.walkActive();
+    const district = walking || city.scale >= DISTRICT_SCALE;
+    const tiles = district && world.overview ? (walking
+      ? world.visibleAround(city, 1500).map(d => world.tiles.get(`${d.tx}_${d.ty}`)).filter(Boolean)
+      : this.visibleTiles(world)) : [];
     // shadows belong to the district tier: farther out they are smaller than a pixel
     this.drawn = { tiles: tiles.length, triangles: 0, trees: 0, landmarks: 0 };
-    this.shadowOn = district && shadows && world.overview && city.scale >= SHADOW_SCALE ? 1 : 0;
-    const life = district && world.overview && city.scale >= LIFE_SCALE;
+    this.shadowOn = district && shadows && world.overview && (walking || city.scale >= SHADOW_SCALE) ? 1 : 0;
+    const life = district && world.overview && (walking || city.scale >= LIFE_SCALE);
     if (life) this.updateLife(tiles);
-    if (this.shadowOn) this.castShadows(tiles, life && city.scale >= CAR_SCALE);   // changes the framebuffer and the colour masks; the scene sets its own
+    if (this.shadowOn) this.castShadows(tiles, life && (walking || city.scale >= CAR_SCALE));   // changes the framebuffer and the colour masks; the scene sets its own
     frame.bindScene();
     gl.disable(gl.BLEND);
     gl.depthMask(true);
@@ -182,15 +187,26 @@ export class CityRenderer extends StyleRenderer {
     gl.depthFunc(gl.LESS);
     gl.colorMask(true, true, true, true, false, false, true, true);
     if (world.overview) {
-      if (district) this.drawDistrict(tiles, world, city.scale >= TREE_SCALE, life);
+      if (district) this.drawDistrict(tiles, world, walking || city.scale >= TREE_SCALE, life);
       else this.drawOverview(world);
     }
     this.resolve();
     this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.color, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
     if (!edges) return frame.workAFbo;
     this.fullscreen('edges', frame.workBFbo, { uColor: frame.workA, uClass: frame.class, uDepthTex: frame.depth },
-      { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
+      walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
+    if (walking) {
+      // the haze: what stands beyond the loaded tiles melts into the page's white before its edge could be seen
+      this.fullscreen('walkFog', frame.workAFbo, { uColor: frame.workB, uDepthTex: frame.depth },
+        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250] });
+      return frame.workAFbo;
+    }
     return frame.workBFbo;
+  }
+
+  // whether the renderer is in the walking view (the page says so through `walk`)
+  walkActive() {
+    return !!(this.walk && this.walk.active);
   }
 
   // The engine depth of what the last frame shows at one of its pixels: the nearest thing drawn there,
@@ -334,11 +350,16 @@ export class CityRenderer extends StyleRenderer {
     const { city, W, H, groundAt } = this;
     this.drawn.landmarks = 0;
     if (!groundAt) return;
+    const walking = this.walkActive();
     for (const landmark of this.landmarks) {
       for (const part of landmark.parts) {
-        const c = city.axes(part.x, part.y), scale = city.scale;
-        if (Math.abs(c.u) * scale > W / 2 + (part.reach + 10) * scale) continue;
-        if (Math.abs(c.v) * city.sinPitch * scale > H / 2 + (part.reach + 10) * scale + part.top * city.cosPitch * scale) continue;
+        if (walking) {
+          if (Math.hypot(part.x - city.x, part.y - city.y) > 1500 + part.reach) continue;
+        } else {
+          const c = city.axes(part.x, part.y), scale = city.scale;
+          if (Math.abs(c.u) * scale > W / 2 + (part.reach + 10) * scale) continue;
+          if (Math.abs(c.v) * city.sinPitch * scale > H / 2 + (part.reach + 10) * scale + part.top * city.cosPitch * scale) continue;
+        }
         draw(program, part, groundAt(part.x, part.y) - part.bed);
         this.drawn.landmarks++;
       }
@@ -430,7 +451,7 @@ export class CityRenderer extends StyleRenderer {
     const right = [-dir[1] / flat, dir[0] / flat, 0];                        // across the sun's picture, level with the ground
     const up = cross(dir, right);
 
-    const halfU = this.W / (2 * city.scale) + 64, halfV = this.H / (2 * city.scale * city.sinPitch) + 64;
+    const halfU = this.walkActive() ? 300 : this.W / (2 * city.scale) + 64, halfV = this.walkActive() ? 300 : this.H / (2 * city.scale * city.sinPitch) + 64;
     let low = Infinity, high = -Infinity;
     for (const tile of tiles) {
       low = Math.min(low, tile.floor);
@@ -526,8 +547,11 @@ export class CityRenderer extends StyleRenderer {
   // where everything is at this moment, and its boxes uploaded
   updateLife(tiles) {
     const { gl, city, W, H } = this;
-    const which = { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE };
+    const walking = this.walkActive();
+    const which = walking ? { cars: true, boats: true, lake: true, people: true }
+      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE };
     this.drawn.life = this.traffic.place(tiles, this.time, city, { W, H, scale: city.scale }, which, this.trafficColours);
+    if (walking) this.walk.place(this.traffic, this.trafficColours);   // the player walks among them
     const { count, people, boxes, folks } = this.traffic;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lifeMesh.buffers[1]);
     gl.bufferData(gl.ARRAY_BUFFER, count ? boxes.subarray(0, count * RECORD) : new Float32Array(0), gl.DYNAMIC_DRAW);
@@ -552,6 +576,7 @@ export class CityRenderer extends StyleRenderer {
   treeRuns(tiles) {
     const { city, W, H } = this;
     const cellM = this.treeCell, half = cellM * Math.SQRT1_2;
+    const walking = this.walkActive();
     const margin = 14 * city.scale + 2;
     const limitU = W / 2 + half * city.scale + margin;
     const limitV = H / 2 + half * city.scale + margin + 16 * city.scale * city.cosPitch;
@@ -562,8 +587,13 @@ export class CityRenderer extends StyleRenderer {
       for (let cy = 0; cy < cells; cy++) for (let cx = 0; cx < cells; cx++) {
         const a = starts[cy * cells + cx], b = starts[cy * cells + cx + 1];
         if (a === b) continue;
-        const c = city.axes(tile.x0 + (cx + 0.5) * cellM, tile.y0 + (cy + 0.5) * cellM);
-        if (Math.abs(c.u) * city.scale > limitU || Math.abs(c.v) * city.sinPitch * city.scale > limitV) continue;
+        const cxw = tile.x0 + (cx + 0.5) * cellM, cyw = tile.y0 + (cy + 0.5) * cellM;
+        if (walking) {
+          if (Math.hypot(cxw - city.x, cyw - city.y) > 620 + half) continue;
+        } else {
+          const c = city.axes(cxw, cyw);
+          if (Math.abs(c.u) * city.scale > limitU || Math.abs(c.v) * city.sinPitch * city.scale > limitV) continue;
+        }
         runs.push({ tile, a, count: b - a });
       }
     }

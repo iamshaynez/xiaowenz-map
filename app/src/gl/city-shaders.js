@@ -6,7 +6,7 @@
 // ribbon    thin strips for the overview tier: main roads, railways, canals
 // boxes     the overview tier's buildings: one box per 50 m cell
 // buildings the district tier's buildings: walls and roofs of real outlines
-import { PREFIX, MRT, TABLES } from './shaders.js';
+import { FULLSCREEN_VS, PREFIX, MRT, TABLES } from './shaders.js';
 import { CITY_CAMERA, CITY_PIXEL, GRAIN, GROUND_GLSL, ISLAND, NOISE, SEASON, SHADOW } from './city-common.js';
 
 const VERTEX = PREFIX + CITY_CAMERA;
@@ -397,5 +397,24 @@ void main() {
   gl_FragDepth = depthOf(vDepth);
 }
 `,
+  },
+
+  // The walking view's haze: the picture fades into the page's white with distance, so that the edge
+  // where the loaded tiles end is never seen. Fullscreen over the finished picture.
+  walkFog: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + /* glsl */`
+uniform sampler2D uColor;
+uniform sampler2D uDepthTex;            // the resolved depth, 0..1
+uniform vec2 uDepth;                    // nearest and farthest engine depth (the walking view: metres ahead)
+uniform vec2 uFog;                      // metres ahead where the haze begins, and where it is whole
+out vec4 outColor;
+void main() {
+  vec3 color = texelFetch(uColor, ivec2(gl_FragCoord.xy), 0).rgb;
+  float z = texelFetch(uDepthTex, ivec2(gl_FragCoord.xy), 0).r;
+  float ahead = uDepth.x - z * (uDepth.x - uDepth.y);   // metres from the eye (the walking view's depth)
+  float fog = smoothstep(uFog.x, uFog.y, ahead);
+  outColor = vec4(mix(color, vec3(1.0), fog), 1.0);
+}`,
   },
 };

@@ -139,6 +139,13 @@
   #hint .touch { display: none; }
   @media (pointer: coarse) { #hint .mouse { display: none; } #hint .touch { display: inline; } }
   #toggle { display: none; }
+  /* 走进城市：街上的 HUD，和走路时收起的地图面板 */
+  #walkhud { position: fixed; left: max(7px, env(safe-area-inset-left)); bottom: max(10px, env(safe-area-inset-bottom)); z-index: 4; }
+  #walkhud[hidden] { display: none; }
+  #walkhud button { border: 1px solid rgba(28, 27, 25, 0.25); border-radius: 4px; padding: 4px 10px; background: rgba(255, 255, 255, 0.72); margin-right: 6px; }
+  #walkhud button[disabled] { opacity: 0.4; cursor: default; }
+  #walkhint { color: var(--muted); }
+  body.walking #menu, body.walking #tools, body.walking #hint, body.walking #compass, body.walking #mark { display: none; }
   /* the map on its own, for pictures: ?ui=off */
   body.quiet #menu, body.quiet #tools, body.quiet #readout, body.quiet #compass, body.quiet #hint { visibility: hidden; }   /* the note stays: it names the place */
   body.quiet #corner { display: block; }   /* and is written where it always was: above where the readout would be */
@@ -197,7 +204,11 @@
   <div class="row" id="seasons" role="group" aria-label="季节"><span>季节</span></div>
   <div class="row"><button id="tour" type="button" aria-pressed="false">导览</button><button id="topdown" type="button" aria-pressed="false">俯视 M</button></div>
   <div class="row"><button id="pixels" type="button">像素</button><button id="home" type="button">全景 R</button></div>
+  <div class="row"><button id="walkgo" type="button">走进城市 G</button></div>
   <div class="row" id="cities" role="group" aria-label="城市" hidden><span>城市</span></div>   <!-- the other cities there are, each the same page at its own address -->
+</div>
+<div id="walkhud" class="panel" hidden>
+  <button id="drive" type="button">上车 E</button><button id="walkback" type="button">回地图 Esc</button><span id="walkhint"></span>
 </div>
 
 <canvas id="compass" width="44" height="44" aria-hidden="true"></canvas>

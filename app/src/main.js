@@ -7,6 +7,7 @@ import { CHANNELS, cityAsked, openCity, openCities } from './world/source.js';
 import { DATA_ORIGIN } from './config.js';
 import { buildLandmarks } from './landmarks/index.js';
 import { BRAND_LOGOS } from './landmarks/brandmarks.js';
+import { Walk } from './walk/walk.js';
 import { createInterface } from './ui.js';
 
 const MAX_WIDTH = 960, MAX_HEIGHT = 540;   // the frame at the middle pixel size; finer and coarser sizes scale it
@@ -103,6 +104,8 @@ async function boot() {
 
   // start above the middle of the region with all of it in view
   const camera = renderer.city;
+  // 走进城市：街景环视、行走、驾驶（walk/walk.js）。工具面板的按钮和 G 键进出，E 上/下车
+  const walk = new Walk({ camera, world, renderer, keys: null });
   const [west, south, east, north] = index.bounds;
   camera.pitch = Math.PI / 6;
   // the camera that holds the whole region, with a margin, at this pitch and yaw. The region's extent is
@@ -148,8 +151,16 @@ async function boot() {
     if (e.button !== 0) e.preventDefault();          // no middle-click autoscroll, nothing else the browser does with a button
     canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, toFrame(e));
-    if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(toFrame(e)) };
+    const at = toFrame(e);
+    pointers.set(e.pointerId, at);
+    if (walk.active) {
+      // walking: on the left of the screen the touch joystick holds, anywhere else the view is looked around
+      const mode = at.x < width * 0.3 && e.pointerType !== 'mouse' ? 'stick' : 'look';
+      drag = { walk: mode };
+      walk.beginDrag(mode, at.x, at.y);
+      return;
+    }
+    if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(at) };
     if (pointers.size === 2) pinch = { ...pinchState(), height: surfaceAt(pinchState()) };
   });
   // the right button is for turning the view: it brings no menu of its own
@@ -162,6 +173,11 @@ async function boot() {
     if (!pointers.has(e.pointerId)) return;
     const was = pointers.get(e.pointerId), now = toFrame(e);
     pointers.set(e.pointerId, now);
+    if (walk.active) {
+      if (drag?.walk) walk.drag(drag.walk, now.x, now.y, (now.x - was.x) * pixelScale, (now.y - was.y) * pixelScale);
+      dirty = true;
+      return;
+    }
     if (pointers.size === 2) {
       // two fingers: nothing is done here. The browser reports one finger at a time, and the distance
       // between them half way through a move is neither the old nor the new one; the gesture is applied in
@@ -186,11 +202,17 @@ async function boot() {
     }
     dirty = true;
   });
-  const release = e => { pointers.delete(e.pointerId); pinch = null; drag = null; };
+  const release = e => {
+    pointers.delete(e.pointerId);
+    pinch = null;
+    if (walk.active) walk.endDrag();
+    drag = null;
+  };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
+    if (walk.active) return;                         // the walking view has no zoom to offer
     // not applied here: the zoom holds on to what the frame on show draws under the cursor, so it is done
     // just before the next frame is drawn (see the loop), and turns that pile up between two frames are
     // done together
@@ -199,6 +221,7 @@ async function boot() {
     dirty = true;
   }, { passive: false });
   const keys = new Set();
+  walk.keys = keys;
   const pan = dt => {
     let right = 0, up = 0;   // screen directions
     if (keys.has('a') || keys.has('arrowleft')) right -= 1;
@@ -221,6 +244,22 @@ async function boot() {
     // not the keys of a box to write in: those are that box's own
     if (e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input, textarea'))) return;
     const key = e.key.toLowerCase();
+    if (key === 'g' || (walk.active && key === 'escape')) {
+      if (!e.repeat) {
+        const go = document.getElementById('walkgo');
+        if (walk.toggle() === false) {
+          go.textContent = '这里落不下脚';
+          setTimeout(() => { go.textContent = '走进城市 G'; }, 1600);
+        }
+      }
+      e.preventDefault();
+      return;
+    }
+    if (walk.active && key === 'e') {
+      if (!e.repeat) walk.key('e');
+      e.preventDefault();
+      return;
+    }
     if (PAN_KEYS.includes(key)) {
       keys.add(key);
       e.preventDefault();
@@ -250,6 +289,19 @@ async function boot() {
   const openedAt = new URLSearchParams(location.search).get('find');
   if (openedAt) ui.find(openedAt, 0).catch(error => console.error(error));
 
+  // the walking view's own buttons: into the streets, and the car and the way back while in them
+  const walkgo = document.getElementById('walkgo');
+  if (walkgo) walkgo.addEventListener('click', () => {
+    if (walk.toggle() === false) {
+      walkgo.textContent = '这里落不下脚';
+      setTimeout(() => { walkgo.textContent = '走进城市 G'; }, 1600);
+    }
+  });
+  const drive = document.getElementById('drive');
+  if (drive) drive.addEventListener('click', () => walk.key('e'));
+  const walkback = document.getElementById('walkback');
+  if (walkback) walkback.addEventListener('click', () => walk.exit());
+
   // ---- loop --------------------------------------------------------------------------------------------------
   // boats, cars and the wind only show once the view is close enough; farther out a frame is made only
   // when something changes
@@ -257,8 +309,11 @@ async function boot() {
   const frame = now => {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (ui.tick(now) || pan(dt)) dirty = true;
-    if (wheelZoom) {
+    if (walk.active) {
+      walk.tick(dt);
+      dirty = true;
+    } else if (ui.tick(now) || pan(dt)) dirty = true;
+    if (wheelZoom && !walk.active) {
       // zoom about the point under the cursor; that point is read from the frame on show, so this comes
       // before the frame is drawn again
       const { x, y, factor } = wheelZoom;
@@ -266,7 +321,7 @@ async function boot() {
       camera.zoomAt(x, y, Math.min(24, Math.max(0.004, camera.scale * factor)), surfaceAt({ x, y }));
       dirty = true;
     }
-    if (pinch && pointers.size === 2) {
+    if (!walk.active && pinch && pointers.size === 2) {
       // two fingers: zoom by how far apart they are, about the middle of them (the wheel's job on a mouse),
       // and how they have moved together turns the city and tilts it (the right button's). All at the height
       // of what was under the middle when the second finger touched: the thing seen there stays under the
@@ -286,8 +341,12 @@ async function boot() {
     // tiles are only wanted from the district tier on; the overview draws from its own package. While a flight
     // is on, only what its destination needs is asked for (D071), and what is on its way but of no use there
     // is let go: the flight passes over tiles it would never wait for, and the overview is drawn meanwhile.
+    // Walking asks for what stands around the player, whatever the zoom the map was left at.
     const flyingToTiles = ui.flying() && ui.target().scale >= DISTRICT_SCALE * 0.5;
-    if (flyingToTiles) {
+    if (walk.active) {
+      if (world.flightTarget) world.endFlight();
+      world.request(walk.view(), 8);
+    } else if (flyingToTiles) {
       const view = world.viewOf(ui.target(), camera);
       if (!world.flightTarget) world.beginFlight(view);
       world.request(view, 10);
@@ -296,7 +355,7 @@ async function boot() {
       if (camera.scale >= DISTRICT_SCALE * 0.5) world.request(world.visible(camera), 10);
     }
     world.upload(4);
-    if (dirty || world.pending.size || (camera.scale >= LIFE_SCALE && !frozen)) {
+    if (dirty || world.pending.size || walk.active || (camera.scale >= LIFE_SCALE && !frozen)) {
       renderer.present(renderer.render(world));
       dirty = false;
       ui.paint(now);
@@ -308,7 +367,7 @@ async function boot() {
   // for tests and the console
   window.__city = {
     camera, renderer, world, manifest: index, gl, ui,
-    landmarks, city,
+    landmarks, city, walk,
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things
     landmarkMask: id => renderer.landmarkMask(id),
