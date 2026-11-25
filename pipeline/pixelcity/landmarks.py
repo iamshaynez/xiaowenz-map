@@ -26,19 +26,24 @@ from .city import TILE_M, of
 from .osm_extract import Layers
 
 TABLE = "landmarks.json"
-PART_KEYS = ("title", "lon", "lat", "angle", "kit", "clear", "clearSpan")
+PART_KEYS = ("title", "lon", "lat", "angle", "kit", "clear", "clearSpan", "clearPoly")
 SIDES = ("east",)          # the sides of its feature a landmark may be placed on, besides its middle (see standing)
 
 
 def cleared_around(c, path=None):
-    """-> [(x, y, radius)] or [(x, y, radius, half length, angle)]: the ground, in world metres, around landmarks
-    built by hand inside which nothing mapped is drawn: a pagoda's own outline, a bridge's deck and the lines
-    along it. A disc for what stands in one place; for a bridge, which is mapped as a line, a corridor from
-    its middle for `half length` each way along `angle`, `radius` to each side."""
+    """-> ("poly", polygon) or [(x, y, radius)] or [(x, y, radius, half length, angle)]: the ground, in world
+    metres, around landmarks built by hand inside which nothing mapped is drawn: a pagoda's own outline, a
+    bridge's deck and the lines along it, a whole plot re-built by hand. A disc for what stands in one place;
+    for a bridge, which is mapped as a line, a corridor from its middle for `half length` each way along
+    `angle`, `radius` to each side; for a row with `clearPoly` (lon/lat corners) the polygon itself, so that
+    the neighbours just outside it keep their houses."""
     data = json.loads((path or c.work / "landmarks.json").read_text(encoding="utf-8"))
     areas = []
     for row in data["landmarks"]:
         for item in [row, *row.get("parts", [])]:
+            if item.get("clearPoly"):
+                areas.append(("poly", shapely.Polygon([c.project(lon, lat) for lon, lat in item["clearPoly"]])))
+                continue
             if not item.get("clear"):
                 continue
             x, y = c.project(item["lon"], item["lat"])
@@ -53,6 +58,9 @@ def cleared_mask(cx, cy, areas):
     """Which of these points (world metres, arrays) lie in any of the areas of cleared_around()."""
     inside = numpy.zeros(len(cx), dtype=bool)
     for area in areas:
+        if area[0] == "poly":
+            inside |= shapely.contains_xy(area[1], cx, cy)
+            continue
         x, y, radius = area[:3]
         dx, dy = cx - x, cy - y
         if len(area) == 3:
@@ -113,6 +121,8 @@ def entry(c, osm, group, row):
     if row.get("kit"):
         # what is built by hand clears the ground around it; a landmark that is only flown to clears nothing
         item["kit"], item["clear"] = row["kit"], row.get("clear", 0)
+    if row.get("clearPoly"):
+        item["clearPoly"] = row["clearPoly"]    # the whole plot it stands on is built by hand
     if row.get("kit") and row.get("clear") and span is not None:
         item["clearSpan"] = round(float(span) + 2.0, 1)      # the whole length of the line the model stands on
     return item

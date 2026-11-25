@@ -26,7 +26,7 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 // painted in its own colours. It was not, for a while: the buildings' shader read every wall as the first
 // colour of the table (D048)
 const KIT_COLOURS = ['stone_pale', 'tile_dark', 'whitewash_aged', 'wood_dark', 'metal_pale', 'temple_red', 'paving', 'metal_dark', 'rail',
-  'concrete_pale', 'panel_white', 'pitch', 'concrete_grey', 'gild', 'glass_blue', 'glass_teal', 'tile_slate', 'window_dark', 'brick_red', 'plaster_cream'];
+  'concrete_pale', 'panel_white', 'pitch', 'concrete_grey', 'gild', 'glass_blue', 'glass_teal', 'tile_slate', 'window_dark', 'brick_red', 'plaster_cream', 'roof_flat_grey', 'water_lake'];
 const OWN_COLOUR_SHARE = 0.25;
 // per city: the landmarks whose view is deliberately not centred (a causeway runs across it; the Pearl's
 // standard shot stands aside on the Bund), and the least pixels a small built landmark has to show

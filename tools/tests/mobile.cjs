@@ -113,7 +113,7 @@ async function run(browser, device, name) {
   await move2(client, middle.x, middle.y, 60, shift.x, shift.y);
   await page.evaluate(() => window.__city.settle(30000));
   const turned = await page.evaluate(() => { const c = window.__city.camera; return { x: c.x, y: c.y, yaw: c.yaw, pitch: c.pitch, scale: c.scale }; });
-  check(Math.abs(turned.yaw - (centre.yaw - shift.x * 0.006)) < 1e-4, `${name}: two fingers moving together turn the view (${(turned.yaw - centre.yaw).toFixed(3)} rad, expected ${(-shift.x * 0.006).toFixed(3)})`);
+  check(Math.abs(turned.yaw - (centre.yaw + shift.x * 0.006)) < 1e-4, `${name}: two fingers moving together turn the view (${(turned.yaw - centre.yaw).toFixed(3)} rad, expected ${(shift.x * 0.006).toFixed(3)})`);
   check(Math.abs(turned.pitch - (centre.pitch + shift.y * 0.005)) < 1e-4, `${name}: two fingers moving together tilt the view (${(turned.pitch - centre.pitch).toFixed(3)} rad, expected ${(shift.y * 0.005).toFixed(3)})`);
   check(Math.abs(turned.x - centre.x) < 1e-3 && Math.abs(turned.y - centre.y) < 1e-3 && Math.abs(turned.scale - centre.scale) < 1e-5,
     `${name}: two fingers moving together do not move the map (${Math.hypot(turned.x - centre.x, turned.y - centre.y).toExponential(1)} m, scale ${(turned.scale - centre.scale).toExponential(1)})`);

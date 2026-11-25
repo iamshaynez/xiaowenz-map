@@ -689,3 +689,40 @@ export function eggHall(c, { width = 212, depth = 144, height = 46, steps = 14 }
   }
   return k;
 }
+
+// 绿城·汀岸芷兰轩, a finished estate the height data set never saw: the map has its plot but not one house
+// of it. Eighteen low-rise slabs of six to eleven storeys round a garden court — a pool, a kids' pool, a
+// hard court, a round pavilion with a white sculpture by it. Everything is laid out in metres from where
+// the landmark stands (the plot's middle), turned to the plot's own bearing (`angle`, from the satellite):
+// each building [u along the long axis, v across, width, depth, storeys]. The measures come off the
+// satellite, the storeys off the estate's own annotated 鸟瞰图 (18 幢 6–11 层). The courtyard's lawn is a
+// slab of its own: the land cover there still reads as the bare ground the construction site was.
+export function residentialCourt(c, { angle = 0, buildings = [], lawn = null, pool = null, kidsPool = null,
+    court = null, plaza = null, pavilion = null, sculptures = [] }) {
+  const k = new Kit();
+  const wall = k.part(c.silver, c.roof, 4), white = k.part(c.white, c.white), ground = k.part(c.path, c.path),
+        water = k.part(c.pond, c.pond), sport = k.part(c.court, c.court), lawnPart = k.part(c.grass, c.grass);
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  const spot = (u, v) => [u * ca - v * sa, u * sa + v * ca];
+  const slab = (part, where, h) => {
+    const [x, y] = spot(where[0], where[1]);
+    k.box(part, x, y, 0, where[2], where[3], h, angle);
+  };
+  if (lawn) slab(lawnPart, lawn, 1.5);
+  for (const [u, v, w, d, storeys] of buildings) slab(wall, [u, v, w, d], storeys * 3 + 0.9);
+  if (pool) slab(water, pool, 1.6);
+  if (kidsPool) slab(water, kidsPool, 1.55);
+  if (court) slab(sport, court, 1.62);
+  if (plaza) {
+    const [x, y] = spot(plaza[0], plaza[1]);
+    k.cap(ground, x, y, 1.62, plaza[2], 24);
+  }
+  if (pavilion) {
+    const [u, v, r, h] = pavilion, [x, y] = spot(u, v);
+    k.prism(white, x, y, 0, h * 0.66, r * 0.8, 12);
+    k.ring(white, x, y, r * 0.3, h, r, h * 0.6, 12);
+    k.cap(white, x, y, h, r * 0.3, 12);
+  }
+  for (const s of sculptures) slab(white, s, 2.6);
+  return k;
+}
