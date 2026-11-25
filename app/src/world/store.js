@@ -300,8 +300,9 @@ export class World {
 
   // the nearest walkable line of the road network to a point (the walking view's roads to drive on):
   // -> { tile, line, s, x, y, z, tx, ty } at the nearest point of the nearest line, or null.
-  // `exclude` leaves one line out (the one a car has just run off the end of).
-  roadsNear(x, y, radius = 60, classes = [5, 6, 7, 8, 9, 10], exclude = null) {
+  // `exclude` leaves one line out; `nearZ` keeps only lines that pass near this height, so that a car
+  // under a viaduct does not take the deck's height for its own.
+  roadsNear(x, y, radius = 60, classes = [5, 6, 7, 8, 9, 10], exclude = null, nearZ = null) {
     const { index } = this, size = index.tileSize;
     const tx0 = Math.floor(x / size) - index.ix0, ty0 = Math.floor(y / size) - index.iy0;
     const span = Math.ceil(radius / size) + 1;
@@ -317,9 +318,11 @@ export class World {
         const px = ax + dx * t, py = ay + dy * t;
         const d = Math.hypot(px - x, py - y);
         if (d < radius && (!best || d < best.d)) {
+          const z = pts[a + 2] + (pts[b + 2] - pts[a + 2]) * t;
+          if (nearZ !== null && Math.abs(z - nearZ) > 4) continue;
           const tx = len2 > 1e-6 ? dx / Math.sqrt(len2) : 1, ty = len2 > 1e-6 ? dy / Math.sqrt(len2) : 0;
           const s = pts[a + 3] + (pts[b + 3] - pts[a + 3]) * t;
-          best = { tile, line, s, x: px, y: py, z: pts[a + 2] + (pts[b + 2] - pts[a + 2]) * t, tx, ty, d };
+          best = { tile, line, s, x: px, y: py, z, tx, ty, d };
         }
       }
     };

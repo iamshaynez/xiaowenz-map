@@ -9,35 +9,16 @@
 const WALK_SPEED = 4.5;      // metres a second at a brisk walk
 const RUN_SPEED = 9;
 const STICK_RANGE = 55;      // frame pixels a touch joystick spans
-const EYE_BACK = 0.6;        // the walking camera rides just behind the player's head
-const EYE_HEIGHT = 1.7;
+const EYE_HEIGHT = 1.7;      // the walking camera's height at the player
 const CAR_ACCEL = 7, CAR_BRAKE = 13, CAR_DRAG = 2.2;
 const CAR_REVERSE = 6;
 const CAR_TOP = { 5: 15, 6: 12.5, 7: 10, 8: 9, 9: 7, 10: 6 };   // by class of road, metres a second
+const CAR_STEER = 1.9;       // radians a second at full lock and city speed
 const CHASE_BACK = 10.5, CHASE_UP = 4.4;                        // the driving camera, metres
 const LOOK_SENS = 0.0028;    // radians of view per pixel of mouse travel (pointer locked)
 const DRAG_SENS = 0.0042;    // the same for a held drag (touch, or a mouse without pointer lock)
 
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
-
-// the point and direction of a PATH line at a distance from its start (points: x, y, z, distance, tile-relative)
-function alongLine(points, s) {
-  const n = points.length / 4;
-  for (let i = 0; i < n - 1; i++) {
-    const a = i * 4, b = a + 4;
-    const from = points[a + 3], to = points[b + 3];
-    if (s <= to || i === n - 2) {
-      const t = to > from ? clamp((s - from) / (to - from), 0, 1) : 0;
-      const dx = points[b] - points[a], dy = points[b + 1] - points[a + 1];
-      const length = Math.hypot(dx, dy);
-      return {
-        x: points[a] + dx * t, y: points[a + 1] + dy * t, z: points[a + 2] + (points[b + 2] - points[a + 2]) * t,
-        tx: length > 1e-6 ? dx / length : 1, ty: length > 1e-6 ? dy / length : 0,
-      };
-    }
-  }
-  return { x: points[0], y: points[1], z: points[2], tx: 1, ty: 0 };
-}
 
 export class Walk {
   constructor({ camera, world, renderer, keys }) {
@@ -53,6 +34,7 @@ export class Walk {
     this.stick = null;             // the touch joystick, x right and y forward, in -1..1
     this.stickHome = null;
     this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
+    this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
     renderer.walk = this;
   }
 
@@ -151,22 +133,29 @@ export class Walk {
     } else {
       this.player.moving = false;
     }
-    // the camera rides at the player's head, a step behind it: turning the view turns in place, and
-    // looking up or down moves nothing but the look
-    camera.x = this.player.x - f.x * EYE_BACK;
-    camera.y = this.player.y - f.y * EYE_BACK;
-    camera.eyeZ = this.player.z + EYE_HEIGHT;
+    // the camera stands behind the player, at the distance the user chose: looking down raises it a
+    // little, like a boom, and a wall at its back pulls it in towards the player
+    const pitch = clamp(camera.pitch, -0.9, 1.35);
+    const tilt = Math.max(pitch, 0) * 0.75;
+    const cos = Math.cos(tilt), sin = Math.sin(tilt);
+    let d = this.camDist;
+    for (; d > 0.6; d -= 0.4) {
+      if (!this.world.solidAt(this.player.x - f.x * d * cos, this.player.y - f.y * d * cos)) break;
+    }
+    camera.x = this.player.x - f.x * d * cos;
+    camera.y = this.player.y - f.y * d * cos;
+    camera.eyeZ = Math.max(this.player.z + EYE_HEIGHT + d * sin, this.world.groundAt(camera.x, camera.y) + 0.7);
   }
 
   // ---- driving ----------------------------------------------------------------------------------------------
 
   // take the car that stands nearest (a car appears on the road at the player's feet)
   enterCar() {
-    const near = this.world.roadsNear(this.player.x, this.player.y, 45);
+    const near = this.world.roadsNear(this.player.x, this.player.y, 60);
     if (!near) { this.hud('附近没有路，走近一点再上车'); return false; }
-    const lane = Math.max(2, near.line.width * 1.05);
-    this.car = { tile: near.tile, line: near.line, s: near.s, lateral: clamp(lateralTo(near, this.player) , -lane, lane), speed: 0 };
+    this.car = { x: near.x, y: near.y, z: near.z, heading: Math.atan2(near.ty, near.tx), speed: 0, cls: near.line.cls };
     this.driving = true;
+    this.player.x = near.x; this.player.y = near.y; this.player.z = near.z;
     this.hud('W/S 油门刹车 · A/D 转向 · E 下车');
     document.getElementById('drive').textContent = '下车 E';
     return true;
@@ -174,14 +163,13 @@ export class Walk {
 
   exitCar() {
     if (!this.driving) return;
-    const p = this.carSpot();
-    const side = { x: p.ty, y: -p.tx };                    // out of the door, to the right of the way
-    let x = p.x + side.x * 3, y = p.y + side.y * 3;
-    if (this.world.solidAt(x, y)) { x = p.x - side.x * 3; y = p.y - side.y * 3; }
-    if (this.world.solidAt(x, y)) { x = p.x; y = p.y; }
+    const hx = Math.cos(this.car.heading), hy = Math.sin(this.car.heading);
+    let x = this.car.x + hy * 3, y = this.car.y - hx * 3;   // out of the door, to the right of the way
+    if (this.world.solidAt(x, y)) { x = this.car.x - hy * 3; y = this.car.y + hx * 3; }
+    if (this.world.solidAt(x, y)) { x = this.car.x; y = this.car.y; }
     this.player.x = x; this.player.y = y;
     this.player.z = this.world.groundAt(x, y);
-    this.player.heading = Math.atan2(p.ty, p.tx);
+    this.player.heading = this.car.heading;
     this.driving = false;
     this.car = null;
     this.camera.pitch = 0.42;
@@ -189,50 +177,57 @@ export class Walk {
     this.hud('WASD 走 · E 上车');
   }
 
-  // where the car stands now
-  carSpot() {
-    const car = this.car, p = alongLine(car.line.points, car.s);
-    const x = car.tile.x0 + p.x + p.ty * car.lateral, y = car.tile.y0 + p.y - p.tx * car.lateral;
-    return { x, y, z: p.z, tx: p.tx, ty: p.ty };
-  }
-
+  // one moment at the wheel: the car owns its heading (steering turns it, reversing turns the other
+  // way), the road only guides it — the nearest line gives the height, decks keep the car in their
+  // corridor, and buildings and water block it like they block a walker
   driveTick(dt, keys) {
     const car = this.car, camera = this.camera;
     const forward = keys.has('w') || keys.has('arrowup') || (this.stick && this.stick.y > 0.2);
     const back = keys.has('s') || keys.has('arrowdown') || (this.stick && this.stick.y < -0.2);
     const steer = (keys.has('a') || keys.has('arrowleft') || (this.stick && this.stick.x < -0.2) ? -1 : 0)
       + (keys.has('d') || keys.has('arrowright') || (this.stick && this.stick.x > 0.2) ? 1 : 0);
-    const top = Math.min(45, (CAR_TOP[car.line.cls] ?? 10) * this.speedScale);
+    const top = Math.min(45, (CAR_TOP[car.cls] ?? 10) * this.speedScale);
     if (forward) car.speed = Math.min(top, car.speed + CAR_ACCEL * dt);
     else if (back) car.speed = Math.max(-CAR_REVERSE, car.speed - CAR_BRAKE * dt);
     else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), CAR_DRAG * dt);
-    const lane = Math.max(2, car.line.width * 1.05);
-    car.lateral = clamp(car.lateral + steer * car.speed * dt * 0.6, -lane, lane);
-    car.s += car.speed * dt;
-    if (car.s >= car.line.length - 0.2) this.hopLine(1);
-    else if (car.s <= 0.2 && car.speed < 0) this.hopLine(-1);
-    const spot = this.carSpot();
-    this.player.x = spot.x; this.player.y = spot.y; this.player.z = spot.z;
-    this.player.heading = Math.atan2(spot.ty, spot.tx);
+    // turning needs way on, tightens at city speed and softens on the fast road; in reverse it swaps sides
+    const grip = clamp(Math.abs(car.speed) / 6, 0, 1) / (1 + Math.abs(car.speed) / 20);
+    car.heading += steer * CAR_STEER * grip * (car.speed < 0 ? -1 : 1) * dt;
+    const hx = Math.cos(car.heading), hy = Math.sin(car.heading);
+    let nx = car.x + hx * car.speed * dt, ny = car.y + hy * car.speed * dt;
+    if (this.world.solidAt(nx, ny)) {
+      // a wall: slide along it and lose way
+      if (!this.world.solidAt(nx, car.y)) ny = car.y;
+      else if (!this.world.solidAt(car.x, ny)) nx = car.x;
+      else { nx = car.x; ny = car.y; }
+      car.speed *= 0.55;
+    }
+    // the road under the wheels: the nearest line's level, a deck's corridor, and the deck's own height
+    const near = this.world.roadsNear(nx, ny, 12, [5, 6, 7, 8, 9, 10], null, car.z);
+    const ground = this.world.groundAt(nx, ny);
+    let z = ground;
+    if (near) {
+      if (near.z > ground + 2) {
+        // up on a deck: stay in its corridor, at its height
+        const dx = nx - near.x, dy = ny - near.y;
+        const lateral = clamp(dx * near.ty - dy * near.tx, -(near.line.width * 1.1 + 0.8), near.line.width * 1.1 + 0.8);
+        nx = near.x + near.ty * lateral;
+        ny = near.y - near.tx * lateral;
+        z = near.z;
+      } else if (Math.abs(near.z - ground) < 2) {
+        z = near.z;                            // right on the road
+      }
+    }
+    car.x = nx; car.y = ny; car.z = z;
+    this.player.x = nx; this.player.y = ny; this.player.z = z;
+    this.player.heading = car.heading;
     // the chase: an eye behind the boot, looking the way the car points
-    camera.yaw = this.camera.constructor.yawOf(spot.tx, spot.ty);
+    camera.yaw = camera.constructor.yawOf(hx, hy);
     camera.pitch = 0.24;
     const f = camera.walkForward();
-    camera.x = spot.x - f.x * CHASE_BACK;
-    camera.y = spot.y - f.y * CHASE_BACK;
-    camera.eyeZ = spot.z + CHASE_UP;
-  }
-
-  // the road ran out: take up the nearest other line ahead of (or behind) the car
-  hopLine(direction) {
-    const car = this.car;
-    const edge = direction > 0 ? car.line.length - 0.2 : 0.2;
-    const p = alongLine(car.line.points, edge);
-    const wx = car.tile.x0 + p.x, wy = car.tile.y0 + p.y;
-    const probe = { x: wx + p.tx * direction * 40, y: wy + p.ty * direction * 40 };
-    const next = this.world.roadsNear(probe.x, probe.y, 80, [5, 6, 7, 8, 9, 10], car.line);
-    if (!next) { car.s = clamp(car.s, 0.2, car.line.length - 0.2); car.speed = 0; this.hud('前面没路了，掉个头（A/D 一边倒着转）'); return; }
-    car.tile = next.tile; car.line = next.line; car.s = next.s; car.lateral = 0;
+    camera.x = nx - f.x * CHASE_BACK;
+    camera.y = ny - f.y * CHASE_BACK;
+    camera.eyeZ = z + CHASE_UP;
   }
 
   // ---- the player among the traffic -------------------------------------------------------------------------
@@ -278,6 +273,15 @@ export class Walk {
     this.hud();
   }
 
+  // the camera's stand behind the player, 2 to 6 metres
+  camDistStep(farther) {
+    const steps = [2, 2.5, 3, 3.5, 4, 5, 6];
+    const at = steps.findIndex(v => v >= this.camDist - 1e-6);
+    const next = farther ? Math.min(steps.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1);
+    this.camDist = steps[at === -1 ? 0 : next];
+    this.hud();
+  }
+
   // a drag on the canvas of the walking view: on the left of the screen a touch joystick (mode 'stick',
   // x and y the pointer's place), anywhere else a look around (dx, dy its motion since the last report)
   beginDrag(mode, x, y) {
@@ -313,7 +317,7 @@ export class Walk {
   hud(text) {
     this.hudText = text ?? this.hudText ?? '';
     const el = document.getElementById('walkhint');
-    if (el) el.textContent = `${this.hudText} · 速度 ×${this.speedScale.toFixed(1)}`;
+    if (el) el.textContent = `${this.hudText} · 速度 ×${this.speedScale.toFixed(1)} · 镜头 ${this.camDist.toFixed(1)} 米`;
   }
 
   // the drive button says what it would do from here, and says nothing while it cannot
@@ -325,10 +329,4 @@ export class Walk {
     button.disabled = !near;
     button.textContent = '上车 E';
   }
-}
-
-// the lateral offset a car would need to stand at the player's place on a line
-function lateralTo(near, player) {
-  const dx = player.x - near.x, dy = player.y - near.y;
-  return dx * near.ty - dy * near.tx;
 }

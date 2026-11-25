@@ -264,6 +264,11 @@ async function boot() {
       e.preventDefault();
       return;
     }
+    if (walk.active && (key === '[' || key === ']')) {
+      if (!e.repeat) walk.camDistStep(key === ']');
+      e.preventDefault();
+      return;
+    }
     if (key === 'g' || (walk.active && key === 'escape' && !document.pointerLockElement)) {
       // 指针锁定时 Esc 由浏览器解锁鼠标，先不解散行走
       if (!e.repeat) {
@@ -320,6 +325,10 @@ async function boot() {
   });
   const drive = document.getElementById('drive');
   if (drive) drive.addEventListener('click', () => walk.key('e'));
+  const camcloser = document.getElementById('camcloser');
+  if (camcloser) camcloser.addEventListener('click', () => walk.camDistStep(false));
+  const camfarther = document.getElementById('camfarther');
+  if (camfarther) camfarther.addEventListener('click', () => walk.camDistStep(true));
   const walkback = document.getElementById('walkback');
   if (walkback) walkback.addEventListener('click', () => walk.exit());
 
