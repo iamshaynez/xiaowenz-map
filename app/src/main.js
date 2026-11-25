@@ -154,7 +154,13 @@ async function boot() {
     const at = toFrame(e);
     pointers.set(e.pointerId, at);
     if (walk.active) {
-      // walking: on the left of the screen the touch joystick holds, anywhere else the view is looked around
+      // walking: a mouse is locked to the view (the browser hands the raw motion over, Esc unlocks it);
+      // a touch drives the view by drag, and the left of the screen holds the joystick
+      if (e.pointerType === 'mouse' && !document.pointerLockElement && canvas.requestPointerLock) {
+        const locked = canvas.requestPointerLock();
+        if (locked && locked.catch) locked.catch(() => {});
+        return;
+      }
       const mode = at.x < width * 0.3 && e.pointerType !== 'mouse' ? 'stick' : 'look';
       drag = { walk: mode };
       walk.beginDrag(mode, at.x, at.y);
@@ -162,6 +168,10 @@ async function boot() {
     }
     if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(at) };
     if (pointers.size === 2) pinch = { ...pinchState(), height: surfaceAt(pinchState()) };
+  });
+  // the locked mouse's raw motion: the view follows it, no button held
+  document.addEventListener('mousemove', e => {
+    if (walk.active && document.pointerLockElement === canvas) walk.look(e.movementX, e.movementY);
   });
   // the right button is for turning the view: it brings no menu of its own
   canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -174,7 +184,8 @@ async function boot() {
     const was = pointers.get(e.pointerId), now = toFrame(e);
     pointers.set(e.pointerId, now);
     if (walk.active) {
-      if (drag?.walk) walk.drag(drag.walk, now.x, now.y, (now.x - was.x) * pixelScale, (now.y - was.y) * pixelScale);
+      // with the mouse locked in, the view is already driven by the raw mousemove above
+      if (drag?.walk && document.pointerLockElement !== canvas) walk.drag(drag.walk, now.x, now.y, (now.x - was.x) * pixelScale, (now.y - was.y) * pixelScale);
       dirty = true;
       return;
     }
@@ -212,7 +223,11 @@ async function boot() {
   canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    if (walk.active) return;                         // the walking view has no zoom to offer
+    if (walk.active) {
+      walk.speedBy(e.deltaY);                        // walking: the wheel sets the pace
+      dirty = true;
+      return;
+    }
     // not applied here: the zoom holds on to what the frame on show draws under the cursor, so it is done
     // just before the next frame is drawn (see the loop), and turns that pile up between two frames are
     // done together
@@ -244,7 +259,13 @@ async function boot() {
     // not the keys of a box to write in: those are that box's own
     if (e.metaKey || e.ctrlKey || e.altKey || (e.target instanceof Element && e.target.closest('input, textarea'))) return;
     const key = e.key.toLowerCase();
-    if (key === 'g' || (walk.active && key === 'escape')) {
+    if (walk.active && (key === '=' || key === '+' || key === '-')) {
+      if (!e.repeat) walk.speedStep(key === '-');
+      e.preventDefault();
+      return;
+    }
+    if (key === 'g' || (walk.active && key === 'escape' && !document.pointerLockElement)) {
+      // 指针锁定时 Esc 由浏览器解锁鼠标，先不解散行走
       if (!e.repeat) {
         const go = document.getElementById('walkgo');
         if (walk.toggle() === false) {

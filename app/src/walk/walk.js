@@ -6,14 +6,17 @@
 //
 // 操控：WASD/方向键 走或开 · Shift 跑 · 拖动 环顾（触屏左半边是摇杆）· E 上/下车 · G 或 Esc 回地图。
 
-const WALK_SPEED = 1.7;      // metres a second at a stroll
-const RUN_SPEED = 4.4;
+const WALK_SPEED = 4.5;      // metres a second at a brisk walk
+const RUN_SPEED = 9;
 const STICK_RANGE = 55;      // frame pixels a touch joystick spans
-const CAM_BACK = 4.8;        // metres the walking camera stands behind its player
+const EYE_BACK = 0.6;        // the walking camera rides just behind the player's head
+const EYE_HEIGHT = 1.7;
 const CAR_ACCEL = 7, CAR_BRAKE = 13, CAR_DRAG = 2.2;
 const CAR_REVERSE = 6;
 const CAR_TOP = { 5: 15, 6: 12.5, 7: 10, 8: 9, 9: 7, 10: 6 };   // by class of road, metres a second
 const CHASE_BACK = 10.5, CHASE_UP = 4.4;                        // the driving camera, metres
+const LOOK_SENS = 0.0028;    // radians of view per pixel of mouse travel (pointer locked)
+const DRAG_SENS = 0.0042;    // the same for a held drag (touch, or a mouse without pointer lock)
 
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 
@@ -48,6 +51,8 @@ export class Walk {
     this.player = { x: 0, y: 0, z: 0, heading: 0, moving: false };
     this.car = null;               // { tile, line, s, lateral, speed }
     this.stick = null;             // the touch joystick, x right and y forward, in -1..1
+    this.stickHome = null;
+    this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
     renderer.walk = this;
   }
 
@@ -56,6 +61,11 @@ export class Walk {
   // enter at a point of the world, nudged onto the nearest ground a walker can stand on
   enterAt(x, y) {
     const camera = this.camera;
+    // 没有瓦片的地方（区域之外、还没载入的角落）落不下脚：那里既没有地面可站，也没有墙可靠
+    const bounds = this.world.index.bounds, [west, south, east, north] = bounds;
+    if (x < west - 300 || x > east + 300 || y < south - 300 || y > north + 300) return false;
+    const tile = this.world.tileAt(x, y);
+    if (!tile) return false;                 // the tile that holds the spot has not loaded yet
     const free = (px, py) => !this.world.solidAt(px, py);
     if (!free(x, y)) {
       let found = null;
@@ -78,7 +88,7 @@ export class Walk {
     camera.pitch = 0.42;
     document.body.classList.add('walking');
     document.getElementById('walkhud').hidden = false;
-    this.hud('WASD 走 · Shift 跑 · 拖动环顾');
+    this.hud('WASD 走 · Shift 跑 · 滚轮/+- 调速 · 点击画面锁定鼠标看四周 · Esc 解锁');
     return true;
   }
 
@@ -125,7 +135,7 @@ export class Walk {
     const length = Math.hypot(mx, my);
     if (length > 0) {
       mx /= length; my /= length;
-      const speed = keys.has('shift') ? RUN_SPEED : WALK_SPEED;
+      const speed = (keys.has('shift') ? RUN_SPEED : WALK_SPEED) * this.speedScale;
       let nx = this.player.x + mx * speed * dt, ny = this.player.y + my * speed * dt;
       // the walls: a step is taken only onto free ground, sliding along what blocks it
       const solid = this.world.solidAt(nx, ny);
@@ -141,13 +151,11 @@ export class Walk {
     } else {
       this.player.moving = false;
     }
-    // the camera stands behind the player's shoulder and looks at his head
-    const pitch = clamp(camera.pitch, -0.45, 1.2);
-    const slant = 0.5 + pitch * 0.6;                       // how high the eye rides as the view tilts down
-    const back = CAM_BACK * Math.cos(slant);
-    camera.x = this.player.x - f.x * back;
-    camera.y = this.player.y - f.y * back;
-    camera.eyeZ = this.player.z + 1.7 + CAM_BACK * Math.sin(slant) + Math.max(0, pitch) * 1.5;
+    // the camera rides at the player's head, a step behind it: turning the view turns in place, and
+    // looking up or down moves nothing but the look
+    camera.x = this.player.x - f.x * EYE_BACK;
+    camera.y = this.player.y - f.y * EYE_BACK;
+    camera.eyeZ = this.player.z + EYE_HEIGHT;
   }
 
   // ---- driving ----------------------------------------------------------------------------------------------
@@ -194,7 +202,7 @@ export class Walk {
     const back = keys.has('s') || keys.has('arrowdown') || (this.stick && this.stick.y < -0.2);
     const steer = (keys.has('a') || keys.has('arrowleft') || (this.stick && this.stick.x < -0.2) ? -1 : 0)
       + (keys.has('d') || keys.has('arrowright') || (this.stick && this.stick.x > 0.2) ? 1 : 0);
-    const top = CAR_TOP[car.line.cls] ?? 10;
+    const top = Math.min(45, (CAR_TOP[car.line.cls] ?? 10) * this.speedScale);
     if (forward) car.speed = Math.min(top, car.speed + CAR_ACCEL * dt);
     else if (back) car.speed = Math.max(-CAR_REVERSE, car.speed - CAR_BRAKE * dt);
     else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), CAR_DRAG * dt);
@@ -250,6 +258,26 @@ export class Walk {
 
   // ---- input -------------------------------------------------------------------------------------------------
 
+  // the view follows the mouse: right turns right, down looks down
+  look(dx, dy) {
+    this.camera.yaw += dx * LOOK_SENS;
+    this.camera.pitch = clamp(this.camera.pitch + dy * LOOK_SENS, -0.9, 1.35);
+  }
+
+  // the pace: a turn of the wheel or a press of +/− multiplies it
+  speedBy(delta) {
+    this.speedScale = clamp(this.speedScale * Math.exp(-delta * 0.0011), 0.5, 6);
+    this.hud();
+  }
+
+  speedStep(up) {
+    const steps = [0.5, 1, 1.5, 2, 3, 4, 6];
+    const at = steps.findIndex(v => v >= this.speedScale - 1e-6);
+    const next = up ? Math.min(steps.length - 1, at + 1) : Math.max(0, at - 1);
+    this.speedScale = steps[at === -1 ? steps.length - 1 : next];
+    this.hud();
+  }
+
   // a drag on the canvas of the walking view: on the left of the screen a touch joystick (mode 'stick',
   // x and y the pointer's place), anywhere else a look around (dx, dy its motion since the last report)
   beginDrag(mode, x, y) {
@@ -265,8 +293,8 @@ export class Walk {
         y: clamp((this.stickHome.y - y) / STICK_RANGE, -1, 1),
       };
     } else {
-      this.camera.yaw += dx * 0.005;
-      this.camera.pitch = clamp(this.camera.pitch - dy * 0.004, -0.45, 1.2);
+      this.camera.yaw += dx * DRAG_SENS;
+      this.camera.pitch = clamp(this.camera.pitch + dy * DRAG_SENS, -0.9, 1.35);
     }
   }
 
@@ -283,8 +311,9 @@ export class Walk {
   // ---- the words on the screen ------------------------------------------------------------------------------
 
   hud(text) {
+    this.hudText = text ?? this.hudText ?? '';
     const el = document.getElementById('walkhint');
-    if (el) el.textContent = text;
+    if (el) el.textContent = `${this.hudText} · 速度 ×${this.speedScale.toFixed(1)}`;
   }
 
   // the drive button says what it would do from here, and says nothing while it cannot
