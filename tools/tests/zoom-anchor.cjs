@@ -7,9 +7,9 @@
 // right corner). And the anchor was the point at ground level under the cursor, so whatever stood on that
 // ground (a hill, a tall roof) slid up the page as the zoom came in.
 //
-// Checked on the default pixel size of a desktop page (two CSS pixels to a frame pixel), with the cursor on
-// a roof, on a hill with nothing on it, and on the lake; zooming in and out; and once at a page where a
-// frame pixel is one CSS pixel.
+// Checked on the default pixel size of a desktop page (细: one CSS pixel to a frame pixel), with the cursor
+// on a roof, on a hill with nothing on it, and on the lake; zooming in and out; once at a page where a
+// frame pixel is two CSS pixels (?px=1, the old default), and once where it is one (a small page).
 //
 // Usage: NODE_PATH="$(npm root -g)" node tools/tests/zoom-anchor.cjs
 const { chromium } = require('playwright');
@@ -47,15 +47,15 @@ async function zoomUnder(page, point, deltaY) {
   return { moved: Math.hypot(after.sx - at.sx, after.sy - at.sy), from: at.scale, to: after.scale, gl: after.errors };
 }
 
-async function run(browser, viewport, name, checks) {
+async function run(browser, viewport, name, checks, query = '', expectedCss = 1) {
   const page = await browser.newPage({ viewport });
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-  await page.goto(`http://127.0.0.1:${PORT}/hz`);
+  await page.goto(`http://127.0.0.1:${PORT}/hz${query}`);
   await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60000 });
   const css = await page.evaluate(() => document.getElementById('c').clientWidth / document.getElementById('c').width);
-  check(css === viewport.width / 960, `${name}: each of the frame's pixels is shown as ${css} CSS pixels`);
+  check(css === expectedCss, `${name}: each of the frame's pixels is shown as ${css} CSS pixels`);
   const rows = [];
   let point = null;
   for (const [label, setup, deltaY] of checks) {
@@ -122,7 +122,7 @@ const TO_LAKE = async () => {
       await wait(200);
     }
     browser = await chromium.launch({ executablePath: CHROME, headless: true });
-    // a desktop page: 1920 x 1080, the frame 960 x 540, two CSS pixels to a frame pixel
+    // a desktop page: 1920 x 1080, the frame as wide as the page (细, the default), one CSS pixel to a frame pixel
     await run(browser, { width: 1920, height: 1080 }, 'desktop', [
       ['the top of Leifeng Pagoda', TO_LEIFENG_TOP, -300],
       ['the top of Leifeng Pagoda', null, 300],
@@ -130,6 +130,11 @@ const TO_LAKE = async () => {
       ['the bare hilltop', null, 300],
       ['whatever is over the lake', TO_LAKE, -300],
     ]);
+    // the same page at the old default (?px=1): the frame 960 x 540, two CSS pixels to a frame pixel
+    await run(browser, { width: 1920, height: 1080 }, 'desktop ?px=1', [
+      ['the top of Leifeng Pagoda', TO_LEIFENG_TOP, -300],
+      ['a bare hilltop', TO_HILL, -300],
+    ], '?px=1', 2);
     // a small page: 960 x 540, one CSS pixel to a frame pixel
     await run(browser, { width: 960, height: 540 }, 'small', [
       ['the top of Leifeng Pagoda', TO_LEIFENG_TOP, -300],

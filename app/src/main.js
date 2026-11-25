@@ -29,10 +29,10 @@ async function boot() {
     const { bootHome } = await import('./home/main.js');
     return bootHome();
   }
-  // how big a pixel is on the page: the middle size keeps the frame within 960 x 540, the fine one has
-  // half the pixels of that each way, the coarse one twice; ?px= overrides for tests
+  // how big a pixel is on the page: the frame is cut into auto−1+size screen pixels (细, the default,
+  // is one notch finer than the 960 x 540 middle); ?px= overrides for tests
   const auto = Math.max(1, Math.ceil(Math.max(innerWidth / MAX_WIDTH, innerHeight / MAX_HEIGHT)));
-  const size = Number(new URLSearchParams(location.search).get('px') ?? localStorage.getItem('pixel-size') ?? 1);
+  const size = Number(new URLSearchParams(location.search).get('px') ?? localStorage.getItem('pixel-size') ?? 0);
   const pixelScale = Math.max(1, Math.min(auto - 1 + size, Math.floor(innerWidth / MIN_WIDTH)));
   const width = Math.max(160, Math.floor(innerWidth / pixelScale)), height = Math.max(120, Math.floor(innerHeight / pixelScale));
   const canvas = document.getElementById('c'), $ = id => document.getElementById(id);
@@ -177,6 +177,7 @@ async function boot() {
       walkLast.set(e.pointerId, page);
       if (role === 'stick') walk.beginStick(page.x, page.y);
       else walk.beginLook();
+      if (e.pointerType !== 'mouse') walk.tapPlayer(at.x, at.y);   // 点在人物身上：双击的第二记发射激光
       return;
     }
     if (pointers.size === 1) drag = { turn: turns(e), height: surfaceAt(at) };
@@ -290,6 +291,11 @@ async function boot() {
     }
     if (walk.active && (key === '[' || key === ']')) {
       if (!e.repeat) walk.camDistStep(key === ']');
+      e.preventDefault();
+      return;
+    }
+    if (walk.active && key === ' ') {
+      if (!e.repeat) walk.fire();                    // 步行的彩蛋：一条随机方向的黄色激光
       e.preventDefault();
       return;
     }

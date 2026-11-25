@@ -1,8 +1,11 @@
 // 走进城市：在地图上操作、行走的体验。三个形态共用这一个入口（main.js 的 G 键和工具按钮）：
 //   环视  落在街上，拖动环顾，贴地透视的眼睛（city-camera 的 walking 字段和 GLSL 的 uWalk 分支）；
-//   行走  第三人称小人在街上走，避开楼和水面（store.js 的碰撞栅格），车流与行人照常来往；
+//   行走  第三人称在街上走，避开楼和水面（store.js 的碰撞栅格），车流与行人照常来往；
 //   驾驶  在路上按 E 上一辆车，沿路网（瓦片的 PATH 线）街机式开，走高架随其剖面，再按 E 下车。
-// 玩家不是特别的渲染：他就是交通系统（life/traffic.js）里的一个行人，开车时是一辆车。
+// 步行的人物是一位小小的奥特曼（place()：银身红纹、红肩甲、高筒红靴、头鳍、黄眼睛、胸口的
+// 彩色计时器，还是交通系统（life/traffic.js）的实例盒子拼的）；开车时是一辆红色小跑车。
+// 彩蛋：步行时网页按空格、手机双击人物，他从胸口放出一条黄色激光——方向随机，撞到楼、水和
+// 地面就随机拐个弯，拐满几次或时辰到了，光就从头到尾收散（shaders-life.js 给它全亮的黄）。
 //
 // 操控：WASD/方向键 走或开 · Shift 跑 · 点击画面锁鼠标看四周 · E 上/下车 · G 或 Esc 回地图。
 // 触屏（手机版 GTA 的手势）：左半边按住出摇杆，推到底是跑；右半边拖动看四周；右下圆钮上/下车，
@@ -22,6 +25,14 @@ const CAR_LOOK_BACK = 2.4;   // how fast the driving view eases back to the car'
 const CHASE_BACK = 10.5, CHASE_UP = 4.4;                        // the driving camera, metres
 const LOOK_SENS = 0.0028;    // radians of view per pixel of mouse travel (pointer locked)
 const DRAG_SENS = 0.005;     // the same for a held drag (touch, or a mouse without pointer lock)
+const LASER_SPEED = 240;     // metres a second, the beam flies at
+const LASER_LIFE = 3.5;      // seconds before a beam stops and draws itself back in
+const LASER_BOUNCES = 12;    // turns a beam may take before it dies
+const LASER_STEP = 3;        // metres between wall probes, so a thin wall is not jumped over
+const LASER_GAP = 14;        // metres between the trail points a beam is drawn between
+const LASER_THICK = 0.5;     // metres of the beam's box
+const LASER_MAX = 7;         // beams alive at once
+const TAP_WINDOW = 420;      // milliseconds between the two taps of a double-tap
 
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 
@@ -85,6 +96,9 @@ export class Walk {
     this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
     this.cycle = 0;                // the walk cycle: legs and arms swing with it
     this.step = 0;                 // 0 standing, 1 walking, eased between
+    this.lasers = [];              // the easter egg's beams in flight
+    this.lastTap = 0;              // when the last tap on the player landed, for the mobile double-tap
+    this.bounds = world.index.bounds;
     this.mapCanvas = document.getElementById('minimap');
     this.mapCtx = this.mapCanvas?.getContext('2d') ?? null;
     this.stickEl = document.getElementById('stick');
@@ -115,7 +129,7 @@ export class Walk {
       x = found.x; y = found.y;
     }
     this.saved = { x: camera.x, y: camera.y, scale: camera.scale, pitch: camera.pitch, yaw: camera.yaw };
-    this.player = { x, y, z: this.world.groundAt(x, y), heading: this.player.heading ?? 0, moving: false };
+    this.player = { x, y, z: this.standZ(x, y), heading: this.player.heading ?? 0, moving: false };
     this.driving = false;
     this.car = null;
     this.active = true;
@@ -143,6 +157,7 @@ export class Walk {
     this.active = false;
     this.driving = false;
     this.car = null;
+    this.lasers = [];
     this.endStick();
     this.lookHeld = 0;
     this.carLook = { yaw: 0, pitch: 0.24 };
@@ -160,10 +175,21 @@ export class Walk {
 
   // ---- one moment -------------------------------------------------------------------------------------------
 
+  // the height to stand on: the ground, lifted onto a road ribbon when one is underfoot — the bake
+  // draws its roads a hand's width above the terrain grid, and the walker stands on the ribbon the
+  // way the traffic's own walkers do, not ankle-deep in it. Decks pass overhead; their z is too far
+  // up to count here
+  standZ(x, y) {
+    const ground = this.world.groundAt(x, y);
+    const near = this.world.roadsNear(x, y, 2.2, [5, 6, 7, 8, 9, 10], null, null);
+    return near && near.z > ground - 0.5 && near.z < ground + 1.2 ? Math.max(ground, near.z) : ground;
+  }
+
   tick(dt) {
     const keys = this.keys;
     if (this.driving) this.driveTick(dt, keys);
     else this.walkTick(dt, keys);
+    this.tickLasers(dt);
     this.hudRoad();
     this.drawMinimap();
   }
@@ -437,11 +463,11 @@ export class Walk {
 
   // ---- the player among the traffic -------------------------------------------------------------------------
 
-  // called by the renderer every frame it draws the walking view: the player is one more box of the
-  // traffic's own (a figure of three boxes on foot, a taxi at the wheel)
   // called by the renderer every frame it draws the walking view. The player is not the plain box the
-  // passers-by are: on foot he is a little hero in a red cap whose legs and arms swing as he walks, and
-  // at the wheel he drives a red roadster — four wheels, a spoiler, lamps, and a little flag on the roof.
+  // passers-by are: on foot he is a little Ultraman — silver body, red shoulders, boots, gloves and
+  // trunks, a crest of three fins on the head, big yellow eyes, and the blue colour timer on the chest —
+  // and at the wheel he drives a red roadster — four wheels, a spoiler, lamps, and a little flag on the
+  // roof. The beams in flight are drawn here too, one box between each pair of trail points.
   place(traffic, colours) {
     const p = this.player;
     const hx = Math.cos(p.heading), hy = Math.sin(p.heading);
@@ -470,15 +496,129 @@ export class Walk {
       at(1.0, -0.3, p.z + 1.6, 0.52, 0.05, 0.3, RED, RED, 7);                 // 车顶小旗
     } else {
       const s = Math.sin(this.cycle) * this.step, bob = Math.abs(Math.cos(this.cycle)) * this.step * 0.04;
-      at(0, 0, p.z + 0.5 + bob, 0.5, 0.56, 0.64, BLUE, BLUE, 8, true);        // 衣
-      at(s * 0.24, -0.14, p.z + 0.03 + Math.max(0, s) * 0.05, 0.44, 0.16, 0.52, DARK, DARK, 8, true);   // 左腿
-      at(-s * 0.24, 0.14, p.z + 0.03 + Math.max(0, -s) * 0.05, 0.44, 0.16, 0.52, DARK, DARK, 8, true);  // 右腿
-      at(-s * 0.2, -0.37, p.z + 0.6, 0.16, 0.16, 0.5, SKIN, SKIN, 8, true);   // 左臂（与左腿反相）
-      at(s * 0.2, 0.37, p.z + 0.6, 0.16, 0.16, 0.5, SKIN, SKIN, 8, true);     // 右臂
-      at(0, 0, p.z + 1.28 + bob, 0.36, 0.36, 0.36, SKIN, SKIN, 9, true);      // 头
-      at(0, 0, p.z + 1.6 + bob, 0.42, 0.42, 0.16, RED, RED, 9, true);         // 帽
-      at(0.27, 0, p.z + 1.57 + bob, 0.2, 0.38, 0.09, RED, RED, 9, true);      // 帽舌
+      const liftL = Math.max(0, s) * 0.05, liftR = Math.max(0, -s) * 0.05;
+      // 腿与靴：银腿随步子摆，红靴是到膝的高筒靴，下沿探进地里两成，路面稍高时也切不到腿
+      at(s * 0.26, -0.14, p.z + 0.2 + liftL, 0.17, 0.17, 0.52, SILVER, SILVER, 8, true);          // 左腿
+      at(-s * 0.26, 0.14, p.z + 0.2 + liftR, 0.17, 0.17, 0.52, SILVER, SILVER, 8, true);          // 右腿
+      at(s * 0.28, -0.14, p.z - 0.2 + liftL, 0.36, 0.19, 0.52, RED, RED, 8, true);                 // 左靴
+      at(-s * 0.28, 0.14, p.z - 0.2 + liftR, 0.36, 0.19, 0.52, RED, RED, 8, true);                 // 右靴
+      // 躯干：银身、红短裤、红肩甲带一道银胸甲，胸甲正中嵌着蓝色的彩色计时器
+      at(0, 0, p.z + 0.66 + bob, 0.32, 0.5, 0.18, RED, RED, 8, true);                             // 红短裤
+      at(0, 0, p.z + 0.8 + bob, 0.3, 0.56, 0.42, SILVER, SILVER, 8, true);                        // 银胸腹
+      at(0, 0, p.z + 1.16 + bob, 0.34, 0.62, 0.26, RED, RED, 8, true);                            // 红肩甲
+      at(0.16, 0, p.z + 1.16 + bob, 0.12, 0.3, 0.26, SILVER, SILVER, 8, true);                    // 银胸甲
+      at(0.21, 0, p.z + 1.24 + bob, 0.06, 0.1, 0.1, BLUE, BLUE, 11, true);                        // 彩色计时器
+      // 臂与手套：整臂是红的，手是一对略大的红手套，摆臂与摆腿反相
+      at(-s * 0.2, -0.38, p.z + 0.92 + bob, 0.16, 0.16, 0.5, RED, RED, 8, true);                  // 左臂
+      at(s * 0.2, 0.38, p.z + 0.92 + bob, 0.16, 0.16, 0.5, RED, RED, 8, true);                    // 右臂
+      at(-s * 0.2, -0.38, p.z + 0.78 + bob, 0.18, 0.18, 0.16, RED, RED, 8, true);                 // 左手
+      at(s * 0.2, 0.38, p.z + 0.78 + bob, 0.18, 0.18, 0.16, RED, RED, 8, true);                   // 右手
+      // 头：银头、一对黄眼睛、后掠的三片头鳍
+      at(0, 0, p.z + 1.4 + bob, 0.14, 0.14, 0.1, SILVER, SILVER, 9, true);                        // 颈
+      at(0, 0, p.z + 1.46 + bob, 0.32, 0.34, 0.4, SILVER, SILVER, 9, true);                       // 头
+      at(0.17, -0.08, p.z + 1.64 + bob, 0.06, 0.09, 0.08, YELLOW, YELLOW, 11, true);              // 左眼
+      at(0.17, 0.08, p.z + 1.64 + bob, 0.06, 0.09, 0.08, YELLOW, YELLOW, 11, true);               // 右眼
+      at(-0.08, 0, p.z + 1.86 + bob, 0.44, 0.05, 0.11, SILVER, SILVER, 9, true);                  // 中央头鳍
+      at(-0.12, -0.1, p.z + 1.86 + bob, 0.32, 0.03, 0.08, SILVER, SILVER, 9, true);               // 左头鳍
+      at(-0.12, 0.1, p.z + 1.86 + bob, 0.32, 0.03, 0.08, SILVER, SILVER, 9, true);                // 右头鳍
     }
+    // the beams: one yellow box between each pair of trail points, pitched as the trail rises and falls
+    const beam = colours[YELLOW];
+    for (const b of this.lasers) {
+      const pts = b.dead ? b.trail : b.trail.concat([{ x: b.x, y: b.y, z: b.z }]);
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], c = pts[i];
+        const dx = c.x - a.x, dy = c.y - a.y, dz = c.z - a.z;
+        const flat = Math.hypot(dx, dy);
+        if (flat < 0.05) continue;
+        traffic.box((a.x + c.x) / 2, (a.y + c.y) / 2, (a.z + c.z) / 2 - LASER_THICK / 2, dx / flat, dy / flat,
+          flat, LASER_THICK, LASER_THICK, beam, beam, 10, Math.atan2(dz, flat));
+      }
+    }
+  }
+
+  // ---- the easter egg: a beam of yellow light --------------------------------------------------------------
+  // 步行时按空格（网页）或双击人物（手机）：一条激光从胸口放出，方向随机。它直着飞，撞到碰撞栅格
+  // 里的楼和水、撞到地面、或飞出地图，就随机拐个弯（拐弯处留在拖尾上，光看得见折角）；拐满
+  // LASER_BOUNCES 次或时辰到了，光停住，从头到尾收回散去
+  fire() {
+    if (!this.active || this.driving) return false;
+    const p = this.player;
+    this.lasers.push({ x: p.x, y: p.y, z: p.z + 1.3, yaw: Math.random() * Math.PI * 2,
+      pitch: Math.random() * 0.3 - 0.15, life: LASER_LIFE, bounces: 0, gone: 0, fade: 0, dead: false,
+      trail: [{ x: p.x, y: p.y, z: p.z + 1.3 }] });
+    while (this.lasers.length > LASER_MAX) this.lasers.shift();
+    return true;
+  }
+
+  tickLasers(dt) {
+    const [west, south, east, north] = this.bounds;
+    for (let k = this.lasers.length - 1; k >= 0; k--) {
+      const b = this.lasers[k];
+      if (b.dead) {
+        // the beam draws itself back in from the tail, at the speed it flew
+        b.fade += LASER_SPEED * dt;
+        while (b.fade >= LASER_GAP && b.trail.length) { b.fade -= LASER_GAP; b.trail.shift(); }
+        if (!b.trail.length) this.lasers.splice(k, 1);
+        continue;
+      }
+      b.life -= dt;
+      if (b.life <= 0) { b.dead = true; continue; }
+      let gone = LASER_SPEED * dt;
+      while (gone > 0) {
+        const step = Math.min(LASER_STEP, gone);
+        gone -= step;
+        const cp = Math.cos(b.pitch), dx = Math.cos(b.yaw) * cp, dy = Math.sin(b.yaw) * cp, dz = Math.sin(b.pitch);
+        const nx = b.x + dx * step, ny = b.y + dy * step, nz = b.z + dz * step;
+        const outside = nx < west - 60 || nx > east + 60 || ny < south - 60 || ny > north + 60;
+        if (outside || this.world.solidAt(nx, ny) || nz < this.world.groundAt(nx, ny)) {
+          if (outside || ++b.bounces > LASER_BOUNCES) { b.dead = true; break; }
+          // 撞上了：拐个随机的弯，弯处留在拖尾上。先试几个方向，挑一个两步之内不再撞的，免得原地打转；
+          // 俯仰压着贴街飞——飞高了往下带，快落地了往上抬，光在街谷里乱窜，不窜上天去
+          b.trail.push({ x: b.x, y: b.y, z: b.z });
+          if (b.trail.length > 12) b.trail.shift();
+          b.gone = 0;
+          let turned = false;
+          for (let t = 0; t < 8 && !turned; t++) {
+            const steer = b.z > 10 ? -0.1 : b.z < 2.5 ? 0.08 : 0;
+            const yaw = Math.random() * Math.PI * 2;
+            const pitch = Math.random() * 0.36 - 0.18 + steer;
+            const cp = Math.cos(pitch);
+            const px = b.x + Math.cos(yaw) * cp * LASER_STEP * 2;
+            const py = b.y + Math.sin(yaw) * cp * LASER_STEP * 2;
+            const pz = b.z + Math.sin(pitch) * LASER_STEP * 2;
+            if (px < west - 60 || px > east + 60 || py < south - 60 || py > north + 60) continue;
+            if (this.world.solidAt(px, py) || pz < this.world.groundAt(px, py)) continue;
+            b.yaw = yaw; b.pitch = pitch; turned = true;
+          }
+          if (!turned) { b.dead = true; break; }   // 被围死了：就地散掉
+          continue;
+        }
+        b.x = nx; b.y = ny; b.z = nz;
+        b.gone += step;
+        if (b.gone >= LASER_GAP) {
+          b.trail.push({ x: b.x, y: b.y, z: b.z });
+          b.gone = 0;
+          if (b.trail.length > 12) b.trail.shift();
+        }
+      }
+    }
+  }
+
+  // 手机上双击人物：一记点在人物身上（屏幕位置离他胸口够近），TAP_WINDOW 毫秒内再来一记，就发射
+  tapPlayer(fx, fy) {
+    const at = this.camera.projectWalk(this.player.x, this.player.y, this.player.z + 1.2);
+    if (!at) return false;
+    const reach = Math.max(64, this.camera.height * 0.2);   // frame pixels around the chest that count
+    if (Math.hypot(fx - at.sx, fy - at.sy) > reach) return false;
+    const now = performance.now();
+    if (now - this.lastTap < TAP_WINDOW) {
+      this.lastTap = 0;
+      this.fire();
+    } else {
+      this.lastTap = now;
+    }
+    return true;
   }
 
   // the tiles to ask for while walking

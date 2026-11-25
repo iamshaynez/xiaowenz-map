@@ -205,7 +205,7 @@ export function createInterface(app) {
   });
 
   // the size of a pixel on the page: kept for the next visit, and applied by loading the page again with it
-  const sizes = Number(localStorage.getItem('pixel-size') || 1);
+  const sizes = Number(localStorage.getItem('pixel-size') || 0);
   $('pixels').textContent = `像素${PIXEL_SIZES[sizes]}`;
   $('pixels').addEventListener('click', () => {
     const next = (sizes + 1) % PIXEL_SIZES.length;

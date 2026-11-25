@@ -14,7 +14,7 @@
 export const CANAL = 200, RIVER = 201, LAKE = 202;
 const MAJOR = 5, SECONDARY = 6, MINOR = 7, SERVICE = 8, PEDESTRIAN = 9, PATH = 10;
 
-export const KIND = { CAR: 0, VAN: 1, BUS: 2, CANAL_BOAT: 3, RIVER_BOAT: 4, LAKE_BOAT: 5, ROW_BOAT: 6, LEGS: 7, BODY: 8, HEAD: 9 };
+export const KIND = { CAR: 0, VAN: 1, BUS: 2, CANAL_BOAT: 3, RIVER_BOAT: 4, LAKE_BOAT: 5, ROW_BOAT: 6, LEGS: 7, BODY: 8, HEAD: 9, LASER: 10, GLOW: 11 };
 // by kind: length along the line, width across it, height: metres
 const SIZE = [
   [4.4, 1.8, 1.5],      // car
@@ -95,21 +95,24 @@ export class Traffic {
     return bigger;
   }
 
-  // one vehicle, as the renderer's shader reads it
-  box(x, y, z, tx, ty, length, width, height, wall, top, kind) {
+  // one vehicle, as the renderer's shader reads it; `spare` carries the pitch (radians) of a beam
+  // tilted out of the horizontal, which the life shader rotates its box by (walk.js's laser)
+  box(x, y, z, tx, ty, length, width, height, wall, top, kind, spare = 0) {
     this.boxes = Traffic.grow(this.boxes, this.count + 1);
     const at = this.count * RECORD, b = this.boxes;
     b[at] = x; b[at + 1] = y; b[at + 2] = z; b[at + 3] = tx; b[at + 4] = ty;
     b[at + 5] = length / 2; b[at + 6] = width / 2; b[at + 7] = height; b[at + 8] = wall; b[at + 9] = top; b[at + 10] = kind;
+    b[at + 11] = spare;
     this.count++;
   }
 
   // one person, in the buffer of people
-  figure(x, y, z, tx, ty, length, width, height, wall, top, kind) {
+  figure(x, y, z, tx, ty, length, width, height, wall, top, kind, spare = 0) {
     this.folks = Traffic.grow(this.folks, this.people + 1);
     const at = this.people * RECORD, b = this.folks;
     b[at] = x; b[at + 1] = y; b[at + 2] = z; b[at + 3] = tx; b[at + 4] = ty;
     b[at + 5] = length / 2; b[at + 6] = width / 2; b[at + 7] = height; b[at + 8] = wall; b[at + 9] = top; b[at + 10] = kind;
+    b[at + 11] = spare;
     this.people++;
   }
 
