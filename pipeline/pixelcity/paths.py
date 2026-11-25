@@ -40,6 +40,7 @@ def collect(ground_data, osm, city, height, lake_routes=(), log=print):
     # streets. ground.py kept the centrelines but not the tags; a centreline's middle lies on the mapped
     # way it was cut from, so the way is found again by that (within half a metre, since cutting moves the
     # coordinates in the last decimal; and the shortest of the ways meeting there, for a junction).
+    ramps_of = {id(line): ramps for _strip, _cls, line, ramps in ground_data.decks}
     ways = [geom for geom, _ in osm.roads]
     tags_of = [tags for _, tags in osm.roads]
     tree = STRtree(ways) if ways else None
@@ -55,10 +56,8 @@ def collect(ground_data, osm, city, height, lake_routes=(), log=print):
         kinds = [k for k in here if ground.GROUP.get(tags_of[k].get("highway")) == cls]
         tags = tags_of[min(kinds, key=lambda k: ways[k].length)] if kinds else {}
         if ground._elevated(tags):
-            # a bridge or viaduct floats `CLEARANCE` above the highest ground under it, as its deck does
-            x, y = shapely.get_coordinates(line).T
-            top = float(numpy.max(height(x, y))) + ground.CLEARANCE
-            add(simplified, cls, width, lambda x, y, top=top: numpy.full(numpy.shape(x), top))
+            # the cars ride the deck's own profile (ground.deck_mesh); a bridge built by hand keeps its level throughout
+            add(simplified, cls, width, ground.deck_level(line, height, ramps_of.get(id(line), (False, False))))
             elevated += 1
         else:
             add(simplified, cls, width, height)

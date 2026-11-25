@@ -98,7 +98,10 @@ class RoadTest(unittest.TestCase):
         rows, points = names.collect(CITY, self.osm, [], SLOPE, **QUIET)
         bridge, tunnel = at(rows, "钱塘江大桥")[0], at(rows, "紫之隧道")[0]
         first, count = rows["line"][bridge]
-        self.assertEqual(set(points["z"][first:first + count].tolist()), {round((2.0 + ground.CLEARANCE) * 8)}, "the deck: six metres over the highest ground under it")
+        zs = points["z"][first:first + count] / 8.0
+        self.assertAlmostEqual(zs[0], ground.CLEARANCE, delta=0.2, msg="the deck starts six metres over the ground at its start")
+        self.assertAlmostEqual(zs[-1], 2.0 + ground.CLEARANCE, delta=0.2, msg="and follows the ground along the way")
+        self.assertTrue((numpy.diff(zs) > 0).all(), "rising with the slope, as its deck does")
         self.assertEqual(said(rows, bridge), "桥")
         first, count = rows["line"][tunnel]
         self.assertAlmostEqual(points["z"][first + count - 1] / 8, 2.0, delta=0.2)

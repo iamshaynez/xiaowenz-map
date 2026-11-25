@@ -381,8 +381,8 @@ def _lines(ways, kind, label, area, height, log=print):
                 if len(pts) < 2:
                     continue
                 if ground._elevated(tags_of):
-                    # a bridge or a viaduct floats above the highest ground under it, as its deck does (ground.deck_mesh)
-                    zs = numpy.full(len(pts), float(numpy.max(height(pts[:, 0], pts[:, 1]))) + ground.CLEARANCE)
+                    # a bridge or a viaduct follows the ground under its way, as its deck does (ground.deck_mesh)
+                    zs = ground.deck_level(part, height)(pts[:, 0], pts[:, 1])
                 else:
                     zs = height(pts[:, 0], pts[:, 1])      # a tunnel's course is drawn on the ground over it
                 if last is not None and numpy.hypot(*(pts[0] - last)) > BREAK_M:
@@ -393,7 +393,7 @@ def _lines(ways, kind, label, area, height, log=print):
                 continue
             z = height(numpy.array([middle.x]), numpy.array([middle.y]))[0]
             if ground._elevated(tags):
-                z = float(numpy.max(height(*shapely.get_coordinates(longest).T))) + ground.CLEARANCE
+                z = ground.deck_level(longest, height)(numpy.array([middle.x]), numpy.array([middle.y]))[0]
             points = numpy.concatenate(course).astype(numpy.float64)
             box = [float(numpy.nanmin(points[:, 0])), float(numpy.nanmin(points[:, 1])), float(numpy.nanmax(points[:, 0])), float(numpy.nanmax(points[:, 1]))]
             out.append({"name": name, "kind": kind, "label": label(tags, name), "x": middle.x, "y": middle.y, "z": z, "size": sum(part.length for part, _ in pieces),
@@ -460,9 +460,11 @@ def collect(city, osm, landmarks, height, aliases=None, log=print):
         entries.append({"name": row["title"], "kind": LANDMARK, "label": row["group"], "x": x, "y": y, "z": z, "size": 0.0, "box": None, "points": None,
                         "also": [part for part in row["title"].split("·") if part != row["title"]], "landmark": row["id"]})
 
-    # what a thing is called that the map does not call it. An alias must point at a name the index has.
+    # what a thing is called that the map does not call it. An alias must point at a name the index has:
+    # the thing's own name, or one of the names it also goes by (a landmark's title carries its parts, and
+    # a landmark absorbs the thing it stands on, so “中信大厦” finds “中国尊·CBD” by its part “中国尊”).
     for alias, name in sorted((aliases or {}).items()):
-        hits = [entry for entry in entries if entry["name"] == name]
+        hits = [entry for entry in entries if entry["name"] == name or name in entry["also"]]
         if not hits:
             raise SystemExit(f"the alias “{alias}” points at nothing in the map: “{name}”")
         for entry in hits:

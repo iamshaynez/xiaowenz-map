@@ -5,7 +5,8 @@ prepare() turns the OSM layers into sets of polygons that do not overlap within 
   land      parks, woods, farmland, yards, urban ground, ... with the specific kinds cut out of the generic
   pavement  the walkways along the wider streets
   roads     carriageways by class, with the pavement cut away
-  decks     roads and railways on bridges or viaducts: a surface that floats, and the walls under it
+  decks     roads and railways on bridges or viaducts: a surface that follows the ground on piers,
+            its edge hung with a fascia and rimmed with a parapet
 
 mesh() turns a set into triangles for one tile. Every polygon is cut into pieces no wider than 40 m
 before it is triangulated, so that the pieces can be laid on the terrain: a triangle spanning a whole
@@ -53,7 +54,14 @@ GROUP = {"motorway": ROAD_MAJOR, "trunk": ROAD_MAJOR, "primary": ROAD_MAJOR, "se
 PAVEMENT = {ROAD_MAJOR: 4.5, ROAD_SECONDARY: 3.5, ROAD_MINOR: 3.0}      # metres of walkway on each side
 WATERWAY_WIDTH = {"river": 12, "stream": 4, "canal": 9, "ditch": 3, "drain": 3}
 RAIL_WIDTH = 3.5
-CLEARANCE = 6.0                                                        # a deck floats this far above what it crosses
+CLEARANCE = 6.0                                                        # a deck floats this far above the ground under it
+DECK_STEP_M = 8.0       # the deck's level is sampled along its way at this pace
+RAMP_M = 40.0           # a deck's free end tapers to the ground over this, as its approach does
+TOUCHDOWN_LIFT = 0.12   # the taper ends this far above the ground: just over the road's own lift, so the two melt together
+PIER_SPACING_M = 35.0   # piers stand this far apart along the way
+PIER_HALF_M = 0.9       # a pier is a square column of twice this, from the ground to the deck
+DECK_EDGE_M = 1.2       # the slab's edge hangs this far down under the deck
+PARAPET_M = 1.1         # and a low wall of this height runs along each side of it
 COVER_WATER_TOLERANCE_M = 7.0   # the satellite map's water comes in 10 m cells: their corners are taken off by this much
 COVER_WATER_MIN_M2 = 120.0       # smaller patches of it are dropped
 RIVER_SIDE_M = 150.0            # water the satellite shows this close to the mapped river is taken to be the river's own
@@ -82,6 +90,50 @@ def _elevated(tags):
 def _union(shapes):
     shapes = numpy.asarray(shapes, dtype=object)
     return shapely.union_all(shapes) if len(shapes) else shapely.Polygon()
+
+
+def _deck_ramps(flying):
+    """Which ends of each elevated centreline carry on into another elevated way: their ways chain end to
+    end, or a ramp merges into them, and such an end keeps the deck's height. A free end tapers to the
+    ground, as the approach of a real bridge does."""
+    if not flying:
+        return []
+    lines = [line for _, _, line in flying]
+    tree = STRtree(numpy.asarray(lines, dtype=object))
+    out = []
+    for k, line in enumerate(lines):
+        coords = shapely.get_coordinates(line)
+        ends = [shapely.points(coords[0, 0], coords[0, 1]), shapely.points(coords[-1, 0], coords[-1, 1])]
+        out.append(tuple(any(int(other) != k for other in tree.query(end, predicate="dwithin", distance=1.5)) for end in ends))
+    return out
+
+
+def deck_level(line, height, ramps=(False, False)):
+    """-> f(x, y): the level of the deck that follows the centreline `line`, in world metres.
+
+    The deck follows the ground along its way (sampled every DECK_STEP_M, CLEARANCE over it), and each
+    free end tapers to the ground over RAMP_M, so that the mapped bridge melts into the road it lands
+    on. The level of a point is the level of the deck at the nearest point of the way. Callers that do
+    not know which ends are free (labels, traffic on a bridge built by hand) leave both ends kept."""
+    far = line.length
+    dists = numpy.arange(0.0, far, DECK_STEP_M)
+    if far - (dists[-1] if len(dists) else 0.0) > 0.5:
+        dists = numpy.append(dists, far)
+    kx, ky = shapely.get_coordinates(shapely.line_interpolate_point(line, dists)).T
+    ground_at = height(kx, ky)
+    levels = ground_at + CLEARANCE
+    if ramps[0]:
+        t = numpy.clip(dists / RAMP_M, 0.0, 1.0)
+        levels = (ground_at[0] + TOUCHDOWN_LIFT) + (levels - ground_at[0] - TOUCHDOWN_LIFT) * (t * t * (3.0 - 2.0 * t))
+    if ramps[1]:
+        t = numpy.clip((far - dists) / RAMP_M, 0.0, 1.0)
+        levels = (ground_at[-1] + TOUCHDOWN_LIFT) + (levels - ground_at[-1] - TOUCHDOWN_LIFT) * (t * t * (3.0 - 2.0 * t))
+
+    def level(x, y):
+        at = shapely.line_locate_point(line, shapely.points(numpy.asarray(x, dtype=float), numpy.asarray(y, dtype=float)))
+        return numpy.interp(at, dists, levels)
+
+    return level
 
 
 def water_class(tags, area, rivers=()):
@@ -152,7 +204,7 @@ class Ground:
         self.parts = {}       # class -> array of simple polygons
         self.trees = {}       # class -> STRtree over the parts
         self.water = shapely.Polygon()
-        self.decks = []       # (strip, class, centreline) for bridges and viaducts
+        self.decks = []       # (strip, class, centreline, ramps) for bridges and viaducts
         self.deck_tree = None  # over the strips
         self.roads = []       # (centreline, class, width) for street trees
 
@@ -167,7 +219,7 @@ class Ground:
 
     def set_decks(self, decks):
         self.decks = decks
-        self.deck_tree = STRtree(numpy.asarray([strip for strip, _, _ in decks], dtype=object)) if decks else None
+        self.deck_tree = STRtree(numpy.asarray([deck[0] for deck in decks], dtype=object)) if decks else None
 
     def in_box(self, cls, query_box):
         """The polygons of a class that reach into a box."""
@@ -273,7 +325,8 @@ def prepare(osm, bounds, rivers=(), log=print):
         g.index(RAIL, _union(on_ground).difference(g.water))
     flying = [(strip, cls, line) for strip, cls, line, elevated, width in roads if elevated]
     flying += [(strip, RAIL, line) for strip, line, elevated in rails if elevated]
-    g.set_decks(flying)
+    ramps = _deck_ramps(flying)
+    g.set_decks([(*deck, ramps[k]) for k, deck in enumerate(flying)])
     g.roads = [(line, cls, width) for strip, cls, line, elevated, width in roads]
 
     # ---- land cover: the specific kinds are cut out of the generic ones ----
@@ -438,40 +491,70 @@ def mesh(ground, classes, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M, rec
 
 
 def deck_mesh(ground, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M):
-    """Bridges and viaducts in a tile: each deck as a flat surface, and walls from its edge to the ground."""
+    """Bridges and viaducts in a tile: each deck as a surface that follows the ground below it, its edge
+    hung with a fascia and rimmed with a parapet, and piers standing to the ground along its way."""
     query = shapely.box(x0 - margin, y0 - margin, x0 + size + margin, y0 + size + margin)
     verts, index = [], []
     count = 0
-    for strip, cls, line in ground.decks_in_box(query):
+
+    def emit(v, tris):
+        nonlocal count
+        verts.append(v)
+        index.append((numpy.asarray(tris, dtype=numpy.int64) + count).astype("<u4"))
+        count += len(v)
+
+    def band(pts, nxt, top_a, top_b, drop, cls):
+        """A vertical strip along a ring: from each point's own `top` by `drop` (negative stands above it)."""
+        quad = numpy.empty((len(pts), 4, 5), dtype=numpy.float32)
+        quad[:, 0, :2], quad[:, 1, :2] = pts - [x0, y0], nxt - [x0, y0]
+        quad[:, 2, :2], quad[:, 3, :2] = nxt - [x0, y0], pts - [x0, y0]
+        quad[:, 0, 2], quad[:, 1, 2] = top_a, top_b
+        quad[:, 2, 2], quad[:, 3, 2] = top_b - drop, top_a - drop
+        quad[:, :, 3], quad[:, :, 4] = cls, 1.0
+        t = numpy.arange(len(pts)) * 4
+        emit(quad.reshape(-1, 5), numpy.column_stack([t, t + 1, t + 2, t, t + 2, t + 3]).reshape(-1))
+
+    for strip, cls, line, ramps in ground.decks_in_box(query):
         part = strip.intersection(query)
         if part.is_empty:
             continue
-        line_x, line_y = shapely.get_coordinates(line).T
-        top = float(numpy.max(height(line_x, line_y))) + CLEARANCE
+        level = deck_level(line, height, ramps)
         for polygon in shapely.get_parts(part):
             corners = triangulate(polygon)
             if len(corners):
-                v = numpy.column_stack([corners[:, 0] - x0, corners[:, 1] - y0, numpy.full(len(corners), top),
+                v = numpy.column_stack([corners[:, 0] - x0, corners[:, 1] - y0, level(corners[:, 0], corners[:, 1]),
                                         numpy.full(len(corners), float(cls)), numpy.zeros(len(corners))]).astype("<f4")
-                verts.append(v)
-                index.append(numpy.arange(len(v), dtype="<u4") + count)
-                count += len(v)
+                emit(v, numpy.arange(len(v)))
             for ring in (polygon.exterior, *polygon.interiors):
                 pts = numpy.asarray(ring.coords)[:-1]
                 if len(pts) < 3:
                     continue
                 nxt = numpy.roll(pts, -1, axis=0)
-                foot = height(nxt[:, 0], nxt[:, 1]) - 0.5
-                quad = numpy.empty((len(pts), 4, 5), dtype=numpy.float32)
-                quad[:, 0, :2], quad[:, 1, :2], quad[:, 2, :2], quad[:, 3, :2] = pts - [x0, y0], nxt - [x0, y0], nxt - [x0, y0], pts - [x0, y0]
-                quad[:, 0, 2], quad[:, 3, 2] = top, top
-                quad[:, 1, 2], quad[:, 2, 2] = foot, foot
+                top, top_n = level(pts[:, 0], pts[:, 1]), level(nxt[:, 0], nxt[:, 1])
+                band(pts, nxt, top, top_n, DECK_EDGE_M, WALL)          # the slab's edge, hanging under the deck
+                band(pts, nxt, top, top_n, -PARAPET_M, SIDEWALK)       # the low wall along it
+        # the piers along the way, each drawn whole by the one tile that owns it, so that neighbours do not double them
+        far = line.length
+        first = numpy.ceil(((RAMP_M if ramps[0] else 0.0) + PIER_SPACING_M / 2) / PIER_SPACING_M) * PIER_SPACING_M
+        last = far - (RAMP_M if ramps[1] else 0.0) - PIER_SPACING_M / 2
+        ds = numpy.arange(first, max(last, first), PIER_SPACING_M)
+        if len(ds):
+            px, py = shapely.get_coordinates(shapely.line_interpolate_point(line, ds)).T
+            own = numpy.nonzero((px >= x0) & (px < x0 + size) & (py >= y0) & (py < y0 + size))[0]
+            for k in own:
+                top = float(level(px[k], py[k]))
+                foot = float(height(px[k], py[k])) - 0.5
+                ring = numpy.array([[px[k] - PIER_HALF_M - x0, py[k] - PIER_HALF_M - y0], [px[k] + PIER_HALF_M - x0, py[k] - PIER_HALF_M - y0],
+                                    [px[k] + PIER_HALF_M - x0, py[k] + PIER_HALF_M - y0], [px[k] - PIER_HALF_M - x0, py[k] + PIER_HALF_M - y0]])
+                nxt = numpy.roll(ring, -1, axis=0)
+                quad = numpy.empty((4, 4, 5), dtype=numpy.float32)
+                quad[:, 0, :2], quad[:, 1, :2] = ring, nxt
+                quad[:, 2, :2], quad[:, 3, :2] = nxt, ring
+                quad[:, 0, 2], quad[:, 1, 2] = top, top
+                quad[:, 2, 2], quad[:, 3, 2] = foot, foot
                 quad[:, :, 3], quad[:, :, 4] = WALL, 1.0
-                v = quad.reshape(-1, 5)
-                verts.append(v)
-                t = numpy.arange(len(pts)) * 4 + count
-                index.append(numpy.column_stack([t, t + 1, t + 2, t, t + 2, t + 3]).reshape(-1).astype("<u4"))
-                count += len(v)
+                t = numpy.arange(4) * 4
+                emit(quad.reshape(-1, 5), numpy.column_stack([t, t + 1, t + 2, t, t + 2, t + 3]).reshape(-1))
     if not verts:
         return numpy.zeros((0, 5), dtype="<f4"), numpy.zeros(0, dtype="<u4")
     return numpy.concatenate(verts), numpy.concatenate(index)
