@@ -75,6 +75,8 @@ export class Walk {
     this.stickHome = null;
     this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
     this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
+    this.cycle = 0;                // the walk cycle: legs and arms swing with it
+    this.step = 0;                 // 0 standing, 1 walking, eased between
     this.mapCanvas = document.getElementById('minimap');
     this.mapCtx = this.mapCanvas?.getContext('2d') ?? null;
     renderer.walk = this;
@@ -280,8 +282,10 @@ export class Walk {
           else if (!this.world.solidAt(this.player.x, ny)) nx = this.player.x;
           else { nx = this.player.x; ny = this.player.y; }
         }
-        this.player.moving = nx !== this.player.x || ny !== this.player.y;
-        this.player.x = nx; this.player.y = ny;
+      this.player.moving = nx !== this.player.x || ny !== this.player.y;
+      if (this.player.moving) this.cycle += dt * (keys.has('shift') ? 12 : 7.5);
+      this.step += ((this.player.moving ? 1 : 0) - this.step) * Math.min(1, dt * 9);
+      this.player.x = nx; this.player.y = ny;
         // 上桥的路：走到一条高度相配的线边（引桥的落地端、台阶、人行桥），人就搭上它
         let z = elevated ? this.player.z : this.world.groundAt(nx, ny);
         const near = this.world.roadsNear(nx, ny, elevated ? 3 : 2.2, [5, 6, 7, 8, 9, 10], null, this.player.z);
@@ -405,15 +409,45 @@ export class Walk {
 
   // called by the renderer every frame it draws the walking view: the player is one more box of the
   // traffic's own (a figure of three boxes on foot, a taxi at the wheel)
+  // called by the renderer every frame it draws the walking view. The player is not the plain box the
+  // passers-by are: on foot he is a little hero in a red cap whose legs and arms swing as he walks, and
+  // at the wheel he drives a red roadster — four wheels, a spoiler, lamps, and a little flag on the roof.
   place(traffic, colours) {
     const p = this.player;
-    const tx = Math.cos(p.heading), ty = Math.sin(p.heading);
+    const hx = Math.cos(p.heading), hy = Math.sin(p.heading);
+    const rx = hy, ry = -hx;                             // to the player's right
+    const at = (along, across, z, len, wid, hei, wall, top, kind, asFigure) => {
+      const x = p.x + hx * along + rx * across, y = p.y + hy * along + ry * across;
+      const colours2 = [colours[wall], colours[top]];
+      if (asFigure) traffic.figure(x, y, z, hx, hy, len, wid, hei, colours2[0], colours2[1], kind);
+      else traffic.box(x, y, z, hx, hy, len, wid, hei, colours2[0], colours2[1], kind);
+    };
+    const RED = 3, DARK = 2, BLUE = 4, YELLOW = 5, SILVER = 1, SKIN = 10;
     if (this.driving) {
-      traffic.box(p.x, p.y, p.z + 0.1, tx, ty, 4.4, 1.8, 1.5, colours[5], colours[1], 0);
+      at(0, 0, p.z + 0.12, 4.4, 1.9, 0.52, RED, RED, 7);                      // 车身
+      at(-0.12, 0, p.z + 0.64, 2.6, 1.74, 0.44, BLUE, BLUE, 7);               // 车窗带
+      at(-0.18, 0, p.z + 1.08, 2.2, 1.62, 0.12, RED, RED, 7);                 // 车顶
+      for (const [a, cr] of [[1.42, 0.94], [1.42, -0.94], [-1.42, 0.94], [-1.42, -0.94]])
+        at(a, cr, p.z + 0.02, 0.72, 0.34, 0.56, DARK, DARK, 7);               // 四轮
+      at(-1.8, 0.72, p.z + 0.64, 0.14, 0.14, 0.4, DARK, DARK, 7);             // 尾翼柱
+      at(-1.8, -0.72, p.z + 0.64, 0.14, 0.14, 0.4, DARK, DARK, 7);
+      at(-1.94, 0, p.z + 1.04, 0.36, 2.05, 0.12, DARK, DARK, 7);              // 尾翼板
+      at(2.18, 0.6, p.z + 0.36, 0.1, 0.42, 0.16, YELLOW, YELLOW, 7);          // 头灯
+      at(2.18, -0.6, p.z + 0.36, 0.1, 0.42, 0.16, YELLOW, YELLOW, 7);
+      at(-2.18, 0.6, p.z + 0.42, 0.1, 0.42, 0.14, RED, RED, 7);               // 尾灯
+      at(-2.18, -0.6, p.z + 0.42, 0.1, 0.42, 0.14, RED, RED, 7);
+      at(0.72, -0.44, p.z + 1.2, 0.07, 0.07, 0.68, SILVER, SILVER, 7);        // 旗杆
+      at(1.0, -0.3, p.z + 1.6, 0.52, 0.05, 0.3, RED, RED, 7);                 // 车顶小旗
     } else {
-      traffic.figure(p.x, p.y, p.z + 0.1, tx, ty, 0.3, 0.42, 0.55, colours[2], colours[2], 7);
-      traffic.figure(p.x, p.y, p.z + 0.65, tx, ty, 0.32, 0.52, 0.75, colours[11], colours[11], 8);
-      traffic.figure(p.x, p.y, p.z + 1.4, tx, ty, 0.36, 0.38, 0.34, colours[10], colours[2], 9);
+      const s = Math.sin(this.cycle) * this.step, bob = Math.abs(Math.cos(this.cycle)) * this.step * 0.04;
+      at(0, 0, p.z + 0.5 + bob, 0.5, 0.56, 0.64, BLUE, BLUE, 8, true);        // 衣
+      at(s * 0.24, -0.14, p.z + 0.03 + Math.max(0, s) * 0.05, 0.44, 0.16, 0.52, DARK, DARK, 8, true);   // 左腿
+      at(-s * 0.24, 0.14, p.z + 0.03 + Math.max(0, -s) * 0.05, 0.44, 0.16, 0.52, DARK, DARK, 8, true);  // 右腿
+      at(-s * 0.2, -0.37, p.z + 0.6, 0.16, 0.16, 0.5, SKIN, SKIN, 8, true);   // 左臂（与左腿反相）
+      at(s * 0.2, 0.37, p.z + 0.6, 0.16, 0.16, 0.5, SKIN, SKIN, 8, true);     // 右臂
+      at(0, 0, p.z + 1.28 + bob, 0.36, 0.36, 0.36, SKIN, SKIN, 9, true);      // 头
+      at(0, 0, p.z + 1.6 + bob, 0.42, 0.42, 0.16, RED, RED, 9, true);         // 帽
+      at(0.27, 0, p.z + 1.57 + bob, 0.2, 0.38, 0.09, RED, RED, 9, true);      // 帽舌
     }
   }
 
