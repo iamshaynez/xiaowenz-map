@@ -22,6 +22,7 @@ const BOARDS = {                       // 与 pixelcity/brands.py 的 TABLE.colo
   mixue: 'brand_red', chabaidao: 'brand_orange', chagee: 'glass_teal', haidilao: 'brand_red',
   familymart: 'brand_blue', seven_eleven: 'brand_orange', lawson: 'brand_blue', hema: 'brand_blue',
   sam: 'glass_teal', walmart: 'brand_blue', rtmart: 'brand_orange', uniqlo: 'brand_red', miniso: 'brand_red',
+  ultraman: 'window_dark',
 };
 const BRANDS = Object.keys(BOARDS);
 // 有些参考图构图不干净：手动给出裁剪框（参考图自己的像素坐标），只取其中干净的主体。
@@ -61,7 +62,37 @@ function drawTastien() {
   }
   return rgba;
 }
-const SPECIAL = { tastien: () => drawTastien(), lawson: () => drawLawson() };
+// 奥特曼：汀岸芷兰轩 11# 楼顶大牌的那张"照片"（初代奥特曼的半身像——银身红纹、金眼、胸前彩色计时器），
+// 夜色板上一尊正面立像。没有干净的参考图可裁，就地按形制画。
+function drawUltraman() {
+  const rgba = new Uint8Array(S * S * 4);
+  const night = palette.window_dark, silver = palette.metal_pale, shade = palette.concrete_grey,
+        red = palette.brand_red, eye = palette.gild, timer = palette.glass_blue, white = palette.panel_white;
+  const put = (x0, y0, x1, y1, c) => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const o = (y * S + x) * 4;
+      rgba[o] = c[0]; rgba[o + 1] = c[1]; rgba[o + 2] = c[2]; rgba[o + 3] = 255;
+    }
+  };
+  put(0, 0, 31, 31, night);
+  put(15, 0, 16, 2, silver);                       // 头顶的鳍
+  put(12, 2, 19, 9, silver);                       // 头
+  put(10, 4, 21, 7, silver);                       // 头展宽的一截
+  put(12, 10, 13, 10, shade); put(18, 10, 19, 10, shade);   // 两颊的暗面
+  put(12, 5, 14, 7, eye); put(17, 5, 19, 7, eye);           // 一双金眼
+  put(12, 5, 12, 5, white); put(19, 7, 19, 7, white);       // 眼里的光
+  put(14, 9, 17, 11, silver);                      // 颈
+  put(9, 12, 22, 26, silver);                      // 躯干
+  put(9, 12, 12, 13, red); put(19, 12, 22, 13, red);        // 红的肩甲
+  put(10, 15, 11, 22, red); put(20, 15, 21, 22, red);       // 两道红纹顺着躯干下去
+  put(15, 14, 16, 15, timer); put(15, 14, 15, 14, white);   // 胸口的彩色计时器
+  put(6, 14, 8, 24, silver); put(23, 14, 25, 24, silver);   // 两臂
+  put(6, 18, 8, 19, red); put(23, 18, 25, 19, red);         // 臂上的红箍
+  put(5, 25, 8, 27, silver); put(23, 25, 26, 27, silver);   // 拳头
+  put(10, 24, 21, 25, red);                        // 腰间的红带
+  return rgba;
+}
+const SPECIAL = { tastien: () => drawTastien(), lawson: () => drawLawson(), ultraman: () => drawUltraman() };
 
 const palette = JSON.parse(fs.readFileSync(path.join(ROOT, 'app/palette.json'), 'utf8')).colours;
 
@@ -173,26 +204,22 @@ export const BRAND_LOGOS = [`;
 const body = logos.map(l => `  { brand: '${l.brand}', board: '${l.board}', rgba: '${l.rgba}' },`).join('\n');
 const tail = `];
 
-// the atlas: every picture packed side by side, row 0 the top, nearest sampled. Column n of the atlas
-// is the logo of the n-th brand of pixelcity/brands.py's TABLE.
-export function brandAtlas(gl) {
-  const size = 32, columns = BRAND_LOGOS.length;
-  const rgba = new Uint8Array(size * size * columns * 4);
-  BRAND_LOGOS.forEach((logo, column) => {
-    const bin = atob(logo.rgba);
-    if (bin.length !== size * size * 4) throw new Error(\`\${logo.brand} 的招牌画不是 \${size}×\${size}\`);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    rgba.set(bytes, column * size * size * 4);
+// 每个品牌一张 32×32 的纹理，按 BRAND_LOGOS 的顺序（=品牌的编号）排好；绘制时按编号取用。
+export function brandTextures(gl) {
+  const size = 32;
+  const textures = BRAND_LOGOS.map((logo, i) => {
+    const bytes = Uint8Array.from(atob(logo.rgba), c => c.charCodeAt(0));
+    if (bytes.length !== size * size * 4) throw new Error(logo.brand + ' 的招牌画不是 ' + size + '×' + size);
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return texture;
   });
-  const texture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size * columns, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return { texture, columns, size };
+  return { textures, count: textures.length };
 }
 `;
 const out = path.join(ROOT, 'app/src/landmarks/brandmarks.js');

@@ -43,6 +43,9 @@ TABLE = {
     "rtmart":     ("大润发", ("大润发", "RT-MART", "rt-mart"), "超市", "brand_orange", "panel_white", "band"),
     "uniqlo":     ("优衣库", ("优衣库", "UNIQLO", "优衣库(UNIQLO)"), "服装店", "brand_red", "panel_white", "band"),
     "miniso":     ("名创优品", ("名创优品", "MINISO"), "杂货店", "brand_red", "panel_white", "disc"),
+    # 不是连锁，是汀岸芷兰轩 11# 楼顶那块大牌（scene.bake 往 osm.brands 里注入一个点）：借同一套招牌机制
+    # 画。按在表末，tile 里已存的品牌序号才不会位移。
+    "ultraman":   ("奥特曼", ("奥特曼", "Ultraman"), "景点", "window_dark", "metal_pale", "figure"),
 }
 
 def mark(brand_id):

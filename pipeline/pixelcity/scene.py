@@ -57,6 +57,7 @@ drawn wherever it reaches into a tile, so that neighbouring tiles meet.
 Usage: python -m pixelcity.scene <city> [--limit N]      (N bakes only the first N tiles, for trying things out)
 """
 import json
+import math
 import pickle
 import struct
 import sys
@@ -416,6 +417,24 @@ def bake(city, limit=None, log=print):
     palette = json.loads(PALETTE.read_text(encoding="utf-8"))["colours"]
     colour_index = {name: i for i, name in enumerate(palette)}
 
+    # 手工地标自己立的楼顶大牌（landmarks.json 里 kit 的 poster）：借品牌招牌那一套画，点抬高让整块牌
+    # 立在屋顶上（brands_section 的牌子从挂点往下 7 米、往上 1.2 米）。kit 的 u、v 是地标锚点系里的米，
+    # angle 是地标自己的方位角；lift 从地面算到挂点。按在 osm.brands 的末尾——下面的清场与分瓦都
+    # 认这个次序，大牌的挂点也是从这段的末尾覆盖的。
+    posters = []
+    land = json.loads((work / "landmarks.json").read_text(encoding="utf-8"))
+    for row in land["landmarks"]:
+        for item in [row, *row.get("parts", [])]:
+            poster = (item.get("kit") or {}).get("poster")
+            if not poster:
+                continue
+            turn = float((item["kit"] or {}).get("angle") or 0.0)
+            x, y = city.project(item["lon"], item["lat"])
+            px = x + float(poster["u"]) * math.cos(turn) - float(poster["v"]) * math.sin(turn)
+            py = y + float(poster["u"]) * math.sin(turn) + float(poster["v"]) * math.cos(turn)
+            osm.brands.append((shapely.Point(px, py), {"brand_id": poster.get("brand", "ultraman")}))
+            posters.append(float(height(numpy.array([px]), numpy.array([py]))[0]) + float(poster.get("lift", 31.2)))
+
     west, south, east, north = city.bounds()
     bounds = (west - MARGIN_M, south - MARGIN_M, east + MARGIN_M, north + MARGIN_M)
     # what stands mostly in open water is a boat or an echo on the water, not a building
@@ -536,6 +555,8 @@ def bake(city, limit=None, log=print):
     brand_top = numpy.full(len(brand_x), numpy.nan)
     brand_top[idx[hit]] = props[idx[hit], 0] + props[idx[hit], 1]
     brand_z = numpy.where(numpy.isnan(brand_top), height(brand_x, brand_y) + 10.0, brand_top)
+    if posters:                                  # 大牌立在屋顶上：挂点自己带来，不认最近楼的檐口线
+        brand_z[len(brand_z) - len(posters):] = numpy.asarray(posters, float)
     brand_tile, brand_starts = group_by_tile(brand_x, brand_y, tx0, ty0, nx_tiles, ny_tiles)
     log(f"brand shops: {len(osm.brands)}")
 
