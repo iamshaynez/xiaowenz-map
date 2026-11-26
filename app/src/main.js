@@ -302,7 +302,7 @@ async function boot() {
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     if (walk.active) {
-      walk.speedBy(e.deltaY);                        // walking: the wheel sets the pace
+      walk.camZoom(e.deltaY);                        // walking: the wheel moves the camera in and out
       dirty = true;
       return;
     }
@@ -348,7 +348,9 @@ async function boot() {
       return;
     }
     if (walk.active && key === ' ') {
-      if (!e.repeat) walk.fire();                    // 步行的彩蛋：一条随机方向的黄色激光
+      // 开车时是手刹（按住才刹，keyup 松开），步行时放激光的彩蛋
+      if (walk.driving) walk.handbrake = true;
+      else if (!e.repeat) walk.fire();
       e.preventDefault();
       return;
     }
@@ -386,8 +388,11 @@ async function boot() {
       e.preventDefault();
     }
   });
-  window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
-  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('keyup', e => {
+    keys.delete(e.key.toLowerCase());
+    if (e.key === ' ') walk.handbrake = false;     // 手刹是按住的键，松开就放
+  });
+  window.addEventListener('blur', () => { keys.clear(); walk.handbrake = false; });
 
   // ---- the page around the map ------------------------------------------------------------------------------
   const ui = createInterface({
@@ -430,6 +435,12 @@ async function boot() {
   });
   const drive = document.getElementById('action');
   if (drive) drive.addEventListener('click', () => walk.key('e'));
+  // 手刹按钮（触屏才有）：按下刹住，松开放掉
+  const handbrake = document.getElementById('handbrake');
+  if (handbrake) {
+    handbrake.addEventListener('pointerdown', e => { e.preventDefault(); walk.handbrake = true; });
+    for (const t of ['pointerup', 'pointerleave', 'pointercancel']) handbrake.addEventListener(t, () => { walk.handbrake = false; });
+  }
   const speedcycle = document.getElementById('speedcycle');
   if (speedcycle) speedcycle.addEventListener('click', () => walk.speedCycle());
   const camcloser = document.getElementById('camcloser');

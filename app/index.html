@@ -161,6 +161,14 @@
   body.walking #action { display: block; }
   #action[disabled] { opacity: 0.4; }
   @media (pointer: coarse) { #action { width: 92px; height: 92px; font-size: 15px; } }
+  /* 手刹：只给触屏（桌面是空格），叠在上车圆钮的上面，按住才刹 */
+  #handbrake { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 104px); z-index: 5;
+               width: 64px; height: 64px; border-radius: 50%; border: 1.5px solid rgba(28, 27, 25, 0.35);
+               background: rgba(255, 255, 255, 0.78); color: var(--ink); font: inherit; display: none; touch-action: manipulation;
+               user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  body.walking #handbrake { display: block; }
+  body.walking #handbrake[hidden] { display: none; }
+  #handbrake:active { background: rgba(28, 27, 25, 0.18); }
   #minimap { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 4; pointer-events: none;
              border-radius: 10px; border: 1px solid rgba(28, 27, 25, 0.3); background: #efece4; display: none; }
   body.walking #minimap { display: block; }
@@ -234,6 +242,7 @@
 </div>
 <div id="stick" hidden><div id="stickknob"></div></div>
 <button id="action" type="button" disabled>上车</button>
+<button id="handbrake" type="button" hidden>手刹</button>
 <canvas id="minimap" width="190" height="130" aria-hidden="true"></canvas>
 
 <canvas id="compass" width="44" height="44" aria-hidden="true"></canvas>

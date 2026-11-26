@@ -1,28 +1,42 @@
 // 走进城市：在地图上操作、行走的体验。三个形态共用这一个入口（main.js 的 G 键和工具按钮）：
 //   环视  落在街上，拖动环顾，贴地透视的眼睛（city-camera 的 walking 字段和 GLSL 的 uWalk 分支）；
 //   行走  第三人称在街上走，避开楼和水面（store.js 的碰撞栅格），车流与行人照常来往；
-//   驾驶  在路上按 E 上一辆车，沿路网（瓦片的 PATH 线）街机式开，走高架随其剖面，再按 E 下车。
+//   驾驶  在路上按 E 上一辆车，街机式开——车速是一个向量，轮胎把它拉向车头，拉手刹就漂——走高架
+//         随其剖面，再按 E 下车。
 // 步行的人物是一位小小的奥特曼（place()：银身红纹、红肩甲、高筒红靴、头鳍、黄眼睛、胸口的
 // 彩色计时器，还是交通系统（life/traffic.js）的实例盒子拼的）；开车时是一辆红色小跑车。
 // 彩蛋：步行时网页按空格、手机双击人物，他从胸口放出一条黄色激光——方向随机，撞到楼、水和
 // 地面就随机拐个弯，拐满几次或时辰到了，光就从头到尾收散（shaders-life.js 给它全亮的黄）。
 //
-// 操控：WASD/方向键 走或开 · Shift 跑 · 点击画面锁鼠标看四周 · E 上/下车 · G 或 Esc 回地图。
-// 触屏（手机版 GTA 的手势）：左半边按住出摇杆，推到底是跑；右半边拖动看四周；右下圆钮上/下车，
-// 上缘一条工具条管速度、镜头和退出。每根手指各司其职（main.js 按指派活），摇杆和看四周同时进行。
+// 操控照着 GTA 调，桌面和触屏各有一套：
+//   桌面  WASD/方向键 走或开 · Shift 跑 · 点击画面锁鼠标看四周 · 滚轮 镜头远近 · +/− 快慢 ·
+//         [ ] 镜头档 · 开车时 空格 手刹（漂移）、步行时 空格 放激光 · E 上/下车 · G 或 Esc 回地图。
+//   触屏  左半边按住出摇杆（浮动的：拇指推出圈外，圈就跟手走；推多少走多快，推到底是跑），
+//         右半边拖动看四周，右下圆钮上/下车，驾驶时它上面多一颗手刹；上缘一条工具条管速度、镜头
+//         和退出。每根手指各司其职（main.js 按指派活），摇杆和看四周同时进行。
+// 镜头是一根弹簧臂（camNow）：先量出这一帧不穿楼该站多远（store.js 的 roofAt 按楼顶高度挡，水放行），
+// 再向那个距离缓过去——压近要快，放回要慢，楼过去了镜头自己漂回你选的距离。
 
 const WALK_SPEED = 4.5;      // metres a second at a brisk walk
 const RUN_SPEED = 9;
 const STICK_RANGE = 62;      // page pixels a touch joystick spans
 const STICK_DEAD = 0.12;     // how far the knob must leave home before the player stirs
 const STICK_RUN = 0.9;       // pushed this far, the walker breaks into a run
+const STICK_CURVE = 1.35;    // the joystick's response curve: fine steps near home, quick at the rim
+const PACE_EASE = 9;         // how fast the pace eases toward what the input asks (starts and stops)
 const EYE_HEIGHT = 1.7;      // the walking camera's height at the player
 const CAR_ACCEL = 7, CAR_BRAKE = 13, CAR_DRAG = 2.2;
 const CAR_REVERSE = 6;
-const CAR_TOP = { 5: 15, 6: 12.5, 7: 10, 8: 9, 9: 7, 10: 6 };   // by class of road, metres a second
+const CAR_HAND = 15;         // the handbrake's own deceleration, metres a second squared
+const CAR_TOP = { 5: 20, 6: 15.5, 7: 12.5, 8: 10.5, 9: 8, 10: 7 };   // by class of road, metres a second
 const CAR_STEER = 1.9;       // radians a second at full lock and city speed
+const STEER_IN = 5.5, STEER_OUT = 8.5;   // the wheel eases to full lock, and back to centre, in so long
+const GRIP = 8, GRIP_DRIFT = 2.2;        // how fast the tyres pull the speed onto the heading; handbrake barely
 const CAR_LOOK_BACK = 2.4;   // how fast the driving view eases back to the car's own heading
 const CHASE_BACK = 10.5, CHASE_UP = 4.4;                        // the driving camera, metres
+const CHASE_MIN = 3.2, FOOT_MIN = 1.1;                          // how near a wall may push each boom
+const FOOT_CAM_STEPS = [2, 2.5, 3, 3.5, 4, 5, 6];               // the boom ladders the buttons walk
+const CAR_CAM_STEPS = [6, 8, 10, 12, 14, 18];
 const LOOK_SENS = 0.0028;    // radians of view per pixel of mouse travel (pointer locked)
 const DRAG_SENS = 0.005;     // the same for a held drag (touch, or a mouse without pointer lock)
 const LASER_SPEED = 240;     // metres a second, the beam flies at
@@ -86,14 +100,22 @@ export class Walk {
     this.driving = false;
     this.saved = null;             // the map pose to go back to
     this.player = { x: 0, y: 0, z: 0, heading: 0, moving: false };
-    this.car = null;               // { tile, line, s, lateral, speed }
+    this.car = null;               // { x, y, z, heading, vx, vy, speed, cls }
     this.stick = null;             // the touch joystick, x right and y forward, in -1..1
-    this.stickHome = null;         // where the thumb came down, in page pixels
+    this.stickHome = null;         // where the thumb came down, in page pixels (it follows the thumb out)
     this.carLook = { yaw: 0, pitch: 0.24 };   // at the wheel, how far the dragged view strays from the car's own; it eases home when let go
     this.lookHeld = 0;             // how many fingers (or a held mouse) are looking around right now
     this.coarse = matchMedia('(pointer: coarse)').matches;   // a phone or a tablet: the words and the sizes say so
-    this.speedScale = 1;           // what the wheel and the +/− keys multiply the pace by, 0.5..6
-    this.camDist = 3.5;            // metres the walking camera stands behind its player, 2..6
+    this.speedScale = 1;           // what the +/− keys multiply the pace by, 0.5..6
+    // the cameras: camDist is the walking boom the user chose, carCam the driving one; camNow is where the
+    // spring arm actually is this frame. A phone sits nearer its player: the screen is small, the far view
+    // reads as a handful of pixels
+    this.camDist = this.coarse ? 2.8 : 3.5;
+    this.carCam = this.coarse ? 8.5 : 10.5;
+    this.camNow = this.camDist;
+    this.handbrake = false;        // the space key or the touch button, held
+    this.steerPos = 0;             // the wheel's own angle: the input eases toward it and back
+    this.pace = 0;                 // the walker's speed this moment (metres a second), eased
     this.cycle = 0;                // the walk cycle: legs and arms swing with it
     this.step = 0;                 // 0 standing, 1 walking, eased between
     this.lasers = [];              // the easter egg's beams in flight
@@ -133,6 +155,11 @@ export class Walk {
     this.driving = false;
     this.car = null;
     this.active = true;
+    this.pace = 0;
+    this.steerPos = 0;
+    this.handbrake = false;
+    this.camNow = this.camDist;
+    this.handbrakeShow(false);
     camera.walking = true;
     camera.scale = 24;             // the map zoom's gates (roofs, brands, facades) read as "close in"
     camera.pitch = 0.42;
@@ -141,8 +168,8 @@ export class Walk {
     const back = document.getElementById('walkback');
     if (back) back.textContent = this.coarse ? '退出' : '退出 Esc';
     this.hud(this.coarse
-      ? '左半边按住 出摇杆 · 推到底是跑 · 右半边拖动 看四周'
-      : 'WASD 走 · Shift 跑 · 滚轮/+- 调速 · 点击画面锁定鼠标看四周 · Esc 解锁');
+      ? '左半边按住 出摇杆 · 推到底是跑 · 右半边拖动 看四周 · 右下圆钮上车'
+      : 'WASD 走 · Shift 跑 · 点击画面锁定鼠标看四周 · 滚轮 镜头 · +/− 快慢 · E 上车');
     return true;
   }
 
@@ -161,6 +188,11 @@ export class Walk {
     this.endStick();
     this.lookHeld = 0;
     this.carLook = { yaw: 0, pitch: 0.24 };
+    this.pace = 0;
+    this.steerPos = 0;
+    this.handbrake = false;
+    this.camNow = this.camDist;
+    this.handbrakeShow(false);
     camera.walking = false;
     Object.assign(camera, this.saved);
     document.body.classList.remove('walking');
@@ -183,6 +215,12 @@ export class Walk {
     const ground = this.world.groundAt(x, y);
     const near = this.world.roadsNear(x, y, 2.2, [5, 6, 7, 8, 9, 10], null, null);
     return near && near.z > ground - 0.5 && near.z < ground + 1.2 ? Math.max(ground, near.z) : ground;
+  }
+
+  // is a building in the camera's way at this point of the world and this height? the roof raster knows
+  // how high the building there reaches: water and anything shorter than the eye let the boom pass
+  blocked(x, y, z) {
+    return this.world.roofAt(x, y) > z + 0.45;
   }
 
   tick(dt) {
@@ -278,14 +316,17 @@ export class Walk {
     if (keys.has('a') || keys.has('arrowleft')) { mx -= r.x; my -= r.y; }
     if (keys.has('d') || keys.has('arrowright')) { mx += r.x; my += r.y; }
     if (this.stick) { mx += r.x * this.stick.x + f.x * this.stick.y; my += r.y * this.stick.x + f.y * this.stick.y; }
-    const length = Math.hypot(mx, my);
+    const raw = Math.hypot(mx, my);
     const ground0 = this.world.groundAt(this.player.x, this.player.y);
     const elevated = this.player.z > ground0 + 1.5;
-    if (length > 0) {
-      mx /= length; my /= length;
-      // 推满摇杆（或按着 Shift）就是跑：手机上没有多余的指头去按快慢键
-      const run = keys.has('shift') || (this.stick && Math.hypot(this.stick.x, this.stick.y) > STICK_RUN);
-      const speed = (run ? RUN_SPEED : WALK_SPEED) * this.speedScale;
+    const run = keys.has('shift') || (this.stick && Math.hypot(this.stick.x, this.stick.y) > STICK_RUN);
+    // 推多少走多快（GTA 的模拟量）：键盘一按就是全速，摇杆带来的 0..1 原样用；起步和停步各有一小段缓
+    const throttle = raw > 1e-6 ? Math.min(1, raw) : 0;
+    const want = throttle > 0 ? (run ? RUN_SPEED : WALK_SPEED) * throttle * this.speedScale : 0;
+    this.pace += (want - this.pace) * Math.min(1, dt * PACE_EASE);
+    const speed = this.pace;
+    if (throttle > 0) {
+      mx /= raw; my /= raw;
       // 在高处（引桥、桥面、人行桥）的人跟着身边的那条线走：线怎么弯人怎么走，线给高度，走出线
       // 的廊道就是下桥。地面上的行走不贴线，还是自由的
       const onDeckLine = elevated && this.onLine;
@@ -303,8 +344,6 @@ export class Walk {
           this.player.x = p.x + p.ty * L.lateral;
           this.player.y = p.y - p.tx * L.lateral;
           this.player.z = p.z;
-          this.player.heading = Math.atan2(p.ty * (along >= 0 ? 1 : -1), p.tx * (along >= 0 ? 1 : -1));
-          this.player.moving = true;
           // 线走到了头：接上前面最近的另一条（高度相配的），不然就是桥尾了
           if (L.s <= 0.1 || L.s >= L.length - 0.1) {
             const ahead = this.world.roadsNear(this.player.x + p.tx * (along >= 0 ? 6 : -6), this.player.y + p.ty * (along >= 0 ? 6 : -6),
@@ -327,10 +366,8 @@ export class Walk {
           else if (!this.world.solidAt(this.player.x, ny)) nx = this.player.x;
           else { nx = this.player.x; ny = this.player.y; }
         }
-      this.player.moving = nx !== this.player.x || ny !== this.player.y;
-      if (this.player.moving) this.cycle += dt * (keys.has('shift') || (this.stick && Math.hypot(this.stick.x, this.stick.y) > STICK_RUN) ? 12 : 7.5);
-      this.step += ((this.player.moving ? 1 : 0) - this.step) * Math.min(1, dt * 9);
-      this.player.x = nx; this.player.y = ny;
+        this.player.moving = nx !== this.player.x || ny !== this.player.y;   // (a wall stopped the step)
+        this.player.x = nx; this.player.y = ny;
         // 上桥的路：走到一条高度相配的线边（引桥的落地端、台阶、人行桥），人就搭上它
         let z = elevated ? this.player.z : this.world.groundAt(nx, ny);
         const near = this.world.roadsNear(nx, ny, elevated ? 3 : 2.2, [5, 6, 7, 8, 9, 10], null, this.player.z);
@@ -348,37 +385,59 @@ export class Walk {
           z = this.world.groundAt(nx, ny);
         }
         this.player.z = z;
-        if (this.player.moving) this.player.heading = Math.atan2(my, mx);
+      } else {
+        this.player.moving = true;                   // 桥上的线载着人，走了就是走了
       }
+      // 身体朝去处转：转过去要一点时间，不再原地一下拧九十度
+      if (this.player.moving) {
+        const target = Math.atan2(my, mx);
+        const dh = Math.atan2(Math.sin(target - this.player.heading), Math.cos(target - this.player.heading));
+        this.player.heading += clamp(dh, -11 * dt, 11 * dt);
+      }
+      // 步频跟着真实的速度走（快慢档只改米/秒，腿的频率封顶在跑步的）
+      this.cycle += dt * (4 + Math.min(RUN_SPEED, speed / Math.max(0.001, this.speedScale)) * 0.95);
     } else {
       this.player.moving = false;
     }
-    // the camera stands behind the player, at the distance the user chose: looking down raises it a
-    // little, like a boom, and a wall at its back pulls it in towards the player
+    this.step += ((this.player.moving ? 1 : 0) - this.step) * Math.min(1, dt * PACE_EASE);
+    // 镜头的弹簧臂：先量出这一帧不穿楼该站多远（roofAt 按楼顶高度挡，水与矮墙放行），再向那个距离
+    // 缓过去——压近要快（不能穿墙），放回要慢，楼过去了镜头自己漂回你选的距离
     const pitch = clamp(camera.pitch, -0.9, 1.35);
     const tilt = Math.max(pitch, 0) * 0.75;
     const cos = Math.cos(tilt), sin = Math.sin(tilt);
     let d = this.camDist;
-    for (; d > 0.6; d -= 0.4) {
-      if (!this.world.solidAt(this.player.x - f.x * d * cos, this.player.y - f.y * d * cos)) break;
+    for (; d > FOOT_MIN; d -= 0.3) {
+      if (!this.blocked(this.player.x - f.x * d * cos, this.player.y - f.y * d * cos, this.player.z + EYE_HEIGHT + d * sin)) break;
     }
-    camera.x = this.player.x - f.x * d * cos;
-    camera.y = this.player.y - f.y * d * cos;
-    camera.eyeZ = Math.max(this.player.z + EYE_HEIGHT + d * sin, this.world.groundAt(camera.x, camera.y) + 0.7);
+    d = Math.max(d, FOOT_MIN);
+    this.camNow += (d - this.camNow) * Math.min(1, dt * (d < this.camNow ? 14 : 3.5));
+    camera.x = this.player.x - f.x * this.camNow * cos;
+    camera.y = this.player.y - f.y * this.camNow * cos;
+    camera.eyeZ = Math.max(this.player.z + EYE_HEIGHT + this.camNow * sin, this.world.groundAt(camera.x, camera.y) + 0.7);
   }
 
   // ---- driving ----------------------------------------------------------------------------------------------
 
-  // take the car that stands nearest (a car appears on the road at the player's feet)
+  // take the car that stands nearest: it waits at the kerb of a road at your own height (a deck passing
+  // overhead is not "near"), parked in the right-hand lane
   enterCar() {
-    const near = this.world.roadsNear(this.player.x, this.player.y, 60);
-    if (!near) { this.hud('附近没有路，走近一点再上车'); return false; }
-    this.car = { x: near.x, y: near.y, z: near.z, heading: Math.atan2(near.ty, near.tx), speed: 0, cls: near.line.cls };
+    const near = this.world.roadsNear(this.player.x, this.player.y, 60, [5, 6, 7, 8, 9, 10], null, this.player.z);
+    if (!near) { this.hud('附近没有能上的路'); return false; }
+    const lane = Math.min(2.6, near.line.width * 0.22);
+    let cx = near.x + near.ty * lane, cy = near.y - near.tx * lane;
+    if (this.world.solidAt(cx, cy)) { cx = near.x; cy = near.y; }   // 窄巷的栅格吃掉半条路：退回中线
+    this.car = { x: cx, y: cy, z: near.z,
+      heading: Math.atan2(near.ty, near.tx), speed: 0, vx: 0, vy: 0, cls: near.line.cls };
     this.driving = true;
     this.carLook = { yaw: 0, pitch: 0.24 };
-    this.player.x = near.x; this.player.y = near.y; this.player.z = near.z;
-    this.hud(this.coarse ? '左摇杆 推上油门 · 左右转向 · 右半边拖动 看四周' : 'W/S 油门刹车 · A/D 转向 · E 下车');
+    this.steerPos = 0;
+    this.handbrake = false;
+    this.camNow = this.carCam;
+    this.player.x = this.car.x; this.player.y = this.car.y; this.player.z = near.z;
+    this.hud(this.coarse ? '左摇杆 推上油门 · 左右转向 · 推下刹车倒车 · 右半边拖动 看四周 · 圆钮下车'
+                         : 'W/S 油门刹车 · A/D 转向 · 空格 手刹 · 滚轮 镜头 · E 下车');
     document.getElementById('action').textContent = '下车';
+    this.handbrakeShow(true);
     return true;
   }
 
@@ -389,48 +448,80 @@ export class Walk {
     if (this.world.solidAt(x, y)) { x = this.car.x - hy * 3; y = this.car.y + hx * 3; }
     if (this.world.solidAt(x, y)) { x = this.car.x; y = this.car.y; }
     this.player.x = x; this.player.y = y;
-    this.player.z = this.world.groundAt(x, y);
+    // 下车站在车边上：桥上下的车人留在桥上——人带着车的高度，脚下那条线接住他，不会一步跨出桥沿
+    this.player.z = this.car.z;
     this.player.heading = this.car.heading;
+    this.onLine = null;
+    if (this.player.z > this.world.groundAt(x, y) + 1.5) {
+      const near = this.world.roadsNear(x, y, 3, [5, 6, 7, 8, 9, 10], null, this.player.z);
+      if (near) this.onLine = { tile: near.tile, line: near.line, s: near.s,
+        lateral: clamp((x - near.x) * near.ty - (y - near.y) * near.tx, -2, 2),
+        tx: near.tx, ty: near.ty, length: near.line.length, width: near.line.width };
+    }
     this.driving = false;
     this.car = null;
     this.carLook = { yaw: 0, pitch: 0.24 };
+    this.steerPos = 0;
+    this.handbrake = false;
+    this.pace = 0;
+    this.camNow = this.camDist;
     this.camera.pitch = 0.42;
     document.getElementById('action').textContent = '上车';
+    this.handbrakeShow(false);
     this.hud(this.coarse ? '左半边摇杆 走 · 圆钮上车' : 'WASD 走 · E 上车');
   }
 
-  // one moment at the wheel: the car owns its heading (steering turns it, reversing turns the other
-  // way), the road only guides it — the nearest line gives the height, decks keep the car in their
-  // corridor, and buildings and water block it like they block a walker. The stick drives it like a
-  // dial: how far the thumb leans is how much throttle and how much lock (a phone has no keys)
+  // one moment at the wheel: the car owns a velocity; the engine pushes it along the heading and the
+  // tyres pull it back there (the handbrake lets it slide), the road only guides it — the nearest line
+  // gives the height and the top speed, decks keep the car in their corridor, and buildings and water
+  // block it like they block a walker. The stick drives it like a dial: how far the thumb leans is how
+  // much throttle and how much lock (a phone has no keys)
   driveTick(dt, keys) {
     const car = this.car, camera = this.camera, s = this.stick;
     const throttle = s ? Math.max(0, s.y) : 0, brake = s ? Math.max(0, -s.y) : 0;
     const keyFwd = keys.has('w') || keys.has('arrowup'), keyBack = keys.has('s') || keys.has('arrowdown');
     const forward = keyFwd || throttle > 0, back = keyBack || brake > 0;
-    let steer = (keys.has('a') || keys.has('arrowleft') ? -1 : 0) + (keys.has('d') || keys.has('arrowright') ? 1 : 0);
-    if (!steer && s && Math.abs(s.x) > STICK_DEAD) steer = clamp(s.x * 1.5, -1, 1);
-    const top = Math.min(45, (CAR_TOP[car.cls] ?? 10) * this.speedScale);
-    if (forward) car.speed = Math.min(top, car.speed + CAR_ACCEL * (keyFwd ? 1 : Math.max(0.3, throttle)) * dt);
-    else if (back) car.speed = Math.max(-CAR_REVERSE, car.speed - CAR_BRAKE * (keyBack ? 1 : Math.max(0.3, brake)) * dt);
-    else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), CAR_DRAG * dt);
-    // turning needs way on, tightens at city speed and softens on the fast road; in reverse it swaps sides
-    const grip = clamp(Math.abs(car.speed) / 6, 0, 1) / (1 + Math.abs(car.speed) / 20);
-    car.heading += steer * CAR_STEER * grip * (car.speed < 0 ? -1 : 1) * dt;
+    const keySteer = (keys.has('a') || keys.has('arrowleft') ? -1 : 0) + (keys.has('d') || keys.has('arrowright') ? 1 : 0);
+    const steerIn = keySteer || (s && Math.abs(s.x) > STICK_DEAD ? clamp(s.x * 1.6, -1, 1) : 0);
+    // 方向盘：输入向目标转角缓过去，打满要一会儿，回正更快——点一下转一点，一直按着才到底
+    const ease = Math.abs(steerIn) > Math.abs(this.steerPos) ? STEER_IN : STEER_OUT;
+    this.steerPos += clamp(steerIn - this.steerPos, -ease * dt, ease * dt);
+    // 车速沿车头分出一个前向的量：油门、刹车、滑行阻力，手刹自己再压一截
+    const fx = Math.cos(car.heading), fy = Math.sin(car.heading);
+    let vF = car.vx * fx + car.vy * fy;      // forward
+    let vR = car.vx * fy - car.vy * fx;      // sliding to the car's right
+    const top = Math.min(60, (CAR_TOP[car.cls] ?? 10) * this.speedScale);
+    if (forward) vF = Math.min(top, vF + CAR_ACCEL * (keyFwd ? 1 : Math.max(0.3, throttle)) * dt);
+    else if (back) vF = Math.max(-CAR_REVERSE, vF - CAR_BRAKE * (keyBack ? 1 : Math.max(0.3, brake)) * dt);
+    else vF -= Math.sign(vF) * Math.min(Math.abs(vF), CAR_DRAG * dt);
+    if (this.handbrake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), CAR_HAND * dt);
+    // 轮胎把速度拉回车头方向：侧向那一份衰减掉（正常贴地，手刹拉了几乎不拉——漂移）
+    vR *= Math.exp(-dt * (this.handbrake ? GRIP_DRIFT : GRIP));
+    // 先把速度合成回世界（还在旧车头上），再拧车头：下一刻分解时速度与车头错开一角，
+    // 轮胎再把它拉回来——这一拧一拉就是转弯，拉不住的那部分就是漂移
+    car.vx = fx * vF + fy * vR;
+    car.vy = fy * vF - fx * vR;
+    car.speed = vF;
+    // 转向要有车速：低速打不满，高速变沉；倒车反手；手刹一拉，车头转得更自如
+    const grip = clamp(Math.abs(vF) / 6, 0, 1) / (1 + Math.abs(vF) / 22);
+    car.heading -= this.steerPos * CAR_STEER * grip * (this.handbrake ? 1.15 : 1) * (vF < 0 ? -1 : 1) * dt;
     const hx = Math.cos(car.heading), hy = Math.sin(car.heading);
-    let nx = car.x + hx * car.speed * dt, ny = car.y + hy * car.speed * dt;
-    if (this.world.solidAt(nx, ny)) {
-      // a wall: slide along it and lose way
-      if (!this.world.solidAt(nx, car.y)) ny = car.y;
-      else if (!this.world.solidAt(car.x, ny)) nx = car.x;
-      else { nx = car.x; ny = car.y; }
-      car.speed *= 0.55;
+    let nx = car.x + car.vx * dt, ny = car.y + car.vy * dt;
+    // 在桥面（离地两米以上）上碰撞不问地面的栅格：桥底下与桥边的楼不是这台车的墙，桥的廊道管着它
+    const upHigh = car.z > this.world.groundAt(car.x, car.y) + 2;
+    if (!upHigh && this.world.solidAt(nx, ny)) {
+      // a wall: what runs along it keeps (and loses a little of its way), what runs into it bounces off
+      if (!this.world.solidAt(nx, car.y)) { ny = car.y; car.vy *= -0.2; car.vx *= 0.86; }
+      else if (!this.world.solidAt(car.x, ny)) { nx = car.x; car.vx *= -0.2; car.vy *= 0.86; }
+      else { nx = car.x; ny = car.y; car.vx *= 0.3; car.vy *= 0.3; }
     }
-    // the road under the wheels: the nearest line's level, a deck's corridor, and the deck's own height
+    // the road under the wheels: the nearest line's class sets the top speed as the road changes, a
+    // deck's corridor keeps the car at the deck's own height
     const near = this.world.roadsNear(nx, ny, 12, [5, 6, 7, 8, 9, 10], null, car.z);
     const ground = this.world.groundAt(nx, ny);
     let z = ground;
     if (near) {
+      car.cls = near.line.cls;
       if (near.z > ground + 2) {
         // up on a deck: stay in its corridor, at its height
         const dx = nx - near.x, dy = ny - near.y;
@@ -456,9 +547,20 @@ export class Walk {
     camera.yaw = camera.constructor.yawOf(hx, hy) + this.carLook.yaw;
     camera.pitch = this.carLook.pitch;
     const f = camera.walkForward();
-    camera.x = nx - f.x * CHASE_BACK;
-    camera.y = ny - f.y * CHASE_BACK;
-    camera.eyeZ = z + CHASE_UP;
+    // 追尾镜头：车速越快站得越远一点；量出不穿楼该站多远（roofAt 按楼顶高度挡），压近快、放回慢，
+    // 过一栋楼是一个起伏而不是一跳；被压近时镜头顺着楼往上升一点，看过楼顶去
+    const speedK = clamp(Math.abs(vF) / 16, 0, 1);
+    const want = clamp(this.carCam * (1 + speedK * 0.35), CHASE_MIN, 24);
+    let d = want;
+    for (; d > CHASE_MIN; d -= 0.5) {
+      if (!this.blocked(nx - f.x * d, ny - f.y * d, z + 1.2 + (CHASE_UP - 1.2) * (d / want))) break;
+    }
+    d = Math.max(d, CHASE_MIN);
+    this.camNow += (d - this.camNow) * Math.min(1, dt * (d < this.camNow ? 10 : 3));
+    camera.x = nx - f.x * this.camNow;
+    camera.y = ny - f.y * this.camNow;
+    camera.eyeZ = z + CHASE_UP + (1 - (this.camNow - CHASE_MIN) / Math.max(0.1, want - CHASE_MIN)) * 1.6;
+    camera.eyeZ = Math.max(camera.eyeZ, this.world.groundAt(camera.x, camera.y) + 1);
   }
 
   // ---- the player among the traffic -------------------------------------------------------------------------
@@ -640,12 +742,7 @@ export class Walk {
     }
   }
 
-  // the pace: a turn of the wheel or a press of +/− multiplies it
-  speedBy(delta) {
-    this.speedScale = clamp(this.speedScale * Math.exp(-delta * 0.0011), 0.5, 6);
-    this.hud();
-  }
-
+  // the pace: a press of +/− walks it round a ladder
   speedStep(up) {
     const steps = [0.5, 1, 1.5, 2, 3, 4, 6];
     const at = steps.findIndex(v => v >= this.speedScale - 1e-6);
@@ -654,7 +751,7 @@ export class Walk {
     this.hud();
   }
 
-  // a phone has no wheel and no +/−: one button walks the pace round the same ladder, and wraps
+  // a phone has no +/−: one button walks the pace round the same ladder, and wraps
   speedCycle() {
     const steps = [0.5, 1, 1.5, 2, 3, 4, 6];
     const at = steps.findIndex(v => v >= this.speedScale - 1e-6);
@@ -662,13 +759,30 @@ export class Walk {
     this.hud();
   }
 
-  // the camera's stand behind the player, 2 to 6 metres
-  camDistStep(farther) {
-    const steps = [2, 2.5, 3, 3.5, 4, 5, 6];
-    const at = steps.findIndex(v => v >= this.camDist - 1e-6);
-    const next = farther ? Math.min(steps.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1);
-    this.camDist = steps[at === -1 ? 0 : next];
+  // the wheel is the camera now: it eases the boom in and out, on foot and at the wheel alike
+  camZoom(delta) {
+    const factor = Math.exp(-delta * 0.0011);
+    if (this.driving) this.carCam = clamp(this.carCam * factor, 6, 24);
+    else this.camDist = clamp(this.camDist * factor, 1.6, 8);
     this.hud();
+  }
+
+  // the camera's stand, walked round a ladder of the mode you are in (the buttons, and the [ ] keys)
+  camDistStep(farther) {
+    const steps = this.driving ? CAR_CAM_STEPS : FOOT_CAM_STEPS;
+    const now = this.driving ? this.carCam : this.camDist;
+    let at = steps.findIndex(v => v >= now - 1e-6);
+    if (at === -1) at = farther ? 0 : steps.length - 1;
+    else at = clamp(at + (farther ? 1 : -1), 0, steps.length - 1);
+    if (this.driving) this.carCam = steps[at];
+    else this.camDist = steps[at];
+    this.hud();
+  }
+
+  // the handbrake button exists only where there is no space key to press
+  handbrakeShow(show) {
+    const el = document.getElementById('handbrake');
+    if (el) el.hidden = !(show && this.coarse);
   }
 
   // a touch on the left of the screen: the ring comes to the thumb, and how far the knob is pushed from
@@ -687,12 +801,27 @@ export class Walk {
   moveStick(x, y) {
     if (!this.stickHome) return;
     let dx = x - this.stickHome.x, dy = y - this.stickHome.y;
+    // 浮动摇杆：拇指推出圈外，圈跟着手走——大转向不必把手指缩回来
     const d = Math.hypot(dx, dy);
-    if (d > STICK_RANGE) { dx *= STICK_RANGE / d; dy *= STICK_RANGE / d; }
+    if (d > STICK_RANGE) {
+      const k = (d - STICK_RANGE) / d;
+      this.stickHome.x += dx * k;
+      this.stickHome.y += dy * k;
+      dx = x - this.stickHome.x;
+      dy = y - this.stickHome.y;
+      if (this.stickEl) {
+        this.stickEl.style.left = `${this.stickHome.x}px`;
+        this.stickEl.style.top = `${this.stickHome.y}px`;
+      }
+    }
     this.setKnob(dx, dy);
-    let sx = dx / STICK_RANGE, sy = -dy / STICK_RANGE;
-    if (Math.hypot(sx, sy) < STICK_DEAD) { sx = 0; sy = 0; }
-    this.stick = { x: sx, y: sy };
+    // 死区之外走一条缓曲线：小推慢走，越到圈边越快，推满过线就是跑
+    let m = Math.hypot(dx, dy) / STICK_RANGE;
+    m = Math.max(0, (m - STICK_DEAD) / (1 - STICK_DEAD));
+    const out = Math.pow(m, STICK_CURVE);
+    if (out <= 0) { this.stick = { x: 0, y: 0 }; return; }
+    const ang = Math.atan2(dy, dx);
+    this.stick = { x: Math.cos(ang) * out, y: -Math.sin(ang) * out };
   }
 
   endStick() {
@@ -742,7 +871,7 @@ export class Walk {
     if (this.driving) return;
     const button = document.getElementById('action');
     if (!button) return;
-    const near = this.world.roadsNear(this.player.x, this.player.y, 45);
+    const near = this.world.roadsNear(this.player.x, this.player.y, 45, [5, 6, 7, 8, 9, 10], null, this.player.z);
     button.disabled = !near;
     if (!button.textContent) button.textContent = '上车';
   }

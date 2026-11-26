@@ -137,11 +137,15 @@ export const UNIT_SQUARE = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 // The walking view's collision raster of one tile: a byte per SOLID_CELL_M square, 1 where a walker or a
 // car cannot be — inside a building, or on open water. The buildings come as their district-tier mesh,
 // whose roofs cover each building's own ground (a wall's normal is a full unit vector and casts no area);
-// the water as its ground mesh, whose every triangle is water.
+// the water as its ground mesh, whose every triangle is water. Beside the bytes, `roof` holds for every
+// square a building stands on how high that building reaches (decimetres, 0 where none): the walking
+// camera reads it, to pass over a low wall and stop short of a tall one instead of pulling in on
+// footprints alone.
 function solidRaster(size, buildings, water) {
   const n = Math.ceil(size / SOLID_CELL_M);
   const bytes = new Uint8Array(n * n);
-  const fill = (ax, ay, bx, by, cx, cy) => {
+  const roof = new Uint16Array(n * n);
+  const fill = (ax, ay, bx, by, cx, cy, h) => {
     const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
     if (Math.abs(area) < 1e-9) return;
     const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx) / SOLID_CELL_M)), maxX = Math.min(n - 1, Math.floor(Math.max(ax, bx, cx) / SOLID_CELL_M));
@@ -153,15 +157,18 @@ function solidRaster(size, buildings, water) {
         const w0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
         const w1 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
         const w2 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
-        if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) bytes[row * n + col] = 1;
+        if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) {
+          bytes[row * n + col] = 1;
+          if (h > roof[row * n + col]) roof[row * n + col] = h;
+        }
       }
     }
   };
-  const mark = (vertices, indices, stride, wanted) => {
+  const mark = (vertices, indices, stride, wanted, height) => {
     for (let k = 0; k + 2 < indices.length; k += 3) {
       const a = indices[k] * stride, b = indices[k + 1] * stride, c = indices[k + 2] * stride;
       if (wanted && !wanted(a, b, c, vertices)) continue;
-      fill(vertices[a], vertices[a + 1], vertices[b], vertices[b + 1], vertices[c], vertices[c + 1]);
+      fill(vertices[a], vertices[a + 1], vertices[b], vertices[b + 1], vertices[c], vertices[c + 1], height ? height(a, vertices) : 0);
     }
   };
   if (buildings && buildings.indices.length) {
@@ -170,10 +177,13 @@ function solidRaster(size, buildings, water) {
       if (props && props[verts[a + 5] * 9 + 8] >= 32) return false;   // a landmark built by hand stands here instead
       const nx = verts[a + 3], ny = verts[a + 4];
       return nx * nx + ny * ny < 0.9;   // a roof, flat or pitched: a wall projects to a line, not an area
+    }, (a, verts) => {
+      const b = verts[a + 5] * 9;       // this corner's building: base z plus its height, in decimetres
+      return Math.min(6553, props[b] + props[b + 1]) * 10;
     });
   }
   if (water && water.indices.length) mark(water.vertices, water.indices, 5, null);
-  return { n, cell: SOLID_CELL_M, bytes };
+  return { n, cell: SOLID_CELL_M, bytes, roof };
 }
 
 export class World {
@@ -296,6 +306,18 @@ export class World {
     const col = Math.floor((x - tile.x0) / SOLID_CELL_M), row = Math.floor((y - tile.y0) / SOLID_CELL_M);
     if (col < 0 || row < 0 || col >= raster.n || row >= raster.n) return 0;
     return raster.bytes[row * raster.n + col];
+  }
+
+  // how high the building standing over a point reaches, 0 where nothing does (the walking camera probes
+  // this along its boom: a low wall lets the eye pass over, a tall one pulls the boom in). Water has no
+  // height, so the camera may hang over it even where a walker may not set foot.
+  roofAt(x, y) {
+    const tile = this.tileAt(x, y);
+    const raster = tile?.solid;
+    if (!raster || !raster.roof) return 0;
+    const col = Math.floor((x - tile.x0) / SOLID_CELL_M), row = Math.floor((y - tile.y0) / SOLID_CELL_M);
+    if (col < 0 || row < 0 || col >= raster.n || row >= raster.n) return 0;
+    return raster.roof[row * raster.n + col] / 10;
   }
 
   // the nearest walkable line of the road network to a point (the walking view's roads to drive on):

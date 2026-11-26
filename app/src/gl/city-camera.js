@@ -26,7 +26,10 @@ export class CityCamera {
     this.textureScale = 22;              // pixels per metre for the close-in textures while walking
   }
 
-  // the direction on the ground that runs up the screen, and the one that runs to the right: unit vectors
+  // the direction on the ground that runs up the screen, and the one that runs to the right: unit vectors.
+  // Up the screen is the ground direction that increases v ((c+s, c−s)/√2), right the one that increases
+  // u ((c−s, −(c+s))/√2) — read both off the projection, not off the forward vector, or the right one
+  // comes out mirrored everywhere but at yaw 0
   walkForward() {
     const k = Math.SQRT1_2, c = this.cos, s = this.sin;
     return { x: (c + s) * k, y: (c - s) * k };
@@ -34,7 +37,7 @@ export class CityCamera {
 
   walkRight() {
     const k = Math.SQRT1_2, c = this.cos, s = this.sin;
-    return { x: (c + s) * k, y: (s - c) * k };
+    return { x: (c - s) * k, y: -(c + s) * k };
   }
 
   // where the eye stands (walking), for the shaders and the tile arithmetic
