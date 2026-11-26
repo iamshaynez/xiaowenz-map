@@ -84,11 +84,13 @@ async function boot() {
   // tests; 5 walks the four. The light stays on the screen's upper left (D017) at every hour: only the
   // shadow's length and the colour of things change.
   const TIMES = {
-    dawn: { label: '晨', shadow: [2.2, 1.83], tint: [1.0, 0.86, 0.78], paper: '#f6ede6', night: 0.25 },
-    noon: { label: '昼', shadow: [1.004, 0.834], tint: [1, 1, 1], paper: '#ffffff', night: 0 },
-    dusk: { label: '暮', shadow: [2.6, 2.16], tint: [1.0, 0.78, 0.64], paper: '#efe2d8', night: 0.55 },
-    night: { label: '夜', shadow: [1.004, 0.834], tint: [0.34, 0.40, 0.60], paper: '#131722', night: 1 },
+    dawn: { label: '晨', shadow: [2.2, 1.83], tint: [1.0, 0.86, 0.78], paper: '#f6ede6', night: 0.25, sky: { top: '#d8c2d6', horizon: '#f2e0ce' } },
+    noon: { label: '昼', shadow: [1.004, 0.834], tint: [1, 1, 1], paper: '#ffffff', night: 0, sky: { top: '#a6cee2', horizon: '#efe7d8' } },
+    dusk: { label: '暮', shadow: [2.6, 2.16], tint: [1.0, 0.78, 0.64], paper: '#efe2d8', night: 0.55, sky: { top: '#6c5e94', horizon: '#e6b486' } },
+    night: { label: '夜', shadow: [1.004, 0.834], tint: [0.34, 0.40, 0.60], paper: '#131722', night: 1, sky: { top: '#090d1a', horizon: '#1a2138' } },
   };
+  // ?sky=1 把白纸换成天：岛后面四条色带，夜里带星。默认关——白纸是 pixel-plays 的身份（REVIEW-QUEUE 45）。
+  renderer.sky = new URLSearchParams(location.search).get('sky') === '1' ? 1 : 0;
   const timeNames = Object.keys(TIMES);
   let time = new URLSearchParams(location.search).get('time');
   if (!TIMES[time]) time = 'noon';

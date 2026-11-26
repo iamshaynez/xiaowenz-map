@@ -67,7 +67,7 @@ export class StyleRenderer {
   }
 
   // --- drawing helpers ---------------------------------------------------------------
-  fullscreen(name, fbo, textures = {}, uniforms = {}) {
+  fullscreen(name, fbo, textures = {}, uniforms = {}, { depthWrite = true } = {}) {
     const { gl, frame } = this;
     const prog = this.programs[name].use();
     this.applyCamera(prog);
@@ -82,7 +82,7 @@ export class StyleRenderer {
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.ALWAYS);
     gl.disable(gl.BLEND);
-    gl.depthMask(true);
+    gl.depthMask(depthWrite);
     gl.colorMask(true, true, true, true);
     frame.bindLow(fbo);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

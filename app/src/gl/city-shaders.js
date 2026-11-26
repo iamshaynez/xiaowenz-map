@@ -583,6 +583,35 @@ void main() {
 }`,
   },
 
+  // ?sky=1 的天空：岛后面四条色带，带与带之间 Bayer 抖动过渡，夜里洒一点星。屏幕空间就够——
+  // 岛的溶解边本来就溶进它后面的东西，现在那后面是天。
+  sky: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + 'uniform vec4 uView;\n' + PIXEL + CITY_CAMERA + TABLES + NOISE + CLASS + /* glsl */`
+uniform sampler2D uColor;              // the finished picture, for the pixels nothing was drawn on
+uniform sampler2D uClass;              // the class buffer: covered pixels keep their colour
+uniform vec3 uSkyTop;
+uniform vec3 uSkyHorizon;
+uniform float uNight;
+out vec4 outColor;
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec3 color = texelFetch(uColor, q, 0).rgb;
+  vec4 cls = texelFetch(uClass, q, 0);
+  if (!isCovered(cls)) {
+    // nothing was drawn here: the sky takes it, in bands with a dithered seam, stars at night
+    float h = float(q.y) / uFrame.y;                     // 0 at the horizon side, 1 at the top
+    float band = floor(h * 4.0 + (bayerAt(cpu(q)) - 0.5) * 0.8);
+    color = mix(uSkyHorizon, uSkyTop, clamp(band / 4.0, 0.0, 1.0));
+    if (uNight > 0.5 && h > 0.3) {
+      float r = hashAt(vec2(q) / 2.0 + 41.0);            // a speck in one cell of forty-six
+      if (r > 0.9785) color = mix(color, vec3(0.88, 0.90, 1.0), 0.85);
+    }
+  }
+  outColor = vec4(color, 1.0);
+}`,
+  },
+
   // The rain: whole-pixel dashes sliding down the frame in steps, in a third of the columns, and only
   // over what is drawn — the paper stays dry. Frozen time holds them where they are for the tests.
   rain: {

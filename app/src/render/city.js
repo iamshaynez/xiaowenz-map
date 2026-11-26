@@ -68,6 +68,9 @@ export class CityRenderer extends StyleRenderer {
     this.paperRgb = [1, 1, 1];
     this.cloud = 1;                      // the fair-weather scattering is always about; rain sets 2, a clear sky 0
     this.rain = 0;                       // 1 while it rains: no sun shadow, thicker haze, wet roads, dashes in the frame
+    this.sky = 0;                        // 1 to draw the bands of sky behind the island (?sky=1)
+    this.skyTop = [0.62, 0.79, 0.88];
+    this.skyHorizon = [0.93, 0.90, 0.84];
     this.lampHeads = new Float32Array(64 * 3);
     this.lampCount = 0;
     this.drawn = { tiles: 0, triangles: 0, trees: 0 };
@@ -185,10 +188,17 @@ export class CityRenderer extends StyleRenderer {
   setTimeOfDay(def) {
     this.shadowLen = def.shadow;
     this.night = def.night;
-    const m = /^#([0-9a-f]{6})$/i.exec(def.paper);
-    const v = m ? [1, 3, 5].map(k => parseInt(def.paper.slice(k, k + 2), 16) / 255) : [1, 1, 1];
+    const hex = text => {
+      const m = /^#([0-9a-f]{6})$/i.exec(text || '');
+      return m ? [1, 3, 5].map(k => parseInt(text.slice(k, k + 2), 16) / 255) : [1, 1, 1];
+    };
+    const v = hex(def.paper);
     this.paper = [v[0], v[1], v[2], 1];
     this.paperRgb = [v[0], v[1], v[2]];
+    if (def.sky) {
+      this.skyTop = hex(def.sky.top);
+      this.skyHorizon = hex(def.sky.horizon);
+    }
   }
 
   bind(unit, texture) {
@@ -226,40 +236,46 @@ export class CityRenderer extends StyleRenderer {
       else this.drawOverview(world);
     }
     this.resolve();
-    this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.color, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
+    // 天空画在 resolve 之后：resolve 把没画东西的像素填成纸色，天空就画在那些地方——
+    // 岛的溶解边溶进天，而不是溶进纸。类别缓冲说哪里是空的。从这往后，画完的图在两块
+    // 工作缓冲之间传递：同时记住它所在的纹理和持有它的 framebuffer，不然某个 pass
+    // 就读写同一张图了。
+    let picTex = frame.color, picFbo = frame.workAFbo;
+    const flip = f => (f === frame.workAFbo ? frame.workBFbo : frame.workAFbo);
+    const texOf = f => (f === frame.workAFbo ? frame.workA : frame.workB);
+    if (this.sky > 0.5) {
+      this.fullscreen('sky', picFbo, { uColor: frame.color, uClass: frame.class },
+        { uSkyTop: this.skyTop, uSkyHorizon: this.skyHorizon, uNight: this.night });
+      picTex = texOf(picFbo);
+    }
+    this.fullscreen('groundTint', flip(picFbo), { uColor: picTex, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
+    picFbo = flip(picFbo); picTex = texOf(picFbo);
     // the ground's own seams: kerbs, banks, the edges of paths (city-side; the reference scene has none)
-    this.fullscreen('seams', frame.workBFbo, { uColor: frame.workA, uClass: frame.class }, { uSnow: this.snow });
-    // from here the finished picture moves between the two work buffers: track both the texture it is in
-    // and the framebuffer that holds it, or a pass ends up reading and writing the same picture at once
-    let picTex = frame.workB, picFbo = frame.workBFbo;
+    this.fullscreen('seams', flip(picFbo), { uColor: picTex, uClass: frame.class }, { uSnow: this.snow });
+    picFbo = flip(picFbo); picTex = texOf(picFbo);
     if (this.night > 0.2 && this.lampCount > 0) {
       // the pools the street lamps cast on the ground
-      this.fullscreen('lampLight', frame.workAFbo, { uColor: picTex, uClass: frame.class },
+      this.fullscreen('lampLight', flip(picFbo), { uColor: picTex, uClass: frame.class },
         { uLamps: this.lampHeads, uLampCount: this.lampCount, uNight: this.night });
-      picTex = frame.workA; picFbo = frame.workAFbo;
+      picFbo = flip(picFbo); picTex = texOf(picFbo);
     }
     if (!edges) return picFbo;
-    const edgesFbo = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
-    this.fullscreen('edges', edgesFbo, { uColor: picTex, uClass: frame.class, uDepthTex: frame.depth },
+    this.fullscreen('edges', flip(picFbo), { uColor: picTex, uClass: frame.class, uDepthTex: frame.depth },
       walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
-    picTex = edgesFbo === frame.workAFbo ? frame.workA : frame.workB;
-    picFbo = edgesFbo;
-    const other = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
+    picFbo = flip(picFbo); picTex = texOf(picFbo);
     if (walking) {
       // the haze: what stands beyond the loaded tiles melts into the page's paper before its edge could be seen
-      this.fullscreen('walkFog', other, { uColor: picTex, uDepthTex: frame.depth },
+      this.fullscreen('walkFog', flip(picFbo), { uColor: picTex, uDepthTex: frame.depth },
         { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paperRgb });
     } else {
       // 大气透视: the far end of the picture sinks into the paper, by how far it is; the rain thickens it
-      this.fullscreen('airHaze', other, { uColor: picTex, uDepthTex: frame.depth },
+      this.fullscreen('airHaze', flip(picFbo), { uColor: picTex, uDepthTex: frame.depth },
         { uDepth: this.depthRange, uPaper: this.paperRgb, uHaze: 0.55 + this.rain * Math.min(0.3, city.scale * 0.08) });
     }
-    picTex = other === frame.workAFbo ? frame.workA : frame.workB;
-    picFbo = other;
+    picFbo = flip(picFbo); picTex = texOf(picFbo);
     if (this.rain > 0.5) {
-      const rainFbo = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
-      this.fullscreen('rain', rainFbo, { uColor: picTex, uClass: frame.class }, { uTime: this.time, uRain: this.rain });
-      return rainFbo;
+      this.fullscreen('rain', flip(picFbo), { uColor: picTex, uClass: frame.class }, { uTime: this.time, uRain: this.rain });
+      picFbo = flip(picFbo); picTex = texOf(picFbo);
     }
     return picFbo;
   }
