@@ -14,7 +14,7 @@
 export const CANAL = 200, RIVER = 201, LAKE = 202;
 const MAJOR = 5, SECONDARY = 6, MINOR = 7, SERVICE = 8, PEDESTRIAN = 9, PATH = 10;
 
-export const KIND = { CAR: 0, VAN: 1, BUS: 2, CANAL_BOAT: 3, RIVER_BOAT: 4, LAKE_BOAT: 5, ROW_BOAT: 6, LEGS: 7, BODY: 8, HEAD: 9, LASER: 10, GLOW: 11 };
+export const KIND = { CAR: 0, VAN: 1, BUS: 2, CANAL_BOAT: 3, RIVER_BOAT: 4, LAKE_BOAT: 5, ROW_BOAT: 6, LEGS: 7, BODY: 8, HEAD: 9, LASER: 10, GLOW: 11, LAMP_HEAD: 12 };
 // by kind: length along the line, width across it, height: metres
 const SIZE = [
   [4.4, 1.8, 1.5],      // car
@@ -46,8 +46,8 @@ const WALK = 1.3;                       // metres a second
 
 // colours are palette indices, given by the renderer (colour names are its business)
 export const TRAFFIC_COLOURS = ['car_white', 'car_silver', 'car_dark', 'car_red', 'car_blue', 'taxi_yellow', 'bus_green', 'hull_dark',
-  'cabin_white', 'lake_boat_teal', 'skin', 'cloth_a', 'cloth_b', 'cloth_c', 'cloth_d'];
-const [WHITE, SILVER, DARK, RED, BLUE, TAXI, BUS, HULL, CABIN, TEAL, SKIN, CLOTH_A, CLOTH_B, CLOTH_C, CLOTH_D] = TRAFFIC_COLOURS.map((_, k) => k);
+  'cabin_white', 'lake_boat_teal', 'skin', 'cloth_a', 'cloth_b', 'cloth_c', 'cloth_d', 'window_lit'];
+const [WHITE, SILVER, DARK, RED, BLUE, TAXI, BUS, HULL, CABIN, TEAL, SKIN, CLOTH_A, CLOTH_B, CLOTH_C, CLOTH_D, WINDOW_LIT] = TRAFFIC_COLOURS.map((_, k) => k);
 const CAR_COLOURS = [WHITE, WHITE, WHITE, SILVER, SILVER, DARK, DARK, RED, BLUE, TAXI];
 const CLOTHES = [CLOTH_A, CLOTH_B, CLOTH_C, CLOTH_D, DARK, WHITE];
 
@@ -84,6 +84,8 @@ export class Traffic {
     this.people = 0;
     this.spot = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
     this.drawn = { cars: 0, boats: 0, people: 0 };
+    this.lampHeads = new Float32Array(64 * 3);      // where the lamps near the camera stand, for the pools of light
+    this.lampCount = 0;
   }
 
   static grow(buffer, n) {
@@ -122,6 +124,7 @@ export class Traffic {
     this.count = 0;
     this.people = 0;
     this.drawn = { cars: 0, boats: 0, people: 0, lamps: 0 };
+    this.lampCount = 0;
     const { W, H, scale } = frame;
     this.camera = camera;
     if (camera.walking) {
@@ -148,7 +151,7 @@ export class Traffic {
         const street = STREETS[line.cls], water = WATERS[line.cls];
         if (street && which.cars) this.flow(line, n, street, time, tile, colours, 0.2, true);
         if (water && which.boats && (line.cls !== LAKE || which.lake)) this.flow(line, n, water, time, tile, colours, line.cls === LAKE ? 0.2 : 0, false);
-        if (which.lamps && street) this.lamps(line, n, tile, colours);
+        if (which.lamps && street) this.lamps(line, n, tile, colours, which.lit);
         if (which.people && PEOPLE[line.cls]) {
           // on the pavements of a street, to either side of it; along the middle of a pedestrian street or a path
           this.walk(line, n, PEOPLE[line.cls], time, tile, colours, line.cls === PEDESTRIAN || line.cls === PATH ? 0.3 : 1);
@@ -202,8 +205,9 @@ export class Traffic {
 
   // street lamps along a line: every twenty-eight metres, either side of the road in turn — a pole, an
   // arm reaching over the carriageway, and the lamp on the end of it. By day the lamp is a pale box;
-  // at night the page asks for it lit (walk.js and the renderer know the hour) and it shines.
-  lamps(line, n, tile, colours) {
+  // at night it shines (a kind of its own, which the shader lights at its brightest step) and the page
+  // draws the pool it casts on the ground. The heads near the camera are remembered for that pool.
+  lamps(line, n, tile, colours, lit) {
     const count = Math.max(1, Math.round(line.length / 28));
     for (let k = 0; k < count; k++) {
       const side = k % 2 === 0 ? 1 : -1;
@@ -214,10 +218,18 @@ export class Traffic {
       const lane = side * (line.width + 0.9);
       const x = tile.x0 + p.x + p.ty * lane, y = tile.y0 + p.y - p.tx * lane;
       if (!this.near(x, y)) continue;
-      const dark = colours[DARK], pale = colours[CABIN];
+      const dark = colours[DARK];
+      const headX = x - side * p.ty * 1.4, headY = y + side * p.tx * 1.4, headZ = p.z + 5.34;
       this.box(x, y, p.z + 0.14, p.tx, p.ty, 0.14, 0.14, 5.3, dark, dark, 0);                                        // the pole
       this.box(x - side * p.ty * 0.9, y + side * p.tx * 0.9, p.z + 5.32, p.tx, p.ty, 1.1, 0.1, 0.1, dark, dark, 0);  // the arm over the road
-      this.box(x - side * p.ty * 1.4, y + side * p.tx * 1.4, p.z + 5.26, p.tx, p.ty, 0.55, 0.24, 0.16, pale, pale, 0); // the lamp
+      this.box(headX, headY, p.z + 5.26, p.tx, p.ty, 0.55, 0.24, 0.16, lit ? colours[WINDOW_LIT] : colours[CABIN], lit ? colours[WINDOW_LIT] : colours[CABIN], lit ? KIND.LAMP_HEAD : 0);
+      if (this.lampCount < 64) {
+        const at = this.lampCount * 3;
+        this.lampHeads[at] = headX - this.camera.x;
+        this.lampHeads[at + 1] = headY - this.camera.y;
+        this.lampHeads[at + 2] = headZ;
+        this.lampCount++;
+      }
       this.drawn.lamps++;
     }
   }

@@ -6,6 +6,7 @@ import { course, said, search } from './world/names.js';
 import { Mark } from './render/mark.js';
 
 const SEASON_LABELS = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
+const TIME_LABELS = { dawn: '晨', noon: '昼', dusk: '暮', night: '夜' };
 const PIXEL_SIZES = ['细', '中', '粗'];       // how big a pixel is on the page: the frame is cut into that many more or fewer
 const TOP_DOWN = 1.483;                      // pitch of the top-down view, 85 degrees
 // how close the flight to a thing found by name comes when the thing is a point: by what it is. A line and what
@@ -77,6 +78,22 @@ export function createInterface(app) {
   function setSeason(name) {
     app.setSeason(name);
     for (const button of $('seasons').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.season === name));
+    hooks.dirty();
+  }
+
+  // ---- the hour ------------------------------------------------------------------------------------------
+  for (const name of app.times) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = TIME_LABELS[name] || name;
+    button.dataset.time = name;
+    button.setAttribute('aria-pressed', String(name === app.time()));
+    button.addEventListener('click', () => setTime(name));
+    $('times').append(button);
+  }
+  function setTime(name) {
+    app.setTime(name);
+    for (const button of $('times').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.time === name));
     hooks.dirty();
   }
 
@@ -236,6 +253,7 @@ export function createInterface(app) {
     if (key === '/') { e.preventDefault(); findBox.focus(); return; }           // a line to write a name in
     const digit = '1234'.indexOf(key);
     if (digit >= 0 && app.seasons[digit]) { setSeason(app.seasons[digit]); return; }
+    if (key === '5') { const at = app.times.indexOf(app.time()); setTime(app.times[(at + 1) % app.times.length]); return; }
     if (key === 'm') { topDown(camera.pitch < 1.2); return; }
     if (key === 't') { if (tour) stopTour(); else startTour(); return; }
     if (key === 'r') { $('home').click(); return; }

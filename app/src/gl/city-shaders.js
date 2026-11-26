@@ -356,6 +356,8 @@ uniform int uWood;
 uniform int uRed;
 uniform int uAwning;                    // of the first of three awning colours (green, red, blue, consecutive)
 uniform float uLift;                    // what the vertex shader raised the model by (a landmark on its ground)
+uniform float uNight;                   // 0 by day, 1 in the small hours: some windows answer it with light
+uniform int uWindowLit;                 // the palette index of lit glass (never tinted by the hour)
 const int JIANGNAN = 1, WALKUP = 2, FARMHOUSE = 3, TOWER = 4, OFFICE = 5, INDUSTRIAL = 6, PUBLIC = 7, TEMPLE = 8, STATION = 9, SHED = 10;
 // by archetype: metres between window bays; and where in a bay a window opens (across, up the storey)
 const float BAY[10] = float[10](4.2, 3.3, 3.2, 3.0, 1.5, 2.4, 3.6, 4.0, 1.5, 3.0);
@@ -396,8 +398,11 @@ void main() {
       vec4 open = OPEN[archetype - 1];
       if (archetype == OFFICE || archetype == STATION) {
         // a curtain wall: glass between mullions on every storey
-        level += (bay > open.x && bay < open.y && up > open.z && up < open.w) ? -1.0 : 0.8;
-        if (!(bay > open.x && bay < open.y && up > open.z && up < open.w) && up < 0.1) level -= 0.5;   // the slab line in the spandrel
+        bool glass = bay > open.x && bay < open.y && up > open.z && up < open.w;
+        level += glass ? -1.0 : 0.8;
+        if (!glass && up < 0.1) level -= 0.5;                                   // the slab line in the spandrel
+        // at night a whole floor of offices is at work, or is not, floor by floor
+        if (uNight > 0.0 && glass && hashAt(vec2(vLook.w * 7.13, floor(storeys) + float(archetype))) < uNight * 0.45) colour = uWindowLit;
       } else if (archetype == INDUSTRIAL) {
         if (up > open.z && up < open.w && fract(vFace.x / 1.2) > 0.12) colour = uWindow;     // a strip of windows under the eave
         level -= (fract(vFace.x / 0.4) > 0.5 ? 0.35 : 0.0);                                  // corrugated sheeting
@@ -425,10 +430,15 @@ void main() {
             if (bay > 0.06 && bay < 0.94 && up > 0.12 && up < 0.68) colour = uWindow;
             else if (up >= 0.68 && up < 0.82 && bay > 0.06 && bay < 0.94) colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, 9.2)) * 3.0);
             else if (bay > 0.40 && bay < 0.52 && up >= 0.68) colour = uWood;
+            // a shop keeps its light on past dark more often than a home does
+            if (uNight > 0.0 && colour == uWindow && hashAt(vec2(vLook.w * 17.31, 7.7)) < uNight) colour = uWindowLit;
           } else {
             if (bay > 0.42 && bay < 0.56 && up < 0.78) colour = archetype == TEMPLE ? uRed : uWood;
             else if ((archetype == WALKUP || archetype == FARMHOUSE || archetype == INDUSTRIAL) && up > 0.9) level -= 1.0;
           }
+        } else if (uNight > 0.0 && colour == uWindow) {
+          // a home answers the night window by window: a little over half of them at full night
+          if (hashAt(vec2(vLook.w * 13.7, floor(storeys) * 3.11 + floor(bay * 4.0))) < uNight * 0.55) colour = uWindowLit;
         }
       }
     }
@@ -441,7 +451,7 @@ void main() {
 `,
   },
 
-  // The walking view's haze: the picture fades into the page's white with distance, so that the edge
+  // The walking view's haze: the picture fades into the page's paper with distance, so that the edge
   // where the loaded tiles end is never seen. Fullscreen over the finished picture.
   walkFog: {
     vs: FULLSCREEN_VS,
@@ -450,13 +460,14 @@ uniform sampler2D uColor;
 uniform sampler2D uDepthTex;            // the resolved depth, 0..1
 uniform vec2 uDepth;                    // nearest and farthest engine depth (the walking view: metres ahead)
 uniform vec2 uFog;                      // metres ahead where the haze begins, and where it is whole
+uniform vec3 uPaper;                    // the colour of the page's paper (white by day, ink at night)
 out vec4 outColor;
 void main() {
   vec3 color = texelFetch(uColor, ivec2(gl_FragCoord.xy), 0).rgb;
   float z = texelFetch(uDepthTex, ivec2(gl_FragCoord.xy), 0).r;
   float ahead = uDepth.x - z * (uDepth.x - uDepth.y);   // metres from the eye (the walking view's depth)
   float fog = smoothstep(uFog.x, uFog.y, ahead);
-  outColor = vec4(mix(color, vec3(1.0), fog), 1.0);
+  outColor = vec4(mix(color, uPaper, fog), 1.0);
 }`,
   },
 
@@ -499,6 +510,42 @@ void main() {
   outColor = vec4(color, 1.0);
   outClass = vec4(1.0, 5.0 / 255.0, 0.0, 1.0);
   gl_FragDepth = depthOf(vDepth);
+}`,
+  },
+
+  // The pools the street lamps cast on the ground at night. The page hands over the lamp heads near the
+  // camera (world metres relative to the camera centre); each is projected back onto the screen and warms
+  // the ground pixels inside its pool, in the engine's own manner: a stepped gain with the Bayer pattern
+  // at its edge. Only the ground answers; what stands above it keeps the dark.
+  lampLight: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + CITY_CAMERA + CLASS + /* glsl */`
+uniform sampler2D uColor;
+uniform sampler2D uClass;               // r: ground, g: the ground class of each pixel
+uniform vec4 uLamps[64];                // x, y, z of a lamp head, relative to the camera centre
+uniform int uLampCount;
+uniform float uNight;
+out vec4 outColor;
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec3 color = texelFetch(uColor, q, 0).rgb;
+  outColor = vec4(color, 1.0);
+  if (uNight < 0.2) return;
+  vec4 cls = texelFetch(uClass, q, 0);
+  if (!(isCovered(cls) && isGround(cls))) return;
+  vec2 here = vec2(float(q.x) + 0.5, uFrame.y - float(q.y) - 0.5);
+  float gain = 0.0;
+  for (int k = 0; k < 64; k++) {
+    if (k >= uLampCount) break;
+    vec3 s = project(uLamps[k].xyz);
+    vec2 px = toPixels(s);
+    float radius = max(3.5 * pixelsPerMetre(s), 2.0);
+    float d = distance(here, px);
+    if (d < radius) gain = max(gain, (1.0 - d / radius) * uNight);
+  }
+  if (gain <= 0.0) return;
+  float step = gain > 0.62 ? 1.0 : gain > 0.3 ? 0.62 : 0.34;
+  outColor = vec4(floor(color * 255.0 * mix(vec3(1.0), vec3(1.55, 1.40, 0.92), step)) / 255.0, 1.0);
 }`,
   },
 

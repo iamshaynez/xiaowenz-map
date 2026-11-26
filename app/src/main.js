@@ -78,14 +78,46 @@ async function boot() {
   const seasonNames = seasons.order || Object.keys(seasons).filter(name => !name.startsWith('_'));
   let season = new URLSearchParams(location.search).get('season');
   if (!seasonNames.includes(season)) season = seasonNames.includes('summer') ? 'summer' : seasonNames[0];
+  // the hour: four standing pictures of the day, each with the sun's own foot of shadow per metre of
+  // height, a tint for the palette, the paper the picture dissolves into, and how much of the night has
+  // fallen (windows answer it, lamps light at it, the sun's shadow map is let go). ?time= picks one for
+  // tests; 5 walks the four. The light stays on the screen's upper left (D017) at every hour: only the
+  // shadow's length and the colour of things change.
+  const TIMES = {
+    dawn: { label: '晨', shadow: [2.2, 1.83], tint: [1.0, 0.86, 0.78], paper: '#f6ede6', night: 0.25 },
+    noon: { label: '昼', shadow: [1.004, 0.834], tint: [1, 1, 1], paper: '#ffffff', night: 0 },
+    dusk: { label: '暮', shadow: [2.6, 2.16], tint: [1.0, 0.78, 0.64], paper: '#efe2d8', night: 0.55 },
+    night: { label: '夜', shadow: [1.004, 0.834], tint: [0.34, 0.40, 0.60], paper: '#131722', night: 1 },
+  };
+  const timeNames = Object.keys(TIMES);
+  let time = new URLSearchParams(location.search).get('time');
+  if (!TIMES[time]) time = 'noon';
+  const emissive = new Set([place('window_lit')]);        // lit glass is its own light; the hour must not tint it
+  let seasonBase = null, winterNow = {};
+  const applyHour = () => {
+    const def = TIMES[time], [tr, tg, tb] = def.tint;
+    if (seasonBase) renderer.setSeason(seasonBase.map((c, i) => emissive.has(i) ? c
+      : [Math.min(255, Math.round(c[0] * tr)), Math.min(255, Math.round(c[1] * tg)), Math.min(255, Math.round(c[2] * tb))]), winterNow);
+    renderer.setTimeOfDay(def);
+    document.documentElement.style.setProperty('--paper', def.paper);
+    document.body.dataset.time = time;
+  };
   const setSeason = name => {
     if (!seasonNames.includes(name)) throw new Error(`没有 ${name} 这个季节`);
     const changed = (seasons[name] || {}).colours || {};
-    renderer.setSeason(names.map(n => changed[n] || colours[n]), seasons[name] || {});
+    seasonBase = names.map(n => changed[n] || colours[n]);
+    winterNow = seasons[name] || {};
     season = name;
     document.body.dataset.season = name;
+    applyHour();
+  };
+  const setTime = name => {
+    if (!TIMES[name]) throw new Error(`没有 ${name} 这个时刻`);
+    time = name;
+    applyHour();
   };
   setSeason(season);
+  setTime(time);
   // the map without the words around it, for pictures
   const quiet = new URLSearchParams(location.search).get('ui') === 'off';
   if (quiet) document.body.classList.add('quiet');
@@ -328,6 +360,7 @@ async function boot() {
   const ui = createInterface({
     camera, renderer, world, canvas, landmarks, seasons: seasonNames,
     season: () => season, setSeason: name => { setSeason(name); dirty = true; },
+    times: timeNames, time: () => time, setTime: name => { setTime(name); dirty = true; },
     overview, overviewTarget, names: book, quiet, tour: city.tour,
   });
   ui.onDirty(() => { dirty = true; });
@@ -430,6 +463,7 @@ async function boot() {
   window.__city = {
     camera, renderer, world, manifest: index, gl, ui,
     landmarks, city, walk,
+    times: timeNames, time: () => time, setTime,
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things
     landmarkMask: id => renderer.landmarkMask(id),

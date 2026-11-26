@@ -60,6 +60,13 @@ export class CityRenderer extends StyleRenderer {
     this.shadowOn = 0;
     this.shadowBias = 0;
     this.light = { dir: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0], box: [0, 0, 1, 1], depth: [0, 1] };
+    // the hour: the sun's own length of shadow, how much of the night has fallen, the paper the picture
+    // dissolves into. The page sets all three together (setTimeOfDay); the defaults are midday.
+    this.shadowLen = SHADOW;
+    this.night = 0;
+    this.paper = [1, 1, 1, 1];
+    this.lampHeads = new Float32Array(64 * 3);
+    this.lampCount = 0;
     this.drawn = { tiles: 0, triangles: 0, trees: 0 };
     this.landmarks = [];              // set by the page: the list from landmarks/index.js
   }
@@ -160,6 +167,16 @@ export class CityRenderer extends StyleRenderer {
     this.snowColour = [white[0] / 255, white[1] / 255, white[2] / 255];
   }
 
+  // The hour: the length of the sun's shadows, how much of the night has fallen, the colour of the paper
+  // the picture dissolves into (and the page behind it). See main.js's TIMES for the definitions.
+  setTimeOfDay(def) {
+    this.shadowLen = def.shadow;
+    this.night = def.night;
+    const m = /^#([0-9a-f]{6})$/i.exec(def.paper);
+    const v = m ? [1, 3, 5].map(k => parseInt(def.paper.slice(k, k + 2), 16) / 255) : [1, 1, 1];
+    this.paper = [v[0], v[1], v[2], 1];
+  }
+
   bind(unit, texture) {
     this.gl.activeTexture(this.gl.TEXTURE0 + unit);
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -177,14 +194,14 @@ export class CityRenderer extends StyleRenderer {
       : this.visibleTiles(world)) : [];
     // shadows belong to the district tier: farther out they are smaller than a pixel
     this.drawn = { tiles: tiles.length, triangles: 0, trees: 0, landmarks: 0 };
-    this.shadowOn = district && shadows && world.overview && (walking || city.scale >= SHADOW_SCALE) ? 1 : 0;
+    this.shadowOn = district && shadows && world.overview && this.night < 0.8 && (walking || city.scale >= SHADOW_SCALE) ? 1 : 0;
     const life = district && world.overview && (walking || city.scale >= LIFE_SCALE);
     if (life) this.updateLife(tiles);
     if (this.shadowOn) this.castShadows(tiles, life && (walking || city.scale >= CAR_SCALE));   // changes the framebuffer and the colour masks; the scene sets its own
     frame.bindScene();
     gl.disable(gl.BLEND);
     gl.depthMask(true);
-    gl.clearBufferfv(gl.COLOR, 0, WHITE);
+    gl.clearBufferfv(gl.COLOR, 0, this.paper);
     gl.clearBufferfv(gl.COLOR, 1, CLEAR);
     gl.clearBufferfv(gl.DEPTH, 0, FAR);
     gl.enable(gl.DEPTH_TEST);
@@ -198,16 +215,24 @@ export class CityRenderer extends StyleRenderer {
     this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.color, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
     // the ground's own seams: kerbs, banks, the edges of paths (city-side; the reference scene has none)
     this.fullscreen('seams', frame.workBFbo, { uColor: frame.workA, uClass: frame.class }, { uSnow: this.snow });
-    if (!edges) return frame.workBFbo;
-    this.fullscreen('edges', frame.workAFbo, { uColor: frame.workB, uClass: frame.class, uDepthTex: frame.depth },
+    let inTex = frame.workB, outFbo = frame.workAFbo;
+    if (this.night > 0.2 && this.lampCount > 0) {
+      // the pools the street lamps cast on the ground
+      this.fullscreen('lampLight', outFbo, { uColor: inTex, uClass: frame.class },
+        { uLamps: this.lampHeads, uLampCount: this.lampCount, uNight: this.night });
+      inTex = frame.workA; outFbo = frame.workBFbo;
+    }
+    if (!edges) return outFbo;
+    this.fullscreen('edges', outFbo, { uColor: inTex, uClass: frame.class, uDepthTex: frame.depth },
       walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
     if (walking) {
-      // the haze: what stands beyond the loaded tiles melts into the page's white before its edge could be seen
-      this.fullscreen('walkFog', frame.workBFbo, { uColor: frame.workA, uDepthTex: frame.depth },
-        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250] });
-      return frame.workBFbo;
+      // the haze: what stands beyond the loaded tiles melts into the page's paper before its edge could be seen
+      const fogFbo = outFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
+      this.fullscreen('walkFog', fogFbo, { uColor: inTex, uDepthTex: frame.depth },
+        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paper });
+      return fogFbo;
     }
-    return frame.workAFbo;
+    return outFbo;
   }
 
   // whether the renderer is in the walking view (the page says so through `walk`)
@@ -480,8 +505,9 @@ export class CityRenderer extends StyleRenderer {
   // must hold for that view (the ground the camera sees, and the height of what stands on it).
   aimLight(tiles) {
     const city = this.city;
-    const length = Math.hypot(SHADOW[0], SHADOW[1], 1);
-    const u = -SHADOW[0] / length, v = -SHADOW[1] / length;                 // towards the sun, in the screen's two ground axes, per unit of height
+    const [sx, sy] = this.shadowLen;                        // the hour's own foot of shadow, per metre of height
+    const length = Math.hypot(sx, sy, 1);
+    const u = -sx / length, v = -sy / length;               // towards the sun, in the screen's two ground axes, per unit of height
     const rx = (u + v) * Math.SQRT1_2, ry = (v - u) * Math.SQRT1_2;        // the same in the camera's frame
     const dir = [rx * city.cos + ry * city.sin, -rx * city.sin + ry * city.cos, 1 / length];
     const flat = Math.hypot(dir[0], dir[1]);
@@ -495,7 +521,7 @@ export class CityRenderer extends StyleRenderer {
       high = Math.max(high, tile.top);
     }
     if (!Number.isFinite(low)) { low = 0; high = TALLEST; }
-    const reach = Math.min(TALLEST, high - low + 20) * Math.hypot(SHADOW[0], SHADOW[1]);   // how far the shade of the tallest thing reaches
+    const reach = Math.min(TALLEST, high - low + 20) * Math.hypot(sx, sy);   // how far the shade of the tallest thing reaches
     const box = [Infinity, Infinity, -Infinity, -Infinity];
     let near = -Infinity, far = Infinity;
     // a point of the screen's ground axes (metres from the camera centre) and a height -> world axes
@@ -585,10 +611,12 @@ export class CityRenderer extends StyleRenderer {
   updateLife(tiles) {
     const { gl, city, W, H } = this;
     const walking = this.walkActive();
-    const which = walking ? { cars: true, boats: true, lake: true, people: true, lamps: true }
-      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE, lamps: city.scale >= 1.1 };
+    const which = walking ? { cars: true, boats: true, lake: true, people: true, lamps: true, lit: this.night > 0.4 }
+      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE, lamps: city.scale >= 1.1, lit: this.night > 0.4 };
     this.drawn.life = this.traffic.place(tiles, this.time, city, { W, H, scale: city.scale }, which, this.trafficColours);
     if (walking) this.walk.place(this.traffic, this.trafficColours);   // the player walks among them
+    this.lampHeads = this.traffic.lampHeads;                           // for the pools of light the lamps cast
+    this.lampCount = this.traffic.lampCount;
     const { count, people, boxes, folks } = this.traffic;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lifeMesh.buffers[1]);
     gl.bufferData(gl.ARRAY_BUFFER, count ? boxes.subarray(0, count * RECORD) : new Float32Array(0), gl.DYNAMIC_DRAW);
