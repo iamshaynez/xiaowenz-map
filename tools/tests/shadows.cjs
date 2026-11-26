@@ -4,8 +4,9 @@
 // tests/pages/shadows-page.js, once with shadows and once without: every pixel whose colour changes is
 // in shade. For every ground pixel the test works out on its own whether the line towards the sun
 // passes through one of the boxes, and the two must agree to within a couple of pixels (the shadow
-// map has about one texel per pixel). The boxes themselves must never be shaded: as in the reference,
-// walls and roofs do not take shadows.
+// map has about one texel per pixel). Since D093 the walls and roofs take the shadows that fall on them
+// (they never used to); how many of their own pixels end up shaded is reported, not gated — what stays
+// gated is the ground's shadow against the analytic answer.
 //
 // Usage: NODE_PATH="$(npm root -g)" node tools/tests/shadows.cjs [out-dir]
 const { chromium } = require('playwright');
@@ -183,7 +184,8 @@ async function main() {
         }
       }
       check(report.share < 0.01, `${test.name}: ${report.extra} extra and ${report.missing} missing of ${report.shadowPixels} shadow pixels`);
-      check(wallsShaded === 0, `${test.name}: ${wallsShaded} of the boxes' own pixels were shaded`);
+      // D093: walls take shadows now (their own far side included), so this only reports
+      console.log(`  (walls shaded: ${wallsShaded} of ${walls})`);
       // a picture with the expected shadow outlined in magenta over the render, to look at when it fails
       const sheet = new Uint8Array(color);
       const edge = dilate(expected, 1);

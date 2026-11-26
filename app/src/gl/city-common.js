@@ -110,6 +110,22 @@ float grainAt(vec2 world, float sizeInPixels, float seed) {
 }
 `;
 
+// The clouds: broad shadow drifting over the ground and everything that stands on it, in two amounts —
+// the fair-weather scattering (uCloud 1) that is always about, and the overcast sky (uCloud 2) that
+// comes with the rain. The masses are kilometres across and take minutes to pass. Needs NOISE, TABLES
+// and uTime.
+export const CLOUD = /* glsl */`
+uniform float uCloud;
+float cloudShade(vec2 world, ivec2 pixel) {
+  if (uCloud < 0.5) return 0.0;
+  vec2 drift = world * 0.00035 + vec2(uTime * 0.0032, uTime * 0.0014);
+  float c = noiseAt(drift) * 0.62 + noiseAt(drift * 2.6 + 19.0) * 0.38;
+  float cover = uCloud > 1.5 ? 0.55 : 0.34;
+  float edge = smoothstep(1.0 - cover, 1.06 - cover, c + (bayerAt(pixel) - 0.5) * 0.14);
+  return edge * (uCloud > 1.5 ? 1.2 : 0.6);
+}
+`;
+
 // The island. Its outline is the region itself: a rectangle of longitude and latitude, which stands on
 // the ground as a rectangle turned a little (index.json's "island" says how much), its corners rounded.
 // A band along the edge is broken up by noise and scattered away with the Bayer pattern, the way

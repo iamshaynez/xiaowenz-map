@@ -65,6 +65,8 @@ export class CityRenderer extends StyleRenderer {
     this.shadowLen = SHADOW;
     this.night = 0;
     this.paper = [1, 1, 1, 1];
+    this.paperRgb = [1, 1, 1];
+    this.cloud = 1;                      // the fair-weather scattering is always about; rain sets 2, a clear sky 0
     this.lampHeads = new Float32Array(64 * 3);
     this.lampCount = 0;
     this.drawn = { tiles: 0, triangles: 0, trees: 0 };
@@ -142,7 +144,8 @@ export class CityRenderer extends StyleRenderer {
       .set('uBare', this.bare)
       .set('uSnow', this.snow)
       .set('uSnowColour', this.snowColour)
-      .set('uSnowIndex', this.snowIndex);
+      .set('uSnowIndex', this.snowIndex)
+      .set('uCloud', this.cloud);
     gl.activeTexture(gl.TEXTURE0 + HASH_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, this.hashTexture);
     prog.set('uHash', HASH_UNIT);
@@ -175,6 +178,7 @@ export class CityRenderer extends StyleRenderer {
     const m = /^#([0-9a-f]{6})$/i.exec(def.paper);
     const v = m ? [1, 3, 5].map(k => parseInt(def.paper.slice(k, k + 2), 16) / 255) : [1, 1, 1];
     this.paper = [v[0], v[1], v[2], 1];
+    this.paperRgb = [v[0], v[1], v[2]];
   }
 
   bind(unit, texture) {
@@ -215,24 +219,31 @@ export class CityRenderer extends StyleRenderer {
     this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.color, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
     // the ground's own seams: kerbs, banks, the edges of paths (city-side; the reference scene has none)
     this.fullscreen('seams', frame.workBFbo, { uColor: frame.workA, uClass: frame.class }, { uSnow: this.snow });
-    let inTex = frame.workB, outFbo = frame.workAFbo;
+    // from here the finished picture moves between the two work buffers: track both the texture it is in
+    // and the framebuffer that holds it, or a pass ends up reading and writing the same picture at once
+    let picTex = frame.workB, picFbo = frame.workBFbo;
     if (this.night > 0.2 && this.lampCount > 0) {
       // the pools the street lamps cast on the ground
-      this.fullscreen('lampLight', outFbo, { uColor: inTex, uClass: frame.class },
+      this.fullscreen('lampLight', frame.workAFbo, { uColor: picTex, uClass: frame.class },
         { uLamps: this.lampHeads, uLampCount: this.lampCount, uNight: this.night });
-      inTex = frame.workA; outFbo = frame.workBFbo;
+      picTex = frame.workA; picFbo = frame.workAFbo;
     }
-    if (!edges) return outFbo;
-    this.fullscreen('edges', outFbo, { uColor: inTex, uClass: frame.class, uDepthTex: frame.depth },
+    if (!edges) return picFbo;
+    const edgesFbo = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
+    this.fullscreen('edges', edgesFbo, { uColor: picTex, uClass: frame.class, uDepthTex: frame.depth },
       walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
+    picTex = edgesFbo === frame.workAFbo ? frame.workA : frame.workB;
+    picFbo = edgesFbo;
+    const other = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
     if (walking) {
       // the haze: what stands beyond the loaded tiles melts into the page's paper before its edge could be seen
-      const fogFbo = outFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
-      this.fullscreen('walkFog', fogFbo, { uColor: inTex, uDepthTex: frame.depth },
-        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paper });
-      return fogFbo;
+      this.fullscreen('walkFog', other, { uColor: picTex, uDepthTex: frame.depth },
+        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paperRgb });
+      return other;
     }
-    return outFbo;
+    // 大气透视: the far end of the picture sinks into the paper, by how far it is
+    this.fullscreen('airHaze', other, { uColor: picTex, uDepthTex: frame.depth }, { uDepth: this.depthRange, uPaper: this.paperRgb });
+    return other;
   }
 
   // whether the renderer is in the walking view (the page says so through `walk`)
@@ -293,7 +304,8 @@ export class CityRenderer extends StyleRenderer {
       .set('uCells', grid.nx - 1)
       .set('uFar', far)
       .set('uGroundPal', this.groundPal)
-      .set('uCity', this.tones);
+      .set('uCity', this.tones)
+      .set('uTime', this.time);
     if (far) {
       prog.set('uCover', this.bind(FIRST_FREE_UNIT + 2, cover.texture))
         .set('uBuilt', this.bind(FIRST_FREE_UNIT + 3, built.texture))
@@ -354,7 +366,8 @@ export class CityRenderer extends StyleRenderer {
     // facades once a pixel is under about 0.8 m: the shader draws them from half of uDetail on
     buildings.set('uDetail', Math.min(1, Math.max(0, city.scale - 0.6)))
       .set('uMid', Math.min(1, Math.max(0, city.scale - 0.3)))
-      .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uAwning', this.awning).set('uLift', 0);
+      .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uAwning', this.awning).set('uLift', 0)
+      .set('uTime', this.time);
     for (const tile of tiles) {
       if (!tile.buildings) continue;
       buildings.set('uProps', this.bind(FIRST_FREE_UNIT, tile.props)).set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
@@ -486,6 +499,7 @@ export class CityRenderer extends StyleRenderer {
     })());
     const stripes = this.programs.stripes.use();
     this.applyCamera(stripes);
+    stripes.set('uTime', this.time);
     let drawn = 0;
     for (const tile of tiles) {
       if (!tile.paths) continue;

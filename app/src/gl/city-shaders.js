@@ -7,10 +7,10 @@
 // boxes     the overview tier's buildings: one box per 50 m cell
 // buildings the district tier's buildings: walls and roofs of real outlines
 import { CLASS, FULLSCREEN_VS, PIXEL, PREFIX, MRT, TABLES } from './shaders.js';
-import { CITY_CAMERA, CITY_PIXEL, GRAIN, GROUND_GLSL, ISLAND, NOISE, SEASON, SHADOW } from './city-common.js';
+import { CLOUD, CITY_CAMERA, CITY_PIXEL, GRAIN, GROUND_GLSL, ISLAND, NOISE, SEASON, SHADOW } from './city-common.js';
 
 const VERTEX = PREFIX + CITY_CAMERA;
-const FRAGMENT = PREFIX + CITY_CAMERA + CITY_PIXEL + TABLES + NOISE + MRT + GROUND_GLSL + ISLAND + GRAIN;
+const FRAGMENT = PREFIX + CITY_CAMERA + CITY_PIXEL + TABLES + NOISE + MRT + GROUND_GLSL + ISLAND + GRAIN + CLOUD;
 const RECEIVING = FRAGMENT + SHADOW + SEASON;   // for surfaces that take shadows and snow
 
 // A surface with one colour and a flat light: box() of the reference.
@@ -106,7 +106,7 @@ void main() {
   int colour = builtTone >= 0 ? (builtTone == 2 ? int(uCity.z) : (builtTone == 1 ? int(uCity.y) : int(uCity.x))) : uGroundPal[cls];
   if (1.0 - look.z > 0.45 && builtTone < 0) colour = uGroundPal[19];   // rock on the cliffs
   float mottle = noiseAt(world * 0.012) - 0.5;                 // about 80 m across
-  float level = floor(light + mottle * 1.2 + grainAt(world, 5.0, 0.0) * 0.8 + (bayerAt(ip) - 0.5) * 0.7);
+  float level = floor(light + mottle * 1.2 + grainAt(world, 5.0, 0.0) * 0.8 - cloudShade(world, ip) + (bayerAt(ip) - 0.5) * 0.7);
   vec3 color = rampOf(colour, clamp(level, 0.0, 4.0));
   if (snowed(SNOWED[cls], world, ip)) color = rampOf(uSnowIndex, clamp(light, 2.5, 4.0));
   if (inSun(vWorld) < 0.5) color = inShade(color);
@@ -210,6 +210,7 @@ void main() {
       level -= (1.0 - seam) * 0.7 * fade;
     }
   }
+  level -= cloudShade(vPlace.xy, ip);
   vec3 color = rampOf(uGroundPal[int(vClass)], clamp(level, 0.0, 4.0));
   if (snowed(SNOWED[int(vClass)], vPlace.xy, ip)) color = rampOf(uSnowIndex, clamp(level, 2.5, 4.0));
   if (inSun(vSpot) < 0.5) color = inShade(color);
@@ -348,7 +349,7 @@ void main() {
   vDepth = s.z;
   gl_Position = clip(s);
 }`,
-    fs: FRAGMENT + SEASON + /* glsl */`
+    fs: FRAGMENT + SHADOW + SEASON + /* glsl */`
 uniform float uDetail;                  // 0 far out, 1 once a pixel is under half a metre
 uniform float uMid;                      // 1 once a pixel is under two metres: the ribs of great roofs
 uniform int uWindow;                    // the palette index of window glass, of wood, of temple red
@@ -377,7 +378,7 @@ void main() {
   bool roof = vFace.y > 0.6;                               // up-facing enough to be a roof
   int archetype = int(vLook.x + 0.5);
   int colour = roof ? int(vLook.z) : int(vLook.y);
-  float level = vLight + grainAt(vWorld.xy, 7.0, vLook.w) * 1.3 + (bayer - 0.5) * 0.5;
+  float level = vLight + grainAt(vWorld.xy, 7.0, vLook.w) * 1.3 - cloudShade(vWorld.xy + uCentre.xy, ip) + (bayer - 0.5) * 0.5;
   if (!roof && vWorld.z - vSize.x - uLift < 0.7) level -= 0.55;   // a wall darkens where it meets the ground
   if (roof && uMid > 0.5 && archetype == STATION) {
     // a great roof, ribbed: the skylight strips of a station hall, every twenty-one metres
@@ -444,7 +445,11 @@ void main() {
     }
   }
   if (roof && snowed(vFace.y > 0.97 ? 0.9 : 0.5, vWorld.xy, ip)) colour = uSnowIndex;   // more lies on a flat roof than on a slope
-  outColor = vec4(rampOf(colour, clamp(floor(level), 0.0, 4.0)), 1.0);
+  vec3 color = rampOf(colour, clamp(floor(level), 0.0, 4.0));
+  // a wall or a roof in another building's shade takes the tint, the same as the ground does. The bias
+  // keeps a sun-facing wall out of its own building's shadow; the shaded sides were dark already.
+  if (inSun(vWorld) < 0.5) color = inShade(color);
+  outColor = vec4(color, 1.0);
   outClass = vec4(0.0, 0.0, 0.0, 1.0);
   gl_FragDepth = depthOf(vDepth);
 }
@@ -507,6 +512,9 @@ void main() {
   if (!onIsland(vPlace.xy, ip)) discard;
   vec3 color = rampOf(int(vMark + 0.5), 4.0);   // paint is the brightest thing on the road, shade included
   if (inSun(vSpot) < 0.5) color = inShade(color);
+  float cs = cloudShade(vPlace.xy, ip);         // and it pales under the clouds like the road does
+  if (cs > 0.0) color = vec3(floor(color.r * 255.0 * (1.0 - cs * 0.5)) / 255.0,
+    floor(color.g * 255.0 * (1.0 - cs * 0.5)) / 255.0, floor(color.b * 255.0 * (1.0 - cs * 0.5)) / 255.0);
   outColor = vec4(color, 1.0);
   outClass = vec4(1.0, 5.0 / 255.0, 0.0, 1.0);
   gl_FragDepth = depthOf(vDepth);
@@ -549,6 +557,26 @@ void main() {
 }`,
   },
 
+  // 大气透视：at the far end of the picture the city sinks into the page's paper — the streets, the
+  // blocks, the far shore, each by how far it is. Fullscreen over the finished picture, map view only
+  // (the walking view has its own fog).
+  airHaze: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + /* glsl */`
+uniform sampler2D uColor;
+uniform sampler2D uDepthTex;
+uniform vec2 uDepth;                    // nearest and farthest engine depth
+uniform vec3 uPaper;
+out vec4 outColor;
+void main() {
+  vec3 color = texelFetch(uColor, ivec2(gl_FragCoord.xy), 0).rgb;
+  float z = texelFetch(uDepthTex, ivec2(gl_FragCoord.xy), 0).r;
+  float dist = (uDepth.x - uDepth.y) * z;      // metres of engine depth away from the camera centre
+  float haze = smoothstep(1800.0, 6000.0, dist) * 0.55;
+  outColor = vec4(mix(color, uPaper, haze), 1.0);
+}`,
+  },
+
   // The seams of the ground: where two ground classes meet (kerb between road and pavement, the bank of
   // a water, the edge of a path across grass), the last pixel is darkened a shade, with the Bayer pattern
   // breaking the line into the dither. Only ground meets ground here; where the ground meets what stands
@@ -573,16 +601,22 @@ void main() {
   if (!(isCovered(cls) && isGround(cls))) return;
   float here = classOf(cls);
   bool hereWater = isWater(here), hereRoad = isRoad(here);
-  bool seam = false;
+  bool seam = false, shore = false;
   for (int k = 0; k < 4; k++) {
     ivec2 off = k == 0 ? ivec2(1, 0) : k == 1 ? ivec2(-1, 0) : k == 2 ? ivec2(0, 1) : ivec2(0, -1);
     vec4 n = texelFetch(uClass, q + off, 0);
     if (!(isCovered(n) && isGround(n))) continue;   // the island's edge dissolving into white draws no line
     float nc = classOf(n);
     if (nc == here) continue;
-    if (hereWater != isWater(nc) || (hereRoad != isRoad(nc) && !hereWater && !isWater(nc))) seam = true;
+    if (hereWater != isWater(nc)) shore = hereWater;   // a water pixel against the land pales: shallow water, foam
+    else if (hereRoad != isRoad(nc) && !hereWater && !isWater(nc)) seam = true;
   }
-  if (!seam || bayerAt(cpu(q)) < 0.2) return;
+  float speck = bayerAt(cpu(q));
+  if (shore) {
+    if (speck >= 0.3) outColor = vec4(floor(color * 255.0 * vec3(1.14, 1.12, 1.05)) / 255.0, 1.0);
+    return;
+  }
+  if (!seam || speck < 0.2) return;
   outColor = vec4(floor(color * 255.0 * (uSnow > 0.5 ? 0.92 : 0.84)) / 255.0, 1.0);
 }`,
   },

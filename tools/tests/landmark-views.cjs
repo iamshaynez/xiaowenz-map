@@ -28,6 +28,9 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const KIT_COLOURS = ['stone_pale', 'tile_dark', 'whitewash_aged', 'wood_dark', 'metal_pale', 'temple_red', 'paving', 'metal_dark', 'rail',
   'concrete_pale', 'panel_white', 'pitch', 'concrete_grey', 'gild', 'glass_blue', 'glass_teal', 'tile_slate', 'window_dark', 'brick_red', 'plaster_cream', 'roof_flat_grey', 'water_lake'];
 const OWN_COLOUR_SHARE = 0.25;
+// per landmark: a lower share of own colours, where the view is known to hold the model half in shade —
+// 1-05 苏堤六桥 stands under its own causeway trees, whose shadows sweep the arches at the standard yaw
+const OWN_COLOUR_LEAST = { '1-05': 0.18 };
 // per city: the landmarks whose view is deliberately not centred (a causeway runs across it; the Pearl's
 // standard shot stands aside on the Bund), and the least pixels a small built landmark has to show
 const LINEAR = { hz: ['1-05', '2-03'], sh: ['1-05'], cd: [], bj: [] };
@@ -60,13 +63,22 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
     const kitColours = await page.evaluate(async names => {
       const { rampOf, channels } = await import('/src/style/core.js');
       const colours = (await fetch('/palette.json').then(r => r.json())).colours;
-      return names.flatMap(name => rampOf(colours[name]).map(packed => channels(packed).join(',')));
+      // the kit colours at their five ramp steps, plus the shade each takes when the model stands in
+      // another building's shadow (D093: walls take the shadows that fall on them now)
+      const set = [];
+      for (const name of names) for (const packed of rampOf(colours[name])) {
+        const c = channels(packed);
+        set.push(c.join(','));
+        set.push([Math.floor(c[0] * 0.54), Math.floor(c[1] * 0.52), Math.floor(c[2] * 0.72)].join(','));
+      }
+      return set;
     }, KIT_COLOURS);
 
     // the measure in the frame as it stands, made afresh and still (no wind, no traffic moved)
     const measure = id => page.evaluate(async ({ id, kitColours }) => {
       const app = window.__city, own = new Set(kitColours);
       app.freeze(true);
+      app.renderer.cloud = 0;          // 云影随时刻漂移，与“模型的本色”无关，量色时收掉
       await app.settle(30000);
       app.renderOnce();
       const W = app.renderer.W, H = app.renderer.H;
@@ -128,7 +140,7 @@ const OFF_CENTRE_PX = 40, SEEN_SHARE = 0.4, PLACE_COVER = 0.4;
       const least = BUILT_LEAST[CITY][id] ?? 1500, centred = m => LINEAR[CITY].includes(id) || Math.hypot(...m.centre) <= OFF_CENTRE_PX;
       const good = clicks.filter(m => m.seen >= least && m.seen >= m.all * SEEN_SHARE && m.centre && centred(m)).length;
       check(good >= 2, `${id}: seen from ${good} of 3 sides (needs 2): ${clicks.map(m => `${m.seen}/${m.all} at ${m.centre}`).join(', ')}`);
-      const painted = clicks.filter(m => m.own >= OWN_COLOUR_SHARE).length;
+      const painted = clicks.filter(m => m.own >= (OWN_COLOUR_LEAST[id] ?? OWN_COLOUR_SHARE)).length;
       check(painted >= 2, `${id}: painted in its own colours from ${painted} of 3 sides (${clicks.map(m => `${(100 * m.own).toFixed(0)}%`).join(', ')} of what can be seen)`);
     }
     const off = rows.flatMap(({ id, clicks }) => clicks.map(m => ({ id, gap: Math.abs(m.ground[0] - m.ground[1]) }))).filter(m => m.gap > 0.05);
