@@ -12,7 +12,7 @@
 - [x] D094 昼夜循环：晨/昼/暮/夜四态（按钮+键盘 5+URL 参数），palette 按状态重铸 ramp，夜窗按窗点亮、路灯暮色点亮+地面光池，页面纸色随状态（昼间渲染零回归）。
 - [x] D093 氛围：云影（uCloud 三档常开淡档）、建筑接影（墙与屋顶吃影，shadows.cjs 契约同步更新）、大气透视 airHaze、水岸亮带（walkFog 目标色参数化 uPaper）。
 - [x] D095 雨：晴/雨两态（天气按钮+键盘 6+URL 参数），雨丝双流互质、湿路反光、雾拉近随缩放档、关阴影改云影（晴天零回归）。
-- [x] D096 天空 flag（`?sky=1` 四条色带+夜星，画在 resolve 之后的空像素上，默认关）+ README 操作表/STYLE-GUIDE/REVIEW-QUEUE（40–49 条）/验收图 `docs/REVIEW/upgrade-*.png` 五张。**六提交全部落地，D091–D096 完。**
+- [x] D096 天空 flag（`?sky=1` 四条色带+夜星，画在 resolve 之后的空像素上，默认关）+ README 操作表/STYLE-GUIDE/REVIEW-QUEUE（40–49 条）/验收图 `docs/REVIEW/upgrade-*.png` 五张。**六提交全部落地，D091–D096 完（2026-11-26 已推送 GitHub、四城数据确认在 R2、页面部署 city.xiaowenz.com 版本 6126cb76，四城 sampled verify 全过，hz 全量瓦片校验另跑）。**
 
 **这之前的状态（2026-11-25）：四座城（杭州、上海、成都、北京）做完上线，D083–D088；D089/D090 是高架桥立体化与走进城市（步行与驾驶），条目在提交信息里。**
 
