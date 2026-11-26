@@ -95,6 +95,7 @@ export class CityRenderer extends StyleRenderer {
     this.window = place('window_dark');
     this.wood = place('wood_dark');
     this.red = place('temple_red');
+    this.awning = place('awning_green');
     this.mark = place('road_mark');
     this.trafficColours = TRAFFIC_COLOURS.map(name => place(name));
     this.treeCell = index.treeCell;
@@ -328,7 +329,7 @@ export class CityRenderer extends StyleRenderer {
     // facades once a pixel is under about 0.8 m: the shader draws them from half of uDetail on
     buildings.set('uDetail', Math.min(1, Math.max(0, city.scale - 0.6)))
       .set('uMid', Math.min(1, Math.max(0, city.scale - 0.3)))
-      .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uLift', 0);
+      .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uAwning', this.awning).set('uLift', 0);
     for (const tile of tiles) {
       if (!tile.buildings) continue;
       buildings.set('uProps', this.bind(FIRST_FREE_UNIT, tile.props)).set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
@@ -487,7 +488,7 @@ export class CityRenderer extends StyleRenderer {
     const right = [-dir[1] / flat, dir[0] / flat, 0];                        // across the sun's picture, level with the ground
     const up = cross(dir, right);
 
-    const halfU = this.walkActive() ? 300 : this.W / (2 * city.scale) + 64, halfV = this.walkActive() ? 300 : this.H / (2 * city.scale * city.sinPitch) + 64;
+    const halfU = this.walkActive() ? 200 : this.W / (2 * city.scale) + 64, halfV = this.walkActive() ? 200 : this.H / (2 * city.scale * city.sinPitch) + 64;
     let low = Infinity, high = -Infinity;
     for (const tile of tiles) {
       low = Math.min(low, tile.floor);
@@ -584,8 +585,8 @@ export class CityRenderer extends StyleRenderer {
   updateLife(tiles) {
     const { gl, city, W, H } = this;
     const walking = this.walkActive();
-    const which = walking ? { cars: true, boats: true, lake: true, people: true }
-      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE };
+    const which = walking ? { cars: true, boats: true, lake: true, people: true, lamps: true }
+      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE, lamps: city.scale >= 1.1 };
     this.drawn.life = this.traffic.place(tiles, this.time, city, { W, H, scale: city.scale }, which, this.trafficColours);
     if (walking) this.walk.place(this.traffic, this.trafficColours);   // the player walks among them
     const { count, people, boxes, folks } = this.traffic;

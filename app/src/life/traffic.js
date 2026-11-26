@@ -121,7 +121,7 @@ export class Traffic {
   place(tiles, time, camera, frame, which, colours) {
     this.count = 0;
     this.people = 0;
-    this.drawn = { cars: 0, boats: 0, people: 0 };
+    this.drawn = { cars: 0, boats: 0, people: 0, lamps: 0 };
     const { W, H, scale } = frame;
     this.camera = camera;
     if (camera.walking) {
@@ -148,6 +148,7 @@ export class Traffic {
         const street = STREETS[line.cls], water = WATERS[line.cls];
         if (street && which.cars) this.flow(line, n, street, time, tile, colours, 0.2, true);
         if (water && which.boats && (line.cls !== LAKE || which.lake)) this.flow(line, n, water, time, tile, colours, line.cls === LAKE ? 0.2 : 0, false);
+        if (which.lamps && street) this.lamps(line, n, tile, colours);
         if (which.people && PEOPLE[line.cls]) {
           // on the pavements of a street, to either side of it; along the middle of a pedestrian street or a path
           this.walk(line, n, PEOPLE[line.cls], time, tile, colours, line.cls === PEDESTRIAN || line.cls === PATH ? 0.3 : 1);
@@ -184,12 +185,40 @@ export class Traffic {
         const h = hash(k * 11 + 3, n * 13 + dir);
         if (isStreet) {
           this.box(x, y, p.z + 0.1, tx, ty, length, width, height, colours[CAR_COLOURS[Math.floor(h * CAR_COLOURS.length)]], colours[SILVER], kind);
+          // four dark wheels under the corners of the body, half of each showing past its side
+          const ax = tx * (length * 0.30), ay = ty * (length * 0.30);
+          const bx2 = ty * (width * 0.5), by2 = -tx * (width * 0.5);
+          for (const [cx2, cy2] of [[ax + bx2, ay + by2], [ax - bx2, ay - by2], [-ax + bx2, -ay + by2], [-ax - bx2, -ay - by2]]) {
+            this.box(x + cx2, y + cy2, p.z + 0.1, tx, ty, 0.62, 0.24, 0.36, colours[DARK], colours[DARK], KIND.CAR);
+          }
           this.drawn.cars++;
         } else {
           this.boat(kind, x, y, p.z, tx, ty, h, colours);
           this.drawn.boats++;
         }
       }
+    }
+  }
+
+  // street lamps along a line: every twenty-eight metres, either side of the road in turn — a pole, an
+  // arm reaching over the carriageway, and the lamp on the end of it. By day the lamp is a pale box;
+  // at night the page asks for it lit (walk.js and the renderer know the hour) and it shines.
+  lamps(line, n, tile, colours) {
+    const count = Math.max(1, Math.round(line.length / 28));
+    for (let k = 0; k < count; k++) {
+      const side = k % 2 === 0 ? 1 : -1;
+      const s = Math.min(line.length - 4, (k + hash(n * 3 + 1, k * 5) * 0.5) * 28);
+      if (s <= 0) continue;
+      const p = this.spot;
+      along(line.points, s, p);
+      const lane = side * (line.width + 0.9);
+      const x = tile.x0 + p.x + p.ty * lane, y = tile.y0 + p.y - p.tx * lane;
+      if (!this.near(x, y)) continue;
+      const dark = colours[DARK], pale = colours[CABIN];
+      this.box(x, y, p.z + 0.14, p.tx, p.ty, 0.14, 0.14, 5.3, dark, dark, 0);                                        // the pole
+      this.box(x - side * p.ty * 0.9, y + side * p.tx * 0.9, p.z + 5.32, p.tx, p.ty, 1.1, 0.1, 0.1, dark, dark, 0);  // the arm over the road
+      this.box(x - side * p.ty * 1.4, y + side * p.tx * 1.4, p.z + 5.26, p.tx, p.ty, 0.55, 0.24, 0.16, pale, pale, 0); // the lamp
+      this.drawn.lamps++;
     }
   }
 
@@ -218,9 +247,11 @@ export class Traffic {
       const x = tile.x0 + p.x + ty * lane, y = tile.y0 + p.y - tx * lane;
       if (!this.near(x, y)) continue;
       const cloth = colours[CLOTHES[Math.floor(hash(k * 7, n + 5) * CLOTHES.length)]];
-      // legs, body and head: three boxes make a figure a few pixels tall
+      // two legs swinging as the person walks, the body on them, the head on that: four boxes make a figure
       const [ll, lw, lh] = SIZE[KIND.LEGS], [bl, bw, bh] = SIZE[KIND.BODY], [hl, hw, hh] = SIZE[KIND.HEAD];
-      this.figure(x, y, p.z + 0.1, tx, ty, ll, lw, lh, colours[DARK], colours[DARK], KIND.LEGS);
+      const stride = 0.12 * Math.sin(time * 5 + k * 2.3 + n * 1.7);
+      this.figure(x + tx * stride, y + ty * stride, p.z + 0.1, tx, ty, ll * 0.7, lw * 0.48, lh, colours[DARK], colours[DARK], KIND.LEGS);
+      this.figure(x - tx * stride, y - ty * stride, p.z + 0.1, tx, ty, ll * 0.7, lw * 0.48, lh, colours[DARK], colours[DARK], KIND.LEGS);
       this.figure(x, y, p.z + 0.1 + lh, tx, ty, bl, bw, bh, cloth, cloth, KIND.BODY);
       this.figure(x, y, p.z + 0.1 + lh + bh, tx, ty, hl, hw, hh, colours[SKIN], colours[DARK], KIND.HEAD);
       this.drawn.people++;

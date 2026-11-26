@@ -354,6 +354,7 @@ uniform float uMid;                      // 1 once a pixel is under two metres: 
 uniform int uWindow;                    // the palette index of window glass, of wood, of temple red
 uniform int uWood;
 uniform int uRed;
+uniform int uAwning;                    // of the first of three awning colours (green, red, blue, consecutive)
 uniform float uLift;                    // what the vertex shader raised the model by (a landmark on its ground)
 const int JIANGNAN = 1, WALKUP = 2, FARMHOUSE = 3, TOWER = 4, OFFICE = 5, INDUSTRIAL = 6, PUBLIC = 7, TEMPLE = 8, STATION = 9, SHED = 10;
 // by archetype: metres between window bays; and where in a bay a window opens (across, up the storey)
@@ -396,16 +397,38 @@ void main() {
       if (archetype == OFFICE || archetype == STATION) {
         // a curtain wall: glass between mullions on every storey
         level += (bay > open.x && bay < open.y && up > open.z && up < open.w) ? -1.0 : 0.8;
+        if (!(bay > open.x && bay < open.y && up > open.z && up < open.w) && up < 0.1) level -= 0.5;   // the slab line in the spandrel
       } else if (archetype == INDUSTRIAL) {
         if (up > open.z && up < open.w && fract(vFace.x / 1.2) > 0.12) colour = uWindow;     // a strip of windows under the eave
+        level -= (fract(vFace.x / 0.4) > 0.5 ? 0.35 : 0.0);                                  // corrugated sheeting
       } else if (archetype != SHED) {
         if (bay > open.x && bay < open.y && up > open.z && up < open.w) colour = uWindow;     // a window
         else if (archetype == TOWER && up < 0.07) level -= 1.0;                                 // the line of a floor slab
         else if (archetype == TEMPLE && bay < 0.05) colour = uRed;                              // a column
+        // the wall's own material, where no opening has taken the pixel
+        bool opening = colour == uWindow || colour == uWood || colour == uRed;
+        if (!opening) {
+          if (archetype == WALKUP || archetype == PUBLIC) {
+            // courses of tile every sixty centimetres, the vertical joints offset half a course a storey
+            if (fract((vWorld.z - vSize.x - uLift) / 0.6) < 0.10) level -= 0.6;
+            if (fract(vFace.x / 1.2 + floor(storeys) * 0.5) < 0.05) level -= 0.5;
+          } else if (archetype == FARMHOUSE) {
+            if (fract((vWorld.z - vSize.x - uLift) / 0.28) < 0.14) level -= 0.7;               // a course of brick every 28 cm
+          } else if (archetype == TOWER) {
+            if (fract(vFace.x / 0.9) < 0.035) level -= 0.4;                                    // a mullion joint every 90 cm
+          }
+        }
         if (storeys < 1.0) {
-          // the ground floor: a door, and on the plainer houses a plinth under it
-          if (bay > 0.42 && bay < 0.56 && up < 0.78) colour = archetype == TEMPLE ? uRed : uWood;
-          else if ((archetype == WALKUP || archetype == FARMHOUSE || archetype == INDUSTRIAL) && up > 0.9) level -= 1.0;
+          // the ground floor: on half the plainer houses a shop — glass, a door, a band of awning; the rest a door
+          float shop = archetype != TEMPLE && hashAt(vec2(vLook.w * 17.31, 7.7)) < 0.55 ? 1.0 : 0.0;
+          if (shop > 0.5) {
+            if (bay > 0.06 && bay < 0.94 && up > 0.12 && up < 0.68) colour = uWindow;
+            else if (up >= 0.68 && up < 0.82 && bay > 0.06 && bay < 0.94) colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, 9.2)) * 3.0);
+            else if (bay > 0.40 && bay < 0.52 && up >= 0.68) colour = uWood;
+          } else {
+            if (bay > 0.42 && bay < 0.56 && up < 0.78) colour = archetype == TEMPLE ? uRed : uWood;
+            else if ((archetype == WALKUP || archetype == FARMHOUSE || archetype == INDUSTRIAL) && up > 0.9) level -= 1.0;
+          }
         }
       }
     }
