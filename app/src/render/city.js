@@ -13,6 +13,7 @@ import { DEBUG_SHADERS } from '../gl/shaders-debug.js';
 import { brandTextures } from '../landmarks/brandmarks.js';
 import { Traffic, TRAFFIC_COLOURS } from '../life/traffic.js';
 import { assemble, BOX_SCALE, DISTRICT_SCALE, LIFE_SCALE, ROOF_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE, UNIT_BOX } from '../world/store.js';
+import { buildStripes } from '../world/streets.js';
 import { CityCamera } from '../gl/city-camera.js';
 import { StyleRenderer } from './style.js';
 
@@ -26,6 +27,7 @@ const SHADOW_SIZE = 1024;                // the sun's picture, in texels
 export const SHADOW = [1.004, 0.834];
 const SHADOW_SLACK_M = 0.05;             // how much nearer the sun something must stand than a point to shade it
 const CAR_SCALE = 1.2, PERSON_SCALE = 5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
+const STRIPE_SCALE = 0.55;             // from this zoom up the streets wear their markings (a pixel is under 2 m)
 const BRAND_SCALE = 0.8;               // from this zoom up a brand's flag is drawn (a pixel is 1.25 m), logo and all
 const BRAND_UNIT = 6;                  // the atlas texture's own unit (FIRST_FREE_UNIT and up are handed out per draw)
 const RECORD = 12;                        // floats per moving box, as traffic.js writes them
@@ -93,6 +95,7 @@ export class CityRenderer extends StyleRenderer {
     this.window = place('window_dark');
     this.wood = place('wood_dark');
     this.red = place('temple_red');
+    this.mark = place('road_mark');
     this.trafficColours = TRAFFIC_COLOURS.map(name => place(name));
     this.treeCell = index.treeCell;
     this.tones = [place('urban_ground'), place('roof_flat_grey'), place('glass_grey')];
@@ -192,16 +195,18 @@ export class CityRenderer extends StyleRenderer {
     }
     this.resolve();
     this.fullscreen('groundTint', frame.workAFbo, { uColor: frame.color, uClass: frame.class, uMask: this.emptyMask, uStaticClass: frame.class }, { uAO: 1 });
-    if (!edges) return frame.workAFbo;
-    this.fullscreen('edges', frame.workBFbo, { uColor: frame.workA, uClass: frame.class, uDepthTex: frame.depth },
+    // the ground's own seams: kerbs, banks, the edges of paths (city-side; the reference scene has none)
+    this.fullscreen('seams', frame.workBFbo, { uColor: frame.workA, uClass: frame.class }, { uSnow: this.snow });
+    if (!edges) return frame.workBFbo;
+    this.fullscreen('edges', frame.workAFbo, { uColor: frame.workB, uClass: frame.class, uDepthTex: frame.depth },
       walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
     if (walking) {
       // the haze: what stands beyond the loaded tiles melts into the page's white before its edge could be seen
-      this.fullscreen('walkFog', frame.workAFbo, { uColor: frame.workB, uDepthTex: frame.depth },
+      this.fullscreen('walkFog', frame.workBFbo, { uColor: frame.workA, uDepthTex: frame.depth },
         { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250] });
-      return frame.workAFbo;
+      return frame.workBFbo;
     }
-    return frame.workBFbo;
+    return frame.workAFbo;
   }
 
   // whether the renderer is in the walking view (the page says so through `walk`)
@@ -317,6 +322,7 @@ export class CityRenderer extends StyleRenderer {
         this.drawn.triangles += mesh.count / 3;
       }
     }
+    if (this.walkActive() || city.scale >= STRIPE_SCALE) this.drawStripes(tiles);
     const buildings = this.programs.buildings.use();
     this.applyCamera(buildings);
     // facades once a pixel is under about 0.8 m: the shader draws them from half of uDetail on
@@ -436,6 +442,36 @@ export class CityRenderer extends StyleRenderer {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.roofs.count);
       this.drawn.triangles += tile.roofs.count * 10;
     }
+  }
+
+  // the streets' own markings: centre-line dashes and crossing zebras, worked out from the tile's PATH
+  // lines and cached on the tile (world/streets.js). Around a hand-built landmark nothing is painted:
+  // the same clearing that moved the real buildings aside keeps the paint off the model's ground.
+  drawStripes(tiles) {
+    const { gl, city } = this;
+    const clearances = (this.clearances ??= (() => {
+      const list = [];
+      for (const landmark of this.landmarks) {
+        const radius = landmark.clear || 0;
+        if (!radius) continue;
+        for (const part of landmark.parts) list.push([part.x, part.y, radius]);
+      }
+      return list;
+    })());
+    const stripes = this.programs.stripes.use();
+    this.applyCamera(stripes);
+    let drawn = 0;
+    for (const tile of tiles) {
+      if (!tile.paths) continue;
+      if (!tile.stripes) tile.stripes = buildStripes(gl, tile, clearances, this.mark);
+      if (!tile.stripes.count) continue;
+      stripes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+      gl.bindVertexArray(tile.stripes.mesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, tile.stripes.count);
+      drawn += tile.stripes.count;
+    }
+    gl.bindVertexArray(null);
+    this.drawn.stripes = drawn;
   }
 
   // ---- shadows --------------------------------------------------------------------------------------------

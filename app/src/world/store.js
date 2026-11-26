@@ -498,6 +498,7 @@ export class World {
     (tile.brandDraws || []).forEach(draw => release(gl, draw.mesh));
     Object.values(tile.ground).forEach(mesh => release(gl, mesh));
     release(gl, tile.treeMesh);
+    if (tile.stripes) release(gl, tile.stripes.mesh);   // the streets' own markings (world/streets.js)
     for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);
   }
 }

@@ -6,7 +6,7 @@
 // ribbon    thin strips for the overview tier: main roads, railways, canals
 // boxes     the overview tier's buildings: one box per 50 m cell
 // buildings the district tier's buildings: walls and roofs of real outlines
-import { FULLSCREEN_VS, PREFIX, MRT, TABLES } from './shaders.js';
+import { CLASS, FULLSCREEN_VS, PIXEL, PREFIX, MRT, TABLES } from './shaders.js';
 import { CITY_CAMERA, CITY_PIXEL, GRAIN, GROUND_GLSL, ISLAND, NOISE, SEASON, SHADOW } from './city-common.js';
 
 const VERTEX = PREFIX + CITY_CAMERA;
@@ -111,7 +111,7 @@ void main() {
   if (snowed(SNOWED[cls], world, ip)) color = rampOf(uSnowIndex, clamp(light, 2.5, 4.0));
   if (inSun(vWorld) < 0.5) color = inShade(color);
   outColor = vec4(color, 1.0);
-  outClass = vec4(1.0, 0.0, 0.0, 1.0);
+  outClass = vec4(1.0, float(cls) / 255.0, 0.0, 1.0);   // the ground class travels with the pixel: the seams pass reads it
   gl_FragDepth = depthOf(vDepth);
 }`,
   },
@@ -159,8 +159,26 @@ void main() {
     // a few bright streaks, as the reference has them on its river: one pixel in a hundred from far out, one in ten close up
     if (streak > 0.99 - 0.09 * clamp(uTilt.z / 4.0, 0.0, 1.0)) level = 4.0;
   } else if (vClass < 10.5) {
-    // roads and paths: a quiet, grainy surface; main roads a shade darker
-    level = floor(3.0 - (vClass == 5.0 ? 0.3 : 0.0) + grainAt(vPlace.xy, 6.0, vSeed) * 1.1 + (bayer - 0.5) * 0.6);
+    // roads and paths: a quiet, grainy surface; main roads a shade darker. Wide patches of tone (about
+    // eighty metres across) keep a street in shade from reading as one flat field; and once a metre is
+    // near a pixel, repairs and manholes spot the carriageway.
+    level = 3.0 - (vClass == 5.0 ? 0.3 : 0.0) + (noiseAt(vPlace.xy * 0.013) - 0.5) * 0.7
+      + grainAt(vPlace.xy, 6.0, vSeed) * 1.1 + (bayer - 0.5) * 0.6;
+    float close = clamp((uTilt.z - 0.6) / 1.2, 0.0, 1.0);
+    if (close > 0.0 && vClass >= 4.5 && vClass <= 8.5) {
+      vec2 cell = floor(vPlace.xy / 14.0);
+      float r = hashAt(cell + vSeed);
+      vec2 spot = (cell + 0.15 + 0.7 * vec2(hashAt(cell + 1.7), hashAt(cell + 9.3))) * 14.0;
+      float d = distance(vPlace.xy, spot);
+      float dark = 0.0;
+      if (r < 0.10) dark = d < 0.55 ? 1.2 : (d < 0.75 ? 0.4 : 0.0);   // a manhole, and the rim around it
+      else if (r < 0.30) {                                            // a patch of newer asphalt, its edge torn by the dither
+        float blob = d / (1.4 + 1.8 * hashAt(cell + 3.1)) + (noiseAt(vPlace.xy * 0.9) - 0.5) * 0.55;
+        if (blob < 1.0 - (bayer - 0.5) * 0.4) dark = 0.8;
+      }
+      level -= dark * close;
+    }
+    level = floor(level);
   } else if (vClass == 14.0) {
     // grass: the mottled lawn of the reference, its clumps kept to a few pixels across at every zoom
     float clumps = noiseAt(vPlace.xy * min(0.5, uTilt.z / 6.0)) * 1.15 - 0.08;
@@ -196,8 +214,7 @@ void main() {
   if (snowed(SNOWED[int(vClass)], vPlace.xy, ip)) color = rampOf(uSnowIndex, clamp(level, 2.5, 4.0));
   if (inSun(vSpot) < 0.5) color = inShade(color);
   outColor = vec4(color, 1.0);
-  bool wet = vClass < 4.5;
-  outClass = vec4(1.0, wet ? 2.0 / 255.0 : 0.0, 0.0, 1.0);
+  outClass = vec4(1.0, vClass / 255.0, 0.0, 1.0);   // the ground class travels with the pixel: the seams pass reads it
   gl_FragDepth = depthOf(vDepth);
 }`,
   },
@@ -235,7 +252,7 @@ void main() {
   if (!onIsland(vPlace.xy, ip)) discard;
   float level = floor(3.0 + grainAt(vPlace.xy, 6.0, 0.0) * 1.0 + (bayerAt(ip) - 0.5) * 0.5);
   outColor = vec4(rampOf(uGroundPal[int(vClass)], clamp(level, 0.0, 4.0)), 1.0);
-  outClass = vec4(1.0, 0.0, 0.0, 1.0);
+  outClass = vec4(1.0, vClass / 255.0, 0.0, 1.0);   // the ground class travels with the pixel: the seams pass reads it
   gl_FragDepth = depthOf(vDepth);
 }`,
   },
@@ -337,6 +354,7 @@ uniform float uMid;                      // 1 once a pixel is under two metres: 
 uniform int uWindow;                    // the palette index of window glass, of wood, of temple red
 uniform int uWood;
 uniform int uRed;
+uniform float uLift;                    // what the vertex shader raised the model by (a landmark on its ground)
 const int JIANGNAN = 1, WALKUP = 2, FARMHOUSE = 3, TOWER = 4, OFFICE = 5, INDUSTRIAL = 6, PUBLIC = 7, TEMPLE = 8, STATION = 9, SHED = 10;
 // by archetype: metres between window bays; and where in a bay a window opens (across, up the storey)
 const float BAY[10] = float[10](4.2, 3.3, 3.2, 3.0, 1.5, 2.4, 3.6, 4.0, 1.5, 3.0);
@@ -357,6 +375,7 @@ void main() {
   int archetype = int(vLook.x + 0.5);
   int colour = roof ? int(vLook.z) : int(vLook.y);
   float level = vLight + grainAt(vWorld.xy, 7.0, vLook.w) * 1.3 + (bayer - 0.5) * 0.5;
+  if (!roof && vWorld.z - vSize.x - uLift < 0.7) level -= 0.55;   // a wall darkens where it meets the ground
   if (roof && uMid > 0.5 && archetype == STATION) {
     // a great roof, ribbed: the skylight strips of a station hall, every twenty-one metres
     if (fract(vWorld.x / 21.0) < 0.12) level -= 1.2;
@@ -415,6 +434,86 @@ void main() {
   float ahead = uDepth.x - z * (uDepth.x - uDepth.y);   // metres from the eye (the walking view's depth)
   float fog = smoothstep(uFog.x, uFog.y, ahead);
   outColor = vec4(mix(color, vec3(1.0), fog), 1.0);
+}`,
+  },
+
+  // What the streets paint on themselves: centre-line dashes and crossing zebras, worked out from the
+  // tile's PATH lines (world/streets.js). Flat quads a hand's width above the road, so they win the depth
+  // test against it; they take shadows like the ground does, and are classed as the road they lie on, so
+  // the seams pass never draws a line at a marking's edge.
+  stripes: {
+    vs: VERTEX + /* glsl */`
+layout(location = 0) in vec2 aCorner;    // unit quad, per vertex
+layout(location = 1) in vec4 aPlace;     // per instance: x, y, z relative to the tile's corner; heading x
+layout(location = 2) in vec4 aShape;     // per instance: heading y, half length, half width, colour
+uniform vec2 uOffset;                    // tile corner relative to the camera centre
+out vec3 vPlace;                         // the same point in world metres, for the edge of the island
+out vec3 vSpot;                          // and relative to the camera centre, for the shadow map
+out float vDepth;
+flat out float vMark;
+void main() {
+  vec2 dir = vec2(aPlace.w, aShape.x);
+  vec2 along = dir * aCorner.x * aShape.y;
+  vec2 across = vec2(-dir.y, dir.x) * aCorner.y * aShape.z;
+  vec3 world = vec3(aPlace.xy + along + across + uOffset, aPlace.z);
+  vPlace = vec3(aPlace.xy + along + across + uOffset + uCentre.xy, aPlace.z);
+  vSpot = world;
+  vMark = aShape.w;
+  vec3 s = project(world);
+  vDepth = s.z;
+  gl_Position = clip(s);
+}`,
+    fs: FRAGMENT + SHADOW + /* glsl */`
+in vec3 vPlace;
+in vec3 vSpot;
+in float vDepth;
+flat in float vMark;
+void main() {
+  ivec2 ip = pixelIndex();
+  if (!onIsland(vPlace.xy, ip)) discard;
+  vec3 color = rampOf(int(vMark + 0.5), 4.0);   // paint is the brightest thing on the road, shade included
+  if (inSun(vSpot) < 0.5) color = inShade(color);
+  outColor = vec4(color, 1.0);
+  outClass = vec4(1.0, 5.0 / 255.0, 0.0, 1.0);
+  gl_FragDepth = depthOf(vDepth);
+}`,
+  },
+
+  // The seams of the ground: where two ground classes meet (kerb between road and pavement, the bank of
+  // a water, the edge of a path across grass), the last pixel is darkened a shade, with the Bayer pattern
+  // breaking the line into the dither. Only ground meets ground here; where the ground meets what stands
+  // on it, the edges pass is already speaking. Fullscreen over the finished ground, before the edges.
+  seams: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + 'uniform vec4 uView;\n' + PIXEL + TABLES + CLASS + /* glsl */`
+uniform sampler2D uColor;
+uniform sampler2D uClass;               // r: ground, g: the ground class of each pixel
+uniform float uSnow;
+out vec4 outColor;
+float classOf(vec4 c) { return floor(c.g * 255.0 + 0.5); }
+bool isWater(float k) { return k >= 1.0 && k <= 4.0; }
+bool isRoad(float k) { return k >= 5.0 && k <= 10.0; }
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec3 color = texelFetch(uColor, q, 0).rgb;
+  outColor = vec4(color, 1.0);
+  ivec2 size = textureSize(uClass, 0);
+  if (q.x < 1 || q.y < 1 || q.x >= size.x - 1 || q.y >= size.y - 1) return;
+  vec4 cls = texelFetch(uClass, q, 0);
+  if (!(isCovered(cls) && isGround(cls))) return;
+  float here = classOf(cls);
+  bool hereWater = isWater(here), hereRoad = isRoad(here);
+  bool seam = false;
+  for (int k = 0; k < 4; k++) {
+    ivec2 off = k == 0 ? ivec2(1, 0) : k == 1 ? ivec2(-1, 0) : k == 2 ? ivec2(0, 1) : ivec2(0, -1);
+    vec4 n = texelFetch(uClass, q + off, 0);
+    if (!(isCovered(n) && isGround(n))) continue;   // the island's edge dissolving into white draws no line
+    float nc = classOf(n);
+    if (nc == here) continue;
+    if (hereWater != isWater(nc) || (hereRoad != isRoad(nc) && !hereWater && !isWater(nc))) seam = true;
+  }
+  if (!seam || bayerAt(cpu(q)) < 0.2) return;
+  outColor = vec4(floor(color * 255.0 * (uSnow > 0.5 ? 0.92 : 0.84)) / 255.0, 1.0);
 }`,
   },
 };
