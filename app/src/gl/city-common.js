@@ -166,6 +166,7 @@ const int ROAD_MAJOR = 5, ROAD_MINOR = 7, ROAD_PEDESTRIAN = 9, PATH = 10, WALL =
 const int GRASS = 14, FOREST = 15, FARMLAND = 16, YARD = 17, URBAN = 22, TEA = 24;
 uniform int uGroundPal[25];   // the palette index of each ground class
 uniform float uTime;          // seconds; tests freeze it
+uniform float uRain;          // 0 clear, 1 raining: the carriageway darkens and glints
 `;
 
 // Shadows. The scene is drawn once more from the sun's point of view, depth only, into a picture

@@ -67,6 +67,7 @@ export class CityRenderer extends StyleRenderer {
     this.paper = [1, 1, 1, 1];
     this.paperRgb = [1, 1, 1];
     this.cloud = 1;                      // the fair-weather scattering is always about; rain sets 2, a clear sky 0
+    this.rain = 0;                       // 1 while it rains: no sun shadow, thicker haze, wet roads, dashes in the frame
     this.lampHeads = new Float32Array(64 * 3);
     this.lampCount = 0;
     this.drawn = { tiles: 0, triangles: 0, trees: 0 };
@@ -172,6 +173,15 @@ export class CityRenderer extends StyleRenderer {
 
   // The hour: the length of the sun's shadows, how much of the night has fallen, the colour of the paper
   // the picture dissolves into (and the page behind it). See main.js's TIMES for the definitions.
+  // The weather: rain takes the sun's shadow map away (the overcast sky answers with cloud shade),
+  // thickens the haze, pulls the walking fog close around the streets, and puts dashes in the frame.
+  setWeather(def) {
+    this.rain = def.rain;
+    this.cloud = def.rain ? 2 : 1;
+    this.walkFogStart = def.rain ? 380 : 620;
+    this.walkFogEnd = def.rain ? 900 : 1250;
+  }
+
   setTimeOfDay(def) {
     this.shadowLen = def.shadow;
     this.night = def.night;
@@ -198,7 +208,7 @@ export class CityRenderer extends StyleRenderer {
       : this.visibleTiles(world)) : [];
     // shadows belong to the district tier: farther out they are smaller than a pixel
     this.drawn = { tiles: tiles.length, triangles: 0, trees: 0, landmarks: 0 };
-    this.shadowOn = district && shadows && world.overview && this.night < 0.8 && (walking || city.scale >= SHADOW_SCALE) ? 1 : 0;
+    this.shadowOn = district && shadows && world.overview && this.night < 0.8 && !this.rain && (walking || city.scale >= SHADOW_SCALE) ? 1 : 0;
     const life = district && world.overview && (walking || city.scale >= LIFE_SCALE);
     if (life) this.updateLife(tiles);
     if (this.shadowOn) this.castShadows(tiles, life && (walking || city.scale >= CAR_SCALE));   // changes the framebuffer and the colour masks; the scene sets its own
@@ -239,11 +249,19 @@ export class CityRenderer extends StyleRenderer {
       // the haze: what stands beyond the loaded tiles melts into the page's paper before its edge could be seen
       this.fullscreen('walkFog', other, { uColor: picTex, uDepthTex: frame.depth },
         { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paperRgb });
-      return other;
+    } else {
+      // 大气透视: the far end of the picture sinks into the paper, by how far it is; the rain thickens it
+      this.fullscreen('airHaze', other, { uColor: picTex, uDepthTex: frame.depth },
+        { uDepth: this.depthRange, uPaper: this.paperRgb, uHaze: 0.55 + this.rain * Math.min(0.3, city.scale * 0.08) });
     }
-    // 大气透视: the far end of the picture sinks into the paper, by how far it is
-    this.fullscreen('airHaze', other, { uColor: picTex, uDepthTex: frame.depth }, { uDepth: this.depthRange, uPaper: this.paperRgb });
-    return other;
+    picTex = other === frame.workAFbo ? frame.workA : frame.workB;
+    picFbo = other;
+    if (this.rain > 0.5) {
+      const rainFbo = picFbo === frame.workAFbo ? frame.workBFbo : frame.workAFbo;
+      this.fullscreen('rain', rainFbo, { uColor: picTex, uClass: frame.class }, { uTime: this.time, uRain: this.rain });
+      return rainFbo;
+    }
+    return picFbo;
   }
 
   // whether the renderer is in the walking view (the page says so through `walk`)
@@ -351,7 +369,7 @@ export class CityRenderer extends StyleRenderer {
     }
     const ground = this.programs.ground.use();
     this.applyCamera(ground);
-    ground.set('uGroundPal', this.groundPal).set('uTime', this.time);
+    ground.set('uGroundPal', this.groundPal).set('uTime', this.time).set('uRain', this.rain);
     for (const tile of tiles) {
       ground.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
       for (const mesh of Object.values(tile.ground)) {

@@ -178,6 +178,11 @@ void main() {
       }
       level -= dark * close;
     }
+    if (uRain > 0.5) {
+      // 湿路：水膜把颜色压深一档，膜里偶尔有一点反光
+      level -= 0.7;
+      if (hashAt(vPlace.xy * 0.7) > 0.985) level += 1.6;
+    }
     level = floor(level);
   } else if (vClass == 14.0) {
     // grass: the mottled lawn of the reference, its clumps kept to a few pixels across at every zoom
@@ -559,7 +564,7 @@ void main() {
 
   // 大气透视：at the far end of the picture the city sinks into the page's paper — the streets, the
   // blocks, the far shore, each by how far it is. Fullscreen over the finished picture, map view only
-  // (the walking view has its own fog).
+  // (the walking view has its own fog). The rain thickens it.
   airHaze: {
     vs: FULLSCREEN_VS,
     fs: PREFIX + /* glsl */`
@@ -567,13 +572,44 @@ uniform sampler2D uColor;
 uniform sampler2D uDepthTex;
 uniform vec2 uDepth;                    // nearest and farthest engine depth
 uniform vec3 uPaper;
+uniform float uHaze;
 out vec4 outColor;
 void main() {
   vec3 color = texelFetch(uColor, ivec2(gl_FragCoord.xy), 0).rgb;
   float z = texelFetch(uDepthTex, ivec2(gl_FragCoord.xy), 0).r;
   float dist = (uDepth.x - uDepth.y) * z;      // metres of engine depth away from the camera centre
-  float haze = smoothstep(1800.0, 6000.0, dist) * 0.55;
+  float haze = smoothstep(1800.0, 6000.0, dist) * uHaze;
   outColor = vec4(mix(color, uPaper, haze), 1.0);
+}`,
+  },
+
+  // The rain: whole-pixel dashes sliding down the frame in steps, in a third of the columns, and only
+  // over what is drawn — the paper stays dry. Frozen time holds them where they are for the tests.
+  rain: {
+    vs: FULLSCREEN_VS,
+    fs: PREFIX + NOISE + CLASS + /* glsl */`
+uniform sampler2D uColor;
+uniform sampler2D uClass;
+uniform float uTime;
+uniform float uRain;
+out vec4 outColor;
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec3 color = texelFetch(uColor, q, 0).rgb;
+  outColor = vec4(color, 1.0);
+  if (uRain < 0.5) return;
+  vec4 cls = texelFetch(uClass, q, 0);
+  if (!isCovered(cls)) return;                 // the paper keeps dry
+  int t = int(uTime * 12.0);
+  int col = q.x / 2;
+  if (hashAt(vec2(float(col) * 0.123, 7.7)) > 0.5) return;    // not every column carries a drop
+  // two streams of dashes with coprime falls, so the eye never finds a lattice in them
+  int dy = (q.y + (t * 17 + col * 61 + int(hashAt(vec2(float(col), 3.3)) * 131.0)) % 131) % 131;
+  int dy2 = (q.y + (t * 29 + col * 97 + int(hashAt(vec2(float(col), 9.1)) * 173.0)) % 173) % 173;
+  bool dash = (dy < 5 && hashAt(vec2(float(col), float(dy) + 1.1)) > 0.35)
+    || (dy2 < 4 && hashAt(vec2(float(col) + 2.3, float(dy2) + 5.7)) > 0.5);
+  if (!dash) return;
+  outColor = vec4(mix(color, vec3(0.86, 0.88, 0.92), 0.4), 1.0);
 }`,
   },
 

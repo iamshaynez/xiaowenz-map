@@ -93,14 +93,27 @@ async function boot() {
   let time = new URLSearchParams(location.search).get('time');
   if (!TIMES[time]) time = 'noon';
   const emissive = new Set([place('window_lit')]);        // lit glass is its own light; the hour must not tint it
+  // the weather: 晴 or 雨. Rain grey-tints the palette, thickens the haze, pulls the fog close, takes the
+  // sun's shadow away (the overcast clouds shade instead) and puts dashes in the frame. ?weather= picks
+  // one for tests; 6 walks the two.
+  const WEATHER = {
+    clear: { label: '晴' },
+    rain: { label: '雨', tint: [0.84, 0.87, 0.92], paper: '#d9dee3' },
+  };
+  const weatherNames = Object.keys(WEATHER);
+  let weather = new URLSearchParams(location.search).get('weather');
+  if (!WEATHER[weather]) weather = 'clear';
   let seasonBase = null, winterNow = {};
   const applyHour = () => {
-    const def = TIMES[time], [tr, tg, tb] = def.tint;
+    const def = TIMES[time], wet = WEATHER[weather];
+    const [tr, tg, tb] = def.tint, [wr, wg, wb] = wet.tint || [1, 1, 1];
     if (seasonBase) renderer.setSeason(seasonBase.map((c, i) => emissive.has(i) ? c
-      : [Math.min(255, Math.round(c[0] * tr)), Math.min(255, Math.round(c[1] * tg)), Math.min(255, Math.round(c[2] * tb))]), winterNow);
+      : [Math.min(255, Math.round(c[0] * tr * wr)), Math.min(255, Math.round(c[1] * tg * wg)), Math.min(255, Math.round(c[2] * tb * wb))]), winterNow);
     renderer.setTimeOfDay(def);
-    document.documentElement.style.setProperty('--paper', def.paper);
+    renderer.setWeather({ rain: weather === 'rain' ? 1 : 0 });
+    document.documentElement.style.setProperty('--paper', wet.paper && def.night < 0.5 ? wet.paper : def.paper);
     document.body.dataset.time = time;
+    document.body.dataset.weather = weather;
   };
   const setSeason = name => {
     if (!seasonNames.includes(name)) throw new Error(`没有 ${name} 这个季节`);
@@ -116,8 +129,14 @@ async function boot() {
     time = name;
     applyHour();
   };
+  const setWeather = name => {
+    if (!WEATHER[name]) throw new Error(`没有 ${name} 这种天气`);
+    weather = name;
+    applyHour();
+  };
   setSeason(season);
   setTime(time);
+  setWeather(weather);
   // the map without the words around it, for pictures
   const quiet = new URLSearchParams(location.search).get('ui') === 'off';
   if (quiet) document.body.classList.add('quiet');
@@ -331,6 +350,18 @@ async function boot() {
       e.preventDefault();
       return;
     }
+    if (key === '6') {
+      // 晴/雨一档档循环（ui.js 管 1–4 季节和 5 时刻，这里顺手管天气的按钮和键）
+      if (!e.repeat) {
+        weather = weatherNames[(weatherNames.indexOf(weather) + 1) % weatherNames.length];
+        setWeather(weather);
+        const button = document.getElementById('weather');
+        if (button) button.textContent = `天气 ${WEATHER[weather].label}`;
+        dirty = true;
+      }
+      e.preventDefault();
+      return;
+    }
     if (key === 'g' || (walk.active && key === 'escape' && !document.pointerLockElement)) {
       // 指针锁定时 Esc 由浏览器解锁鼠标，先不解散行走
       if (!e.repeat) {
@@ -364,6 +395,15 @@ async function boot() {
     overview, overviewTarget, names: book, quiet, tour: city.tour,
   });
   ui.onDirty(() => { dirty = true; });
+  // 天气按钮：晴/雨一档档循环（键盘 6 同）
+  const weatherButton = $('weather');
+  if (weatherButton) {
+    weatherButton.addEventListener('click', () => {
+      setWeather(weatherNames[(weatherNames.indexOf(weather) + 1) % weatherNames.length]);
+      weatherButton.textContent = `天气 ${WEATHER[weather].label}`;
+      dirty = true;
+    });
+  }
   if (fromGlobe) ui.enter(overviewTarget(), 2.8);   // 从高空落到全景：飞行的缓动和途中的俯冲都是现成的（ui.js）
   // the words that name the city: the title of the page, its heading, and what the canvas is said to be
   const titled = `像素${city.name}`;
@@ -464,6 +504,7 @@ async function boot() {
     camera, renderer, world, manifest: index, gl, ui,
     landmarks, city, walk,
     times: timeNames, time: () => time, setTime,
+    weathers: weatherNames, weather: () => weather, setWeather: name => { setWeather(name); dirty = true; },
     renderOnce: () => { renderer.present(renderer.render(world)); dirty = false; },
     // how much of a landmark is in the frame and how much of it is hidden behind other things
     landmarkMask: id => renderer.landmarkMask(id),
