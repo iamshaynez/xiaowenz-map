@@ -12,6 +12,7 @@ import { LIFE_SHADERS } from '../gl/shaders-life.js';
 import { DEBUG_SHADERS } from '../gl/shaders-debug.js';
 import { brandTextures } from '../landmarks/brandmarks.js';
 import { Traffic, TRAFFIC_COLOURS } from '../life/traffic.js';
+import { buildFurniture } from '../life/furniture.js';
 import { assemble, BOX_SCALE, DISTRICT_SCALE, LIFE_SCALE, ROOF_SCALE, SHADOW_SCALE, TALLEST, TREE_SCALE, UNIT_BOX } from '../world/store.js';
 import { buildStripes } from '../world/streets.js';
 import { CityCamera } from '../gl/city-camera.js';
@@ -28,6 +29,7 @@ export const SHADOW = [1.004, 0.834];
 const SHADOW_SLACK_M = 0.05;             // how much nearer the sun something must stand than a point to shade it
 const CAR_SCALE = 1.2, PERSON_SCALE = 5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
 const STRIPE_SCALE = 0.55;             // from this zoom up the streets wear their markings (a pixel is under 2 m)
+const PROPS_SCALE = 1.1;               // from this zoom up the street furniture stands up (a signal box is three pixels tall)
 const BRAND_SCALE = 0.8;               // from this zoom up a brand's flag is drawn (a pixel is 1.25 m), logo and all
 const BRAND_UNIT = 6;                  // the atlas texture's own unit (FIRST_FREE_UNIT and up are handed out per draw)
 const RECORD = 12;                        // floats per moving box, as traffic.js writes them
@@ -109,8 +111,19 @@ export class CityRenderer extends StyleRenderer {
     this.wood = place('wood_dark');
     this.red = place('temple_red');
     this.awning = place('awning_green');
+    this.shutter = place('asphalt_light');
     this.mark = place('road_mark');
+    this.markYellow = place('taxi_yellow');
+    this.markTactile = place('tactile_yellow');
     this.trafficColours = TRAFFIC_COLOURS.map(name => place(name));
+    // 街具的色板（life/furniture.js）：路面上的铁灰、蓝板、石栏、三家共享单车与信号灯的灯色
+    this.propsColours = {
+      dark: place('metal_dark'), metal: place('metal_dark'), cabinet: place('concrete_grey'),
+      pale: place('concrete_pale'), silver: place('metal_pale'), wood: place('wood_dark'),
+      navy: place('brand_navy'), blue: place('brand_blue'), green: place('brand_green'), gold: place('brand_gold'),
+      red: place('brand_red'), yellow: place('taxi_yellow'), greenLight: place('signal_green'), lit: place('window_lit'),
+    };
+    this.propsColours.green = this.propsColours.greenLight;
     this.treeCell = index.treeCell;
     this.tones = [place('urban_ground'), place('roof_flat_grey'), place('glass_grey')];
     // the island is the region itself, turned as it stands on the ground; its edge wanders up to 600 m
@@ -181,8 +194,8 @@ export class CityRenderer extends StyleRenderer {
   setWeather(def) {
     this.rain = def.rain;
     this.cloud = def.rain ? 2 : 1;
-    this.walkFogStart = def.rain ? 380 : 620;
-    this.walkFogEnd = def.rain ? 900 : 1250;
+    this.walkFogStart = def.rain ? 380 : 700;
+    this.walkFogEnd = def.rain ? 900 : 1400;
   }
 
   setTimeOfDay(def) {
@@ -264,9 +277,11 @@ export class CityRenderer extends StyleRenderer {
       walking ? { uGradientY: 0, uEdge: 0.35 } : { uGradientY: city.gradientY, uEdge: EDGE_PX / city.scale });
     picFbo = flip(picFbo); picTex = texOf(picFbo);
     if (walking) {
-      // the haze: what stands beyond the loaded tiles melts into the page's paper before its edge could be seen
+      // the haze: what stands beyond the loaded tiles melts into the sky before its edge could be seen
+      // (走进来时后面是天；地图上后面还是纸)。目标色随时刻——夜里是墨蓝的
+      const target = this.sky > 0.5 ? this.skyHorizon : this.paperRgb;
       this.fullscreen('walkFog', flip(picFbo), { uColor: picTex, uDepthTex: frame.depth },
-        { uFog: [this.walkFogStart ?? 620, this.walkFogEnd ?? 1250], uPaper: this.paperRgb });
+        { uFog: [this.walkFogStart ?? 700, this.walkFogEnd ?? 1400], uPaper: target });
     } else {
       // 大气透视: the far end of the picture sinks into the paper, by how far it is; the rain thickens it
       this.fullscreen('airHaze', flip(picFbo), { uColor: picTex, uDepthTex: frame.depth },
@@ -395,12 +410,14 @@ export class CityRenderer extends StyleRenderer {
       }
     }
     if (this.walkActive() || city.scale >= STRIPE_SCALE) this.drawStripes(tiles);
+    if (this.walkActive() || city.scale >= PROPS_SCALE) this.drawFurniture(tiles);
     const buildings = this.programs.buildings.use();
     this.applyCamera(buildings);
     // facades once a pixel is under about 0.8 m: the shader draws them from half of uDetail on
     buildings.set('uDetail', Math.min(1, Math.max(0, city.scale - 0.6)))
       .set('uMid', Math.min(1, Math.max(0, city.scale - 0.3)))
       .set('uWindow', this.window).set('uWood', this.wood).set('uRed', this.red).set('uAwning', this.awning).set('uLift', 0)
+      .set('uShutter', this.shutter)
       .set('uTime', this.time);
     for (const tile of tiles) {
       if (!tile.buildings) continue;
@@ -537,7 +554,7 @@ export class CityRenderer extends StyleRenderer {
     let drawn = 0;
     for (const tile of tiles) {
       if (!tile.paths) continue;
-      if (!tile.stripes) tile.stripes = buildStripes(gl, tile, clearances, this.mark);
+      if (!tile.stripes) tile.stripes = buildStripes(gl, tile, clearances, { white: this.mark, yellow: this.markYellow, tactile: this.markTactile });
       if (!tile.stripes.count) continue;
       stripes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
       gl.bindVertexArray(tile.stripes.mesh.vao);
@@ -546,6 +563,50 @@ export class CityRenderer extends StyleRenderer {
     }
     gl.bindVertexArray(null);
     this.drawn.stripes = drawn;
+  }
+
+  // the street furniture (life/furniture.js): signals, boards, shelters, barriers, benches, bikes,
+  // railings — static instance boxes derived from the tile's PATH lines and cached on the tile, drawn
+  // with the moving things' own shader so they light, edge and shade alike. At night the second mesh
+  // adds the signal cells' glow.
+  drawFurniture(tiles) {
+    const { gl, city } = this;
+    const boxes = this.programs.lifeBoxes.use();
+    this.applyCamera(boxes);
+    boxes.set('uWindow', this.window);
+    let drawn = 0, lit = 0;
+    for (const tile of tiles) {
+      if (!tile.paths) continue;
+      if (!tile.furniture) tile.furniture = buildFurniture(gl, tile, (this.clearances ??= this.furnitureClearances()), this.propsColours);
+      if (!tile.furniture.count) continue;
+      boxes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+      gl.bindVertexArray(tile.furniture.mesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.furniture.count);
+      drawn += tile.furniture.count;
+    }
+    if (this.night > 0.4) {
+      for (const tile of tiles) {
+        if (!tile.furniture?.litCount) continue;
+        boxes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(tile.furniture.lit.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.furniture.litCount);
+        lit += tile.furniture.litCount;
+      }
+    }
+    gl.bindVertexArray(null);
+    this.drawn.furniture = drawn;
+    this.drawn.furnitureLit = lit;
+  }
+
+  // what the sun's picture asks of the furniture: the same clearances that keep paint off the landmarks
+  furnitureClearances() {
+    const list = [];
+    for (const landmark of this.landmarks) {
+      const radius = landmark.clear || 0;
+      if (!radius) continue;
+      for (const part of landmark.parts) list.push([part.x, part.y, radius]);
+    }
+    return list;
   }
 
   // ---- shadows --------------------------------------------------------------------------------------------
@@ -646,8 +707,20 @@ export class CityRenderer extends StyleRenderer {
     if (withLife && this.traffic.count) {
       const life = this.programs.shadowLife.use();
       this.applyCamera(life, { shadowMap: false });
+      life.set('uOffset', [0, 0]);
       gl.bindVertexArray(this.lifeMesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, this.traffic.count);
+    }
+    // 街具也接影：交通灯、候车亭、隔离栏和树一样，在太阳的画里占一个位置
+    if (withLife && (this.walkActive() || city.scale >= PROPS_SCALE)) {
+      const props = this.programs.shadowLife.use();
+      this.applyCamera(props, { shadowMap: false });
+      for (const tile of tiles) {
+        if (!tile.furniture?.count) continue;
+        props.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(tile.furniture.mesh.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.furniture.count);
+      }
     }
     gl.bindVertexArray(null);
     gl.colorMask(true, true, true, true);
@@ -659,8 +732,8 @@ export class CityRenderer extends StyleRenderer {
   updateLife(tiles) {
     const { gl, city, W, H } = this;
     const walking = this.walkActive();
-    const which = walking ? { cars: true, boats: true, lake: true, people: true, lamps: true, lit: this.night > 0.4 }
-      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE, lamps: city.scale >= 1.1, lit: this.night > 0.4 };
+    const which = walking ? { cars: true, boats: true, lake: true, people: true, lamps: true, lit: this.night > 0.4, rain: this.rain > 0.5 }
+      : { cars: city.scale >= CAR_SCALE, boats: true, lake: city.scale >= LAKE_BOAT_SCALE, people: city.scale >= PERSON_SCALE, lamps: city.scale >= 1.1, lit: this.night > 0.4, rain: this.rain > 0.5 };
     this.drawn.life = this.traffic.place(tiles, this.time, city, { W, H, scale: city.scale }, which, this.trafficColours);
     if (walking) this.walk.place(this.traffic, this.trafficColours);   // the player walks among them
     this.lampHeads = this.traffic.lampHeads;                           // for the pools of light the lamps cast
@@ -676,7 +749,7 @@ export class CityRenderer extends StyleRenderer {
     const { gl } = this;
     const boxes = this.programs.lifeBoxes.use();
     this.applyCamera(boxes);
-    boxes.set('uWindow', this.window);
+    boxes.set('uWindow', this.window).set('uOffset', [0, 0]);   // 街具刚用过 uOffset：车和人带的是世界米
     for (const [mesh, count] of [[this.lifeMesh, this.traffic.count], [this.folkMesh, this.traffic.people]]) {
       if (!count) continue;
       gl.bindVertexArray(mesh.vao);

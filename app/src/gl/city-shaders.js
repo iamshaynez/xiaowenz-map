@@ -364,6 +364,7 @@ uniform int uAwning;                    // of the first of three awning colours 
 uniform float uLift;                    // what the vertex shader raised the model by (a landmark on its ground)
 uniform float uNight;                   // 0 by day, 1 in the small hours: some windows answer it with light
 uniform int uWindowLit;                 // the palette index of lit glass (never tinted by the hour)
+uniform int uShutter;                   // the palette index of a shop's roller shutter (closed for the night)
 const int JIANGNAN = 1, WALKUP = 2, FARMHOUSE = 3, TOWER = 4, OFFICE = 5, INDUSTRIAL = 6, PUBLIC = 7, TEMPLE = 8, STATION = 9, SHED = 10;
 // by archetype: metres between window bays; and where in a bay a window opens (across, up the storey)
 const float BAY[10] = float[10](4.2, 3.3, 3.2, 3.0, 1.5, 2.4, 3.6, 4.0, 1.5, 3.0);
@@ -416,6 +417,11 @@ void main() {
         if (bay > open.x && bay < open.y && up > open.z && up < open.w) colour = uWindow;     // a window
         else if (archetype == TOWER && up < 0.07) level -= 1.0;                                 // the line of a floor slab
         else if (archetype == TEMPLE && bay < 0.05) colour = uRed;                              // a column
+        else if (bay > open.x - 0.02 && bay < open.y + 0.02 && colour != uWindow) {
+          // 窗台与窗楣：窗下一条受光的亮线，窗上一条压暗的框影——窗从此凹进墙里去
+          if (up > open.z - 0.055 && up < open.z) level += 0.6;
+          else if (up > open.w && up < open.w + 0.05) level -= 0.55;
+        }
         // the wall's own material, where no opening has taken the pixel
         bool opening = colour == uWindow || colour == uWood || colour == uRed;
         if (!opening) {
@@ -428,19 +434,54 @@ void main() {
           } else if (archetype == TOWER) {
             if (fract(vFace.x / 0.9) < 0.035) level -= 0.4;                                    // a mullion joint every 90 cm
           }
+          // 排水管：老住宅的墙上隔两三米一根竖管，按楼的种子落位
+          if (archetype == WALKUP || archetype == FARMHOUSE) {
+            if (fract(vFace.x / 2.7 + vLook.w * 3.1) < 0.014) level -= 0.5;
+          }
+          // 女儿墙：平顶楼的顶上一道压顶，最后一层的上缘压暗
+          float levelsAll = (vSize.y - vSize.x) / max(vSize.z, 2.0);
+          if ((archetype == WALKUP || archetype == TOWER || archetype == PUBLIC || archetype == OFFICE)
+            && storeys > levelsAll - 1.0 && up > 0.92) level -= 0.55;
         }
+        float bayIndex = floor(vFace.x / BAY[archetype - 1] + vLook.w);
+        float inBay = bay;
         if (storeys < 1.0) {
-          // the ground floor: on half the plainer houses a shop — glass, a door, a band of awning; the rest a door
-          float shop = archetype != TEMPLE && hashAt(vec2(vLook.w * 17.31, 7.7)) < 0.55 ? 1.0 : 0.0;
-          if (shop > 0.5) {
-            if (bay > 0.06 && bay < 0.94 && up > 0.12 && up < 0.68) colour = uWindow;
-            else if (up >= 0.68 && up < 0.82 && bay > 0.06 && bay < 0.94) colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, 9.2)) * 3.0);
-            else if (bay > 0.40 && bay < 0.52 && up >= 0.68) colour = uWood;
-            // a shop keeps its light on past dark more often than a home does
-            if (uNight > 0.0 && colour == uWindow && hashAt(vec2(vLook.w * 17.31, 7.7)) < uNight) colour = uWindowLit;
+          // 一层按开间分成铺面：每一间自己掷骰——开橱窗、只开门、或者拉下卷帘
+          bool shopArch = archetype != TEMPLE;
+          float bayRand = hashAt(vec2(vLook.w * 17.31, bayIndex * 3.77 + 1.1));
+          float shopChance = 0.58;
+          bool shop = shopArch && bayRand < shopChance;
+          float bayOpen = hashAt(vec2(vLook.w * 17.31, bayIndex * 3.77 + 2.4));
+          if (shop) {
+            if (bayOpen < 0.16) {
+              // 收了卷帘的铺面：浅灰的横棱，夜里不亮
+              if (inBay > 0.10 && inBay < 0.90 && up < 0.72) {
+                colour = uShutter;
+                level -= fract(up * 12.0) < 0.22 ? 0.8 : 0.0;
+              } else if (up >= 0.72 && up < 0.84 && inBay > 0.06 && inBay < 0.94) {
+                colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, bayIndex)) * 3.0);
+              }
+            } else {
+              if (inBay > 0.10 && inBay < 0.90 && up > 0.12 && up < 0.66) colour = uWindow;
+              else if (inBay >= 0.32 && inBay < 0.52 && up >= 0.66 && up < 0.80) colour = uWood;   // 门
+              else if (up >= 0.66 && up < 0.80 && inBay > 0.06 && inBay < 0.94) {
+                colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, bayIndex)) * 3.0);               // 雨棚
+              }
+              // 开着的铺面过去天黑也亮着灯
+              if (uNight > 0.0 && colour == uWindow && bayOpen > 0.3) colour = uWindowLit;
+            }
           } else {
-            if (bay > 0.42 && bay < 0.56 && up < 0.78) colour = archetype == TEMPLE ? uRed : uWood;
+            // 不是铺面的一层：一扇门，门上一个小雨罩；老住宅门洞上缘压暗
+            if (inBay > 0.40 && inBay < 0.56 && up < 0.78) colour = archetype == TEMPLE ? uRed : uWood;
+            else if (inBay > 0.36 && inBay < 0.60 && up >= 0.80 && up < 0.88) level -= 0.6;
             else if ((archetype == WALKUP || archetype == FARMHOUSE || archetype == INDUSTRIAL) && up > 0.9) level -= 1.0;
+          }
+        } else if (storeys < 1.32) {
+          // 二层墙脚的招牌带：底下那间是铺面的，就有一道自己的色；夜里亮成灯箱
+          bool shopBelow = archetype != TEMPLE && hashAt(vec2(vLook.w * 17.31, bayIndex * 3.77 + 1.1)) < 0.58;
+          if (shopBelow && inBay > 0.08 && inBay < 0.92 && up > 0.52) {
+            colour = uAwning + int(hashAt(vec2(vLook.w * 3.1, bayIndex)) * 3.0);
+            if (uNight > 0.0) colour = uWindowLit;
           }
         } else if (uNight > 0.0 && colour == uWindow) {
           // a home answers the night window by window: a little over half of them at full night

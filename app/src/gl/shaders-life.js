@@ -7,9 +7,10 @@ import { CITY_CAMERA, CITY_PIXEL, GRAIN, ISLAND, LIGHT, NOISE } from './city-com
 const RECORD = /* glsl */`
 layout(location = 0) in vec3 aCorner;    // unit box: x and y in {-1, 1}, z in {0, 1}
 layout(location = 1) in vec2 aNormal;    // outward normal of the face; (0, 0) on the top
-layout(location = 2) in vec4 aPlace;     // per instance: x, y in world metres; z; heading x
+layout(location = 2) in vec4 aPlace;     // per instance: x, y in world metres (street furniture: tile-relative, plus uOffset); z; heading x
 layout(location = 3) in vec4 aShape;     // per instance: heading y, half length, half width, height
 layout(location = 4) in vec4 aLook;      // per instance: wall colour, top colour, kind, pitch (radians)
+uniform vec2 uOffset;                    // the tile's corner relative to the camera centre; the moving things leave it 0
 `;
 // the corner of a box in world axes, relative to the camera centre (as every city shader wants it).
 // A box can also be pitched out of the horizontal (the laser beam): its "along" axis tips up by
@@ -21,7 +22,7 @@ vec3 place(vec3 corner) {
   vec2 local = vec2(corner.x * aShape.z, corner.y * aShape.y);   // across the heading, along it
   float along = local.y * ca;
   vec2 turned = vec2(local.x * hy + along * hx, -local.x * hx + along * hy);   // across is to the heading's right
-  return vec3(aPlace.xy - uCentre.xy + turned, aPlace.z + corner.z * aShape.w + local.y * sa);
+  return vec3(aPlace.xy + uOffset - uCentre.xy + turned, aPlace.z + corner.z * aShape.w + local.y * sa);
 }
 vec2 turned(vec2 normal) {
   float hx = aPlace.w, hy = aShape.x;

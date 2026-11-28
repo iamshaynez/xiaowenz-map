@@ -151,6 +151,8 @@ export class Walk {
       x = found.x; y = found.y;
     }
     this.saved = { x: camera.x, y: camera.y, scale: camera.scale, pitch: camera.pitch, yaw: camera.yaw };
+    this.savedSky = this.renderer.sky;                 // 白纸是地图的身份；走进去时后面是天（REVIEW-QUEUE 45）
+    this.renderer.sky = 1;
     this.player = { x, y, z: this.standZ(x, y), heading: this.player.heading ?? 0, moving: false };
     this.driving = false;
     this.car = null;
@@ -194,6 +196,7 @@ export class Walk {
     this.camNow = this.camDist;
     this.handbrakeShow(false);
     camera.walking = false;
+    this.renderer.sky = this.savedSky ?? 0;
     Object.assign(camera, this.saved);
     document.body.classList.remove('walking');
     document.getElementById('walkhud').hidden = true;
@@ -278,6 +281,17 @@ export class Walk {
         ctx.moveTo(tile.x0 + pts[0], tile.y0 + pts[1]);
         for (let i = 4; i < pts.length; i += 4) ctx.lineTo(tile.x0 + pts[i], tile.y0 + pts[i + 1]);
         ctx.stroke();
+      }
+    }
+    // 地标：名录里的地方是画上的一点，走近了认得出是哪座
+    ctx.fillStyle = '#8c2f24';
+    for (const landmark of this.renderer.landmarks || []) {
+      for (const part of landmark.parts) {
+        const d = Math.hypot(part.x - this.player.x, part.y - this.player.y);
+        if (d > 320) continue;
+        ctx.beginPath();
+        ctx.arc(part.x, part.y, 26, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.restore();
