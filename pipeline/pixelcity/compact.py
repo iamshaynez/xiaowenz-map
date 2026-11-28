@@ -75,19 +75,23 @@ def _bytes_of(column):
 
 
 def building_properties(props):
-    """The nine properties of each building in 11 bytes: base (i16, 2.5 cm), height (u16, a centimetre), then
-    levels, archetype, roof, wall colour, roof colour, seed and flags, a byte each.
+    """A building's properties in 14 bytes: base (i16, 2.5 cm), height (u16, a centimetre), then levels,
+    archetype, roof, wall colour, roof colour, seed and flags, a byte each, and then three more the street
+    tier reads: which sides of it touch a road (a byte of bits, north, east, south, west), whether its
+    ground floor is shops, and a variant byte of its own (more facades may come to read it).
 
     The base and the height are rounded to single precision first: the mesh is built in single precision, so a
     wall's foot is the single-precision base, and the two must come out as one number or a wall would stand
     a unit above or below the base its building says."""
     props = numpy.asarray(props, dtype=numpy.float64)
     base, height = props[:, 0].astype(numpy.float32), props[:, 1].astype(numpy.float32)
-    out = numpy.empty((len(props), 11), dtype="u1")
+    out = numpy.zeros((len(props), 14), dtype="u1")
     out[:, 0:2] = _bytes_of(i16(base, BASE_PER_M, "the base of a building"))
     out[:, 2:4] = _bytes_of(u16(height, HEIGHT_PER_M, "the height of a building"))
     for k, column in enumerate(range(2, 9)):
         out[:, 4 + k] = u8(props[:, column], 1, f"property {column} of a building")
+    for k, column in enumerate(range(9, len(props[0]))):
+        out[:, 11 + k] = u8(props[:, column], 1, f"property {column} of a building")
     return out.tobytes()
 
 
@@ -200,14 +204,16 @@ def _column(rows, at, dtype):
 
 
 def read_buildings(payload):
-    """A BLDB section -> (properties float64[n, 9], corners float64[m, 6] of x, y, z, nx, ny, building, indices int64)."""
+    """A BLDB section -> (properties float64[n, 12], corners float64[m, 6] of x, y, z, nx, ny, building, indices int64).
+    The last three properties are the street tier's: frontage (bits of the four sides), ground-floor use, variant."""
     buildings, corners, count, width = struct.unpack_from("<IIIB", payload, 0)
     at = 13
-    rows = _rows(payload[at:at + buildings * 11], 11)
-    props = numpy.empty((buildings, 9))
+    rows = _rows(payload[at:at + buildings * 14], 14)
+    props = numpy.zeros((buildings, 12))
     props[:, 0], props[:, 1] = _column(rows, 0, "<i2") / BASE_PER_M, _column(rows, 2, "<u2") / HEIGHT_PER_M
-    props[:, 2:] = rows[:, 4:11]
-    at += buildings * 11
+    props[:, 2:9] = rows[:, 4:11]
+    props[:, 9:] = rows[:, 11:14]
+    at += buildings * 14
     rows = _rows(payload[at:at + corners * 12], 12)
     vertices = numpy.column_stack([_column(rows, 0, "<i2") / XY_PER_M, _column(rows, 2, "<i2") / XY_PER_M, _column(rows, 4, "<i2") / Z_PER_M,
                                    _column(rows, 6, "<i2") / NORMAL_UNIT, _column(rows, 8, "<i2") / NORMAL_UNIT, _column(rows, 10, "<u2")])

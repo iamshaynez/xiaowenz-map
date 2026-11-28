@@ -272,19 +272,212 @@ function treePits(tile, colours, out) {
   }
 }
 
+// OSM 真点的类别号（osm_extract.py 的 FURNITURE_KINDS / POI）：页面按点替换规矩派生的那几样
+const NODE_SIGNAL = 0, NODE_CROSSING = 1, NODE_BUS_STOP = 2, NODE_BENCH = 3, NODE_WASTE = 4, NODE_BIKES = 5,
+  NODE_BOLLARD = 7, NODE_GATE = 8, NODE_CABINET = 9, NODE_SUBWAY = 12, NODE_POI = 20, NODE_FOOD = 21, NODE_SERVICE = 22;
+const STREET_NONE = 0, STREET_COMMERCIAL = 1, STREET_OLD = 2, STREET_TOURIST = 3;
+
+// 一条线附近最近一段路的方向与路面高（信号灯与店招要贴着路的方向立）
+function nearestRoad(tile, x, y, classes) {
+  let best = null;
+  for (const line of tile.paths || []) {
+    if (!classes.includes(line.cls)) continue;
+    const pts = line.points;
+    for (let i = 0; i < pts.length / 4 - 1; i++) {
+      const a = i * 4, b = a + 4;
+      const ax = tile.x0 + pts[a], ay = tile.y0 + pts[a + 1], bx = tile.x0 + pts[b], by = tile.y0 + pts[b + 1];
+      const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (len2 || 1)));
+      const px = ax + dx * t, py = ay + dy * t;
+      const d = (px - x) * (px - x) + (py - y) * (py - y);
+      if (!best || d < best.d) {
+        const len = Math.sqrt(len2) || 1;
+        best = { d, tx: dx / len, ty: dy / len, z: pts[a + 2] + (pts[b + 2] - pts[a + 2]) * t };
+      }
+    }
+  }
+  return best;
+}
+
+// OSM 真点立的街具：信号灯、候车亭、长椅、单车、配电箱、路障，和挂着品类色招牌的店。规矩派生的
+// 那几样在真点在场时让位——真点在哪，东西就在哪
+function realNodes(tile, colours, clearances, out, lit) {
+  const nodes = tile.nodes;
+  if (!nodes?.count) return false;
+  const e = new Emitter(colours, tile, out), f = new Emitter(colours, tile, lit);
+  let poi = 0;
+  const board = [colours.red, colours.blue, colours.green];
+  for (let k = 0; k < nodes.count; k++) {
+    const x = tile.x0 + nodes.x[k], y = tile.y0 + nodes.y[k];
+    if (clearances.some(([cx, cy, r]) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < r * r)) continue;
+    const z = tile.surfaceAt ? tile.surfaceAt(x, y) : (nearestRoad(tile, x, y, [5, 6, 7, 8])?.z ?? 0);
+    const kind = nodes.kind[k];
+    if (kind === NODE_SIGNAL) {
+      const road = nearestRoad(tile, x, y, [5, 6, 7]);
+      if (!road) continue;
+      e.box(x, y, z, road.tx, road.ty, 0.07, 0.07, 4.3, colours.dark);
+      e.box(x - road.ty * 1.1, y + road.tx * 1.1, z + 4.0, road.tx, road.ty, 1.1, 0.06, 0.09, colours.dark);
+      e.box(x - road.ty * 1.9, y + road.tx * 1.9, z + 3.35, road.tx, road.ty, 0.12, 0.23, 1.05, colours.dark);
+      for (let c = 0; c < 3; c++) {
+        e.box(x - road.ty * 2.0, y + road.tx * 2.0, z + 3.52 + c * 0.33, road.tx, road.ty, 0.10, 0.19, 0.20,
+          [colours.red, colours.yellow, colours.green][c]);
+      }
+      f.box(x - road.ty * 2.1, y + road.tx * 2.1, z + 3.52 + 2 * 0.33, road.tx, road.ty, 0.10, 0.19, 0.20, colours.lit, colours.lit, 6);
+    } else if (kind === NODE_BUS_STOP) {
+      const road = nearestRoad(tile, x, y, [5, 6, 7]);
+      if (road) shelterAt(e, tile, colours, x, y, road.tx, road.ty);
+    } else if (kind === NODE_BENCH) {
+      e.box(x, y, z + 0.42, 1, 0, 0.75, 0.20, 0.09, colours.wood);
+      e.box(x, y, z + 0.72, 1, 0, 0.75, 0.05, 0.38, colours.wood);
+    } else if (kind === NODE_WASTE) {
+      e.box(x, y, z, 1, 0, 0.18, 0.18, 0.82, colours.bin);
+    } else if (kind === NODE_BIKES) {
+      const road = nearestRoad(tile, x, y, [5, 6, 7, 8, 9]);
+      bikeRow(e, tile, colours, x, y, road ? road.tx : 1, road ? road.ty : 0, 5);
+    } else if (kind === NODE_BOLLARD) {
+      e.box(x, y, z, 1, 0, 0.09, 0.09, 0.85, colours.metal);
+    } else if (kind === NODE_GATE || kind === NODE_SUBWAY) {
+      e.box(x, y, z, 1, 0, 0.6, 0.12, 2.2, colours.dark);
+    } else if (kind === NODE_CABINET) {
+      e.box(x, y, z, 1, 0, 0.5, 0.23, 1.15, colours.cabinet);
+    } else if (kind >= NODE_POI && poi < 44) {
+      poi++;
+      const road = nearestRoad(tile, x, y, [5, 6, 7, 8, 9]);
+      const tx = road ? road.tx : 1, ty = road ? road.ty : 0;
+      const zx = tile.surfaceAt ? tile.surfaceAt(x, y) : (road ? road.z : z);
+      e.box(x, y, zx, tx, ty, 0.05, 0.05, 2.3, colours.metal);
+      e.box(x, y, zx + 1.85, tx, ty, 0.30, 0.03, 0.55, board[nodes.category[k] % 3]);
+    }
+  }
+  return true;
+}
+
+// 一座候车亭立在一处：站台、两根柱、顶棚、站牌（真点与规矩共用）
+function shelterAt(e, tile, colours, bx, by, tx, ty) {
+  const bz = tile.surfaceAt ? tile.surfaceAt(bx, by) : 0;
+  e.box(bx, by, bz, tx, ty, 2.0, 0.9, 0.14, colours.pale);
+  for (const end of [-1.75, 1.75]) {
+    e.box(bx + tx * end, by + ty * end, bz + 0.14, tx, ty, 0.06, 0.06, 2.45, colours.metal);
+  }
+  e.box(bx, by, bz + 2.59, tx, ty, 1.95, 0.7, 0.09, colours.silver, colours.silver);
+  const signX = bx + tx * 2.9 + ty * 0.5, signY = by + ty * 2.9 - tx * 0.5;
+  const sz = tile.surfaceAt ? tile.surfaceAt(signX, signY) : bz;
+  e.box(signX, signY, sz, tx, ty, 0.05, 0.05, 2.6, colours.metal);
+  e.box(signX, signY, sz + 2.2, tx, ty, 0.27, 0.03, 0.5, colours.blue);
+}
+
+// 一排共享单车：n 辆，车头对着 hx, hy
+function bikeRow(e, tile, colours, ax, ay, hx, hy, n) {
+  for (let k = 0; k < n; k++) {
+    const x = ax + hy * 0.72 * k, y = ay - hx * 0.72 * k;
+    const z = tile.surfaceAt ? tile.surfaceAt(x, y) : 0;
+    const r = hash(k * 3 + 1, ay + ax);
+    const colour = r < 0.42 ? colours.blue : r < 0.84 ? colours.green : colours.gold;
+    e.box(x, y, z + 0.18, hx, hy, 0.72, 0.16, 0.30, colours.dark);
+    e.box(x, y, z + 0.46, hx, hy, 0.60, 0.10, 0.34, colour);
+  }
+}
+
+// 景区步道的长椅与垃圾桶：游线沿线的歇脚处，隔五六十米一对
+function touristBenches(tile, colours, out) {
+  const ways = (tile.paths || []).filter(line => line.kind === STREET_TOURIST);
+  for (const line of ways) {
+    const e = new Emitter(colours, tile, out);
+    for (let k = 0; k * 55 < line.length - 8; k++) {
+      const side = k % 2 === 0 ? 1 : -1;
+      const s = (k + 0.5) * 55 + 6;
+      if (s < 4 || s > line.length - 4) continue;
+      const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+      along(line.points, s, p);
+      const lateral = side * 1.2;
+      const x = tile.x0 + p.x - p.ty * lateral, y = tile.y0 + p.y + p.tx * lateral;
+      const z = tile.surfaceAt ? tile.surfaceAt(x, y) : p.z;
+      e.box(x, y, z + 0.42, p.tx, p.ty, 0.75, 0.20, 0.09, colours.wood);
+      e.box(x - p.ty * side * 0.22, y + p.tx * side * 0.22, z + 0.72, p.tx, p.ty, 0.75, 0.05, 0.38, colours.wood);
+    }
+  }
+}
+
+// 老街的灯：檐下一盏灯笼（夜里亮），街上隔三十五米一个摊位——白棚、两根柱、一只货箱
+function oldStreetFurniture(tile, colours, out, lit) {
+  const ways = (tile.paths || []).filter(line => line.kind === STREET_OLD);
+  for (const line of ways) {
+    for (const side of [1, -1]) {
+      const e = new Emitter(colours, tile, out), f = new Emitter(colours, tile, lit);
+      for (let s = 4; s < line.length - 4; s += 8) {
+        const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+        along(line.points, s, p);
+        const lateral = side * (line.width + 0.85);
+        const x = tile.x0 + p.x - p.ty * lateral, y = tile.y0 + p.y + p.tx * lateral;
+        const z = (tile.surfaceAt ? tile.surfaceAt(x, y) : p.z) + 2.7;
+        e.box(x, y, z, p.tx, p.ty, 0.16, 0.16, 0.42, colours.lantern);
+        f.box(x, y, z, p.tx, p.ty, 0.17, 0.17, 0.44, colours.lit, colours.lit, 6);
+      }
+      for (let s = 12; s < line.length - 12; s += 35) {
+        const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+        along(line.points, s, p);
+        const lateral = side * (line.width + 1.6);
+        const bx = tile.x0 + p.x - p.ty * lateral, by = tile.y0 + p.y + p.tx * lateral;
+        const bz = tile.surfaceAt ? tile.surfaceAt(bx, by) : p.z;
+        e.box(bx, by, bz + 2.05, p.tx, p.ty, 0.85, 0.5, 0.06, colours.cloth, colours.cloth);
+        for (const end of [-0.7, 0.7]) {
+          e.box(bx + p.tx * end, by + p.ty * end, bz, p.tx, p.ty, 0.05, 0.05, 2.05, colours.metal);
+        }
+        e.box(bx - p.ty * 0.3, by + p.tx * 0.3, bz, p.tx, p.ty, 0.3, 0.24, 0.4, colours.wood);
+      }
+    }
+  }
+}
+
+// 小街巷的电杆与电线：一根杆、一道横担、两根跨档的线。商业街与老街不让电线杆——它们埋线
+function polesAndWires(tile, colours, out) {
+  const ways = (tile.paths || []).filter(line => (line.cls === 7 || line.cls === 8) && line.kind === STREET_NONE);
+  for (const line of ways) {
+    const e = new Emitter(colours, tile, out);
+    for (const side of [1]) {                        // 杆只立一侧，线顺着它们跑
+      const lateral = side * (line.width + 0.8);
+      let prev = null;
+      for (let s = 8; s < line.length - 4; s += 45) {
+        const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+        along(line.points, s, p);
+        const x = tile.x0 + p.x - p.ty * lateral, y = tile.y0 + p.y + p.tx * lateral;
+        const z = tile.surfaceAt ? tile.surfaceAt(x, y) : p.z;
+        e.box(x, y, z, p.tx, p.ty, 0.09, 0.09, 6.2, colours.wood);                       // 杆
+        e.box(x, y, z + 5.9, -p.ty, p.tx, 1.0, 0.05, 0.07, colours.wood);                // 横担（横过路）
+        if (prev) {
+          const mx = (prev.x + x) / 2, my = (prev.y + y) / 2;
+          const dx = x - prev.x, dy = y - prev.y, len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len, uy = dy / len;
+          for (const off of [-1.0, 1.0]) {
+            const wx = -uy * off, wy = ux * off;
+            e.box(mx + wx, my + wy, (prev.z + z) / 2 + 5.85, ux, uy, len / 2, 0.035, 0.05, colours.dark);   // 线
+          }
+        }
+        prev = { x, y, z };
+      }
+    }
+  }
+}
+
 // -> { mesh, count, lit, litCount }: 一块瓦片的街具。夜里的那份只有信号灯的灯色
 export function buildFurniture(gl, tile, clearances, colours) {
   const out = [], lit = [];
   const streets = (tile.paths || []).filter(line => line.cls === 5 || line.cls === 6);
   const junctions = crossings(streets);
-  signals(junctions, tile, colours, clearances, out, lit);
+  const fromReal = realNodes(tile, colours, clearances, out, lit);
+  if (!fromReal) {
+    signals(junctions, tile, colours, clearances, out, lit);
+    shelters(tile, colours, out);
+    cabinets(tile, colours, out);
+    benches(tile, colours, out);
+  }
   nameBoards(junctions, tile, colours, clearances, out);
   barriers(tile, colours, junctions, clearances, out);
-  shelters(tile, colours, out);
-  cabinets(tile, colours, out);
-  benches(tile, colours, out);
   treePits(tile, colours, out);
   railings(tile, colours, out);
+  polesAndWires(tile, colours, out);
+  touristBenches(tile, colours, out);
+  oldStreetFurniture(tile, colours, out, lit);
   const anchors = [];
   for (const junction of junctions) {
     if (junction.a.cls === 5) anchors.push([tile.x0 + junction.x, tile.y0 + junction.y]);

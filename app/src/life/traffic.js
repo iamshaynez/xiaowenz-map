@@ -239,15 +239,20 @@ export class Traffic {
           if (Math.abs(c.u) > halfU + line.reach || Math.abs(c.v) > halfV + line.reach / camera.sinPitch) continue;
         }
         const street = STREETS[line.cls], water = WATERS[line.cls];
-        if (street && which.cars) {
+        // the street's own kind of life (the bake carried it in the PATH's kind byte): an old street walks
+        // and carries no traffic at all; a commercial street crowds its pavements and parks no cars; a
+        // tourist shore is busy too
+        const crowd = line.kind === 1 ? 0.42 : line.kind === 2 ? 0.34 : line.kind === 3 ? 0.55 : 1.0;
+        const oldStreet = line.kind === 2;
+        if (street && which.cars && !oldStreet) {
           this.flow(line, n, street, time, tile, colours, 0.55, true);
-          if (line.cls === MINOR || line.cls === SERVICE) this.parked(line, n, tile, colours);
+          if ((line.cls === MINOR || line.cls === SERVICE) && line.kind !== 1) this.parked(line, n, tile, colours);
         }
         if (water && which.boats && (line.cls !== LAKE || which.lake)) this.flow(line, n, water, time, tile, colours, line.cls === LAKE ? 0.2 : 0, false);
         if (which.lamps && street) this.lamps(line, n, tile, colours, which.lit);
         if (which.people && PEOPLE[line.cls]) {
           // on the pavements of a street, to either side of it; along the middle of a pedestrian street or a path
-          this.walk(line, n, PEOPLE[line.cls], time, tile, colours, line.cls === PEDESTRIAN || line.cls === PATH ? 0.3 : 1, which.rain);
+          this.walk(line, n, PEOPLE[line.cls] * crowd, time, tile, colours, line.cls === PEDESTRIAN || line.cls === PATH ? 0.3 : 1, which.rain);
         }
       }
     }

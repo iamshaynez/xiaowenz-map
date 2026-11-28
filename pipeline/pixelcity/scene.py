@@ -77,7 +77,10 @@ from .bake import (
     buildings_section,
     coarse_grid_section,
     container,
+    facade_boxes,
+    facade_section,
     massing_section,
+    nodes_section,
     roof_boxes_section,
     rooftop_props,
     surface,
@@ -90,6 +93,7 @@ from .ground import (
     FARMLAND,
     FOREST,
     GRASS,
+    kerb_mesh,
     GROUND_COLOURS,
     LAND_CLASSES,
     LIFT,
@@ -397,6 +401,29 @@ def unholdable(geoms, cx, cy, tx0, tx1, ty0, ty1):
     return out
 
 
+def compute_frontage(geoms, ground_data, reach=3.0):
+    """A byte of bits per building: which of its four sides -- north, east, south, west, as its bounding
+    box has them -- a carriageway of the street's own classes runs within `reach` metres of. The street
+    tier hangs its balconies and its shopfronts only where a street is."""
+    car = [ground_data.layers[c] for c in (ground.ROAD_MAJOR, ground.ROAD_SECONDARY, ground.ROAD_MINOR, ground.ROAD_SERVICE)
+           if c in ground_data.layers]
+    if not car:
+        return numpy.zeros(len(geoms), dtype=numpy.int64)
+    road = shapely.union_all(car)
+    west, south, east, north = shapely.bounds(numpy.asarray(geoms, dtype=object)).T
+    out = numpy.zeros(len(geoms), dtype=numpy.int64)
+    # each side's own edge line, as its own batch of two-point linestrings: north, east, south, west
+    for bit, (x0s, y0s, x1s, y1s) in enumerate(((west, north, east, north), (east, south, east, north),
+                                                (west, south, east, south), (west, south, west, north))):
+        coords = numpy.empty((len(geoms), 2, 2), dtype=numpy.float64)
+        coords[:, 0, 0], coords[:, 0, 1] = x0s, y0s
+        coords[:, 1, 0], coords[:, 1, 1] = x1s, y1s
+        lines = shapely.linestrings(coords.reshape(-1, 2))
+        near = shapely.distance(road, lines) <= reach
+        out[near] |= 1 << bit
+    return out
+
+
 def bake(city, limit=None, log=print):
     t0 = time.time()
     work = city.work
@@ -468,6 +495,11 @@ def bake(city, limit=None, log=print):
                          + FLAG_DATASET_OUTLINE * (b["origin"] == "globfp") + FLAG_REPLACED_BLOCK * (b["origin"] == "osm-block") for b in buildings])
     props = numpy.array([[b["base"], b["height"], b["levels"], b["archetype"], b["roof"], colour_index[b["wall"]], colour_index[b["roof_colour"]], b["seed"], f, x, y]
                          for b, f, x, y in zip(buildings, flags, cx, cy, strict=True)], dtype=numpy.float64)
+    # 街道档的三列：哪几条边临街（车行道三米内）、一层是不是铺面（按标签）、楼自己的一个花样字节
+    frontage = compute_frontage(geoms, ground_data)
+    ground_use = numpy.asarray([1 if (b["tags"].get("shop") or b["tags"].get("amenity") in ("restaurant", "cafe", "fast_food", "bar", "pub", "bank", "pharmacy", "fuel"))
+                                else (2 if b["tags"].get("building") in ("commercial", "retail", "office") or b["tags"].get("office") else 0) for b in buildings])
+    variant = numpy.asarray([(int(b["seed"]) * 37 + int(b["levels"]) * 11) % 256 for b in buildings], dtype=numpy.int64)
     cleared = flag_cleared(props, clears)
     log(f"{int(cleared.sum())} mapped buildings give way to landmarks built by hand")
     # what was left out and what was kept in its place, for the data report and for tools/tests/bake-compare.cjs
@@ -487,6 +519,7 @@ def bake(city, limit=None, log=print):
         roof_geoms, roof_rows = roof_geoms[on_kept], roof_rows[on_kept]
         buildings = [b for b, t in zip(buildings, gone, strict=True) if not t]
         geoms, areas, cx, cy, flags, props, cleared = geoms[~gone], areas[~gone], cx[~gone], cy[~gone], flags[~gone], props[~gone], cleared[~gone]
+        frontage, ground_use, variant = frontage[~gone], ground_use[~gone], variant[~gone]
     live = props[~cleared]             # what is drawn, for the overview tier
     live_areas = areas[~cleared]
 
@@ -565,6 +598,33 @@ def bake(city, limit=None, log=print):
     lcv, urb = overview_rasters(city, live, live_areas, ground_data, cover, bounds, height)
 
     roof_tile, roof_starts = group_by_tile(roof_rows[:, 9], roof_rows[:, 10], tx0, ty0, nx_tiles, ny_tiles)
+    # 瓦片带的楼属性：九个旧的，加上临街面、一层用途、花样字节
+    section_props = numpy.column_stack([props[:, :9], frontage, ground_use, variant])
+    facade_rows = facade_boxes(geoms, section_props, ground_data, colour_index)
+    log(f"facade boxes: {len(facade_rows)}")
+    if len(facade_rows):
+        fx = numpy.clip(numpy.floor(facade_rows[:, 0] / TILE_M).astype(numpy.int64), tx0, tx0 + nx_tiles - 1) - tx0
+        fy = numpy.clip(numpy.floor(facade_rows[:, 1] / TILE_M).astype(numpy.int64), ty0, ty0 + ny_tiles - 1) - ty0
+        fkey = fx * ny_tiles + fy
+        forder = numpy.argsort(fkey, kind="stable")
+        facade_rows = facade_rows[forder]
+        facade_key = fkey[forder]
+        facade_starts = numpy.searchsorted(facade_key, numpy.arange(nx_tiles * ny_tiles + 1))
+    else:
+        facade_starts = numpy.zeros(nx_tiles * ny_tiles + 1, dtype=numpy.int64)
+    # the street furniture the map has real points for, by tile; a node of the margin that no tile's 16-bit
+    # corner can hold is left out (it stands past what a tile can name, as the brands' shops do)
+    node_x = numpy.asarray([point.x for point, _, _ in osm.furniture], dtype=numpy.float64) if osm.furniture else numpy.zeros(0)
+    node_y = numpy.asarray([point.y for point, _, _ in osm.furniture], dtype=numpy.float64) if osm.furniture else numpy.zeros(0)
+    ntx = numpy.clip(numpy.floor(node_x / TILE_M).astype(numpy.int64), tx0, tx0 + nx_tiles - 1)
+    nty = numpy.clip(numpy.floor(node_y / TILE_M).astype(numpy.int64), ty0, ty0 + ny_tiles - 1)
+    holdable = (numpy.abs(node_x - ntx * TILE_M) <= 32767 / compact.XY_PER_M) & (numpy.abs(node_y - nty * TILE_M) <= 32767 / compact.XY_PER_M)
+    if not holdable.all():
+        osm.furniture = [item for item, keep in zip(osm.furniture, holdable, strict=True) if keep]
+        node_x, node_y = node_x[holdable], node_y[holdable]
+        log(f"{int((~holdable).sum())} furniture nodes left out that no tile could hold")
+    node_tile, node_starts = group_by_tile(node_x, node_y, tx0, ty0, nx_tiles, ny_tiles)
+    log(f"furniture nodes: {len(osm.furniture)}")
     real = len(props)
     log(f"rooftop props: {len(roof_rows)}")
     (city.baked / "overview.bin").write_bytes(container([
@@ -592,12 +652,17 @@ def bake(city, limit=None, log=print):
             x0, y0 = tile_origin(tx + tx0, ty + ty0)
             sections = [(b"TERR", terrain_section(x0, y0, grid, info)), (b"BASE", base_section(city, x0, y0, cover))]
             if len(sl):
-                section = buildings_section(geoms[sl], props[sl], x0, y0)
+                section = buildings_section(geoms[sl], section_props[sl], x0, y0)
                 totals["vertices"] += struct.unpack_from("<I", section, 4)[0]
                 sections.append((b"BLDB", section))
             ground_parts = [mesh(ground_data, classes, x0, y0, height, reclassify=lambda x, y, cls: reclassify_ground(city, x, y, cls))
                             for classes in (WATER_CLASSES, ROAD_CLASSES + (RAIL,), LAND_CLASSES)]
             deck = deck_mesh(ground_data, x0, y0, height)
+            # the kerb: a vertical face along the carriageway where a pavement stands beside it
+            kerb_v, kerb_i = kerb_mesh(ground_data, x0, y0, height)
+            if len(kerb_v):
+                road_v, road_i = ground_parts[1]
+                ground_parts[1] = (numpy.concatenate([road_v, kerb_v]), numpy.concatenate([road_i, kerb_i + len(road_v)]))
             for sid, (vertices, indices) in zip((b"WATR", b"ROAD", b"LAND", b"DECK"), (*ground_parts, deck), strict=True):
                 if len(indices):
                     sections.append((sid, mesh_section(vertices, indices, sid == b"DECK")))
@@ -616,8 +681,14 @@ def bake(city, limit=None, log=print):
             roof_here = roof_tile[roof_starts[k]:roof_starts[k + 1]]
             if len(roof_here):
                 sections.append((b"ROOF", roof_boxes_section(roof_geoms[roof_here], roof_rows[roof_here], x0, y0)))
+            facade_here = facade_rows[facade_starts[k]:facade_starts[k + 1]]
+            if len(facade_here):
+                sections.append((b"FCLD", facade_section(facade_here, x0, y0)))
+            node_here = node_tile[node_starts[k]:node_starts[k + 1]]
+            if len(node_here):
+                sections.append((b"NODE", nodes_section([osm.furniture[j] for j in node_here], x0, y0)))
             sections.append((b"META", json.dumps({"x0": x0, "y0": y0, "buildings": len(sl), "rooftop": len(roof_here),
-                                                  "trees": len(trees_here)}).encode("utf-8")))
+                                                  "trees": len(trees_here), "facades": len(facade_here), "nodes": len(node_here)}).encode("utf-8")))
             (out_dir / f"{tx}_{ty}.bin").write_bytes(container(sections))
             made += 1
         if limit is not None and made >= limit:
@@ -628,6 +699,10 @@ def bake(city, limit=None, log=print):
         "palette": list(palette), "brandMarks": list(brands.TABLE), "origin": [city.origin_e, city.origin_n], "epsg": city.epsg, "bounds": [west, south, east, north],
         "coarseTolerance": 1.5,
         "buildings": real, "leftOutOfWater": int(afloat.sum()), "repeatedOutlines": repeated, "rooftopProps": len(roof_rows),
+        "facadeBoxes": len(facade_rows), "furnitureNodes": len(osm.furniture),
+        "frontageBuildings": int((frontage != 0).sum()), "groundFloorShops": int((ground_use == 1).sum()),
+        "streetKinds": {"commercial": sum(1 for _, _, _, _, k in moving if k == 1), "oldStreet": sum(1 for _, _, _, _, k in moving if k == 2),
+                        "tourist": sum(1 for _, _, _, _, k in moving if k == 3)},
         "inferredHeights": int((flags & FLAG_INFERRED_HEIGHT != 0).sum()), "villageCaps": int((flags & FLAG_VILLAGE_CAP != 0).sum()),
         "datasetOutlines": int((flags & FLAG_DATASET_OUTLINE != 0).sum()), "replacedBlocks": int((flags & FLAG_REPLACED_BLOCK != 0).sum()),
         "flags": {"rooftop": 1, "inferredHeight": 2, "villageCap": 4, "datasetOutline": 8, "replacedBlock": 16, "cleared": 32},

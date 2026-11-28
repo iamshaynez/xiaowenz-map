@@ -7,7 +7,7 @@
 // arrays are needed over them the bytes are copied first (a Float32Array has to start on a multiple of four).
 
 const MAGIC = [0x48, 0x5a, 0x54, 0x31]; // "HZT1"
-const FORMAT = 2;                      // the version after the magic: the compact forms (a file of version 1 is refused)
+const FORMAT = 3;                      // the version after the magic: 3 carries the street tier (a file of version 2 or older is refused)
 const TEXT = new TextDecoder();
 
 // the units of compact.py
@@ -155,22 +155,24 @@ export function readRibbons(section, ground, lifts) {
   return { vertices, indices };
 }
 
+export const PROP_COLS = 12;          // floats a building: the nine old ones, then frontage, ground-floor use, variant
+
 // BLDB: the buildings of a tile (compact.py): buildings, corners and indices (u32 each), bytes per index (u8);
-// then 11 bytes of properties a building (base i16 in 2.5 cm, height u16 in a centimetre, then levels,
-// archetype, roof, wall colour, roof colour, seed and flags, a byte each); 12 bytes a corner (x, y in 4 cm,
-// z in 2.5 cm, the level part of the normal in two i16, the building it belongs to, u16); the indices (u16,
-// or u32 where a tile has more than 65,535 corners).
-// -> { buildings, props: 9 floats a building, vertices: 6 floats a corner, indices }
+// then 14 bytes of properties a building (base i16 in 2.5 cm, height u16 in a centimetre, levels, archetype,
+// roof, wall colour, roof colour, seed, flags, then frontage (bits of the four sides), ground-floor use and a
+// variant byte); 12 bytes a corner (x, y in 4 cm, z in 2.5 cm, the level part of the normal in two i16, the
+// building it belongs to, u16); the indices (u16, or u32 where a tile has more than 65,535 corners).
+// -> { buildings, props: 12 floats a building, vertices: 6 floats a corner, indices }
 export function readBuildings(section) {
   const { view, offset } = section;
   const buildings = view.getUint32(offset, true), corners = view.getUint32(offset + 4, true), count = view.getUint32(offset + 8, true);
   const wide = view.getUint8(offset + 12) === 4;
   let at = offset + 13;
-  const props = new Float32Array(buildings * 9), vertices = new Float32Array(corners * 6);
-  for (let b = 0; b < buildings; b++, at += 11) {
-    props[b * 9] = view.getInt16(at, true) / Z_PER_M;
-    props[b * 9 + 1] = view.getUint16(at + 2, true) / 100;
-    for (let c = 2; c < 9; c++) props[b * 9 + c] = view.getUint8(at + 2 + c);
+  const props = new Float32Array(buildings * PROP_COLS), vertices = new Float32Array(corners * 6);
+  for (let b = 0; b < buildings; b++, at += 14) {
+    props[b * PROP_COLS] = view.getInt16(at, true) / Z_PER_M;
+    props[b * PROP_COLS + 1] = view.getUint16(at + 2, true) / 100;
+    for (let c = 2; c < PROP_COLS; c++) props[b * PROP_COLS + c] = view.getUint8(at + 2 + c);
   }
   for (let v = 0; v < corners; v++, at += 12) {
     const o = v * 6;
@@ -293,7 +295,7 @@ export function readPaths(section) {
   const lines = [];
   let at = 4;
   for (let k = 0; k < count; k++) {
-    const points = view.getUint16(at, true), cls = view.getUint8(at + 2), width = view.getFloat32(at + 4, true), length = view.getFloat32(at + 8, true);
+    const points = view.getUint16(at, true), cls = view.getUint8(at + 2), kind = view.getUint8(at + 3), width = view.getFloat32(at + 4, true), length = view.getFloat32(at + 8, true);
     at += 12;
     const data = new Float32Array(buffer, at, points * 4);
     at += points * 16;
@@ -303,7 +305,7 @@ export function readPaths(section) {
       west = Math.min(west, data[i]); east = Math.max(east, data[i]);
       south = Math.min(south, data[i + 1]); north = Math.max(north, data[i + 1]);
     }
-    lines.push({ cls, width, length, points: data, cx: (west + east) / 2, cy: (south + north) / 2, reach: Math.hypot(east - west, north - south) / 2 });
+    lines.push({ cls, kind, width, length, points: data, cx: (west + east) / 2, cy: (south + north) / 2, reach: Math.hypot(east - west, north - south) / 2 });
   }
   if (at !== buffer.byteLength) throw new Error('truncated paths');
   return lines;
@@ -312,6 +314,31 @@ export function readPaths(section) {
 // PLCE: JSON: [name, kind key, kind]
 export function readPlaces(section) {
   return JSON.parse(TEXT.decode(section.bytes));
+}
+
+// FCLD: what hangs on the street-facing walls (bake.py's facade_boxes), as life-box records: u32 count,
+// then 12 floats a box — x, y, z relative to the tile's corner, heading x, y, half length, half width,
+// height, wall colour, top colour, kind, pitch. The page draws them with the moving things' own shader.
+export function readFacades(section) {
+  const count = new DataView(section.bytes.buffer, section.bytes.byteOffset, section.bytes.byteLength).getUint32(0, true);
+  return ownCopy(section, 4, count * 48).buffer;
+}
+
+// NODE: the street furniture the map has real points for (osm_extract.py): u32 count, then 6 bytes a node —
+// x, y relative to the tile's corner (i16, 4 cm), the kind, the category (what colour a shop's board is).
+// -> { x, y, kind, category, count }
+export function readNodes(section) {
+  const { view, offset } = section;
+  const count = view.getUint32(offset, true);
+  const x = new Float32Array(count), y = new Float32Array(count), kind = new Uint8Array(count), category = new Uint8Array(count);
+  let at = offset + 4;
+  for (let k = 0; k < count; k++, at += 6) {
+    x[k] = view.getInt16(at, true) / XY_PER_M;
+    y[k] = view.getInt16(at + 2, true) / XY_PER_M;
+    kind[k] = view.getUint8(at + 4);
+    category[k] = view.getUint8(at + 5);
+  }
+  return { x, y, kind, category, count };
 }
 
 // NAME and LINE of names.bin, the names the page searches by (pipeline/pixelcity/names.py). NAME is JSON: a

@@ -329,6 +329,8 @@ uniform vec2 uOffset;                    // tile corner relative to the camera c
 uniform float uLift;                     // added to every height: for a landmark, the height of the ground it stands on
 out vec3 vWorld;                         // relative to the camera centre
 out vec4 vLook;                          // archetype, wall colour, roof colour, seed
+out float vBuilding;                     // which building of the tile this wall belongs to
+out float vGround;                       // its ground floor's use: 1 when the bake read shops there
 out vec4 vSize;                          // base, eave, height of a storey, spare
 out vec3 vFace;                          // metres along the wall, share of the normal that faces up, spare
 out float vLight;
@@ -348,6 +350,8 @@ void main() {
   vWorld = world;
   vLight = faceLight(aNormal);
   vLook = vec4(prop(b, 3), prop(b, 5), prop(b, 6), prop(b, 7));      // archetype, wall colour, roof colour, seed
+  vBuilding = float(b);
+  vGround = prop(b, 10) * step(11.0, float(textureSize(uProps, 0).x));   // 一层是不是铺面；手搭地标是九列，读 0
   vSize = vec4(base, base + height, height / levels, 0.0);            // base, eave, height of a storey
   vFace = vec3(dot(aPos.xy, vec2(-aNormal.y, aNormal.x)), sqrt(max(0.0, 1.0 - dot(aNormal, aNormal))), 0.0);
   vec3 s = project(world);
@@ -377,6 +381,8 @@ in vec4 vSize;
 in vec3 vFace;
 in float vLight;
 in float vDepth;
+in float vBuilding;
+in float vGround;
 void main() {
   ivec2 ip = pixelIndex();
   if (!onIsland(vWorld.xy + uCentre.xy, ip)) discard;
@@ -449,7 +455,7 @@ void main() {
           // 一层按开间分成铺面：每一间自己掷骰——开橱窗、只开门、或者拉下卷帘
           bool shopArch = archetype != TEMPLE;
           float bayRand = hashAt(vec2(vLook.w * 17.31, bayIndex * 3.77 + 1.1));
-          float shopChance = 0.58;
+          float shopChance = vGround >= 1.0 ? 0.86 : 0.58;   // 烘焙认出的一层铺面：底商几乎都开；其余按开间掷骰
           bool shop = shopArch && bayRand < shopChance;
           float bayOpen = hashAt(vec2(vLook.w * 17.31, bayIndex * 3.77 + 2.4));
           if (shop) {

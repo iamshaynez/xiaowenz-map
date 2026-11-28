@@ -67,6 +67,16 @@ PLACE_VALUES = {
 }
 PLACE_KEYS = tuple(PLACE_VALUES)
 
+# street furniture the map has real points for: the bake carries them to the tiles and the page builds
+# its signals, shelters, benches and shopfronts from them where they exist (its own rules fill the gaps).
+# Values are the kinds the app's furniture section knows (world/furniture.js reads the same numbers).
+FURNITURE_KINDS = {"traffic_signals": 0, "crossing": 1, "bus_stop": 2, "bench": 3, "waste_basket": 4, "bicycle_parking": 5,
+                   "parking": 6, "bollard": 7, "gate": 8, "street_cabinet": 9, "power": 10, "information": 11,
+                   "subway_entrance": 12, "motorcycle_parking": 13, "stop": 15, "give_way": 16, "street_lamp": 17}
+POI_KIND = 20                     # a shop or eatery mapped as a point: a signboard of its category's colour
+POI_COLOUR = {21: 0, 22: 1, 20: 2}   # food warm, service cool, retail green
+
+
 
 class Layers:
     def __init__(self):
@@ -78,6 +88,7 @@ class Layers:
         self.water_lines = []   # lines: streams and narrow canals mapped as centrelines
         self.land = []          # polygons: land use and cover, parks, woods, campuses, squares
         self.places = []        # points and polygons with a name worth showing
+        self.furniture = []     # points: street furniture the map has real nodes for (signals, crossings, benches, POIs)
         self.brands = []        # points: the chain-brand shops the table in brands.py knows (pixelcity.brands)
         self.meta = {}
 
@@ -175,6 +186,26 @@ class Extractor(osmium.SimpleHandler):
         brand = brands.of(tags)
         if brand is not None:
             self.layers.brands.append((Point(x, y), self._brand_tags(tags, brand)))
+        # street furniture and POIs mapped as points: the page's signals, benches and shopfronts stand
+        # on these where the map has them
+        kind = FURNITURE_KINDS.get(tags.get("highway", "")) if "highway" in tags else None
+        if kind is None:
+            kind = FURNITURE_KINDS.get(tags.get("barrier", "")) if "barrier" in tags else None
+        if kind is None and tags.get("man_made") == "street_cabinet":
+            kind = FURNITURE_KINDS["street_cabinet"]
+        if kind is None and tags.get("power") == "pole":
+            kind = FURNITURE_KINDS["power"]
+        if kind is None and tags.get("tourism") == "information":
+            kind = FURNITURE_KINDS["information"]
+        if kind is None and tags.get("railway") == "subway_entrance":
+            kind = FURNITURE_KINDS["subway_entrance"]
+        if kind is None:
+            kind = FURNITURE_KINDS.get(tags.get("amenity", "")) if "amenity" in tags else None
+        if kind is None and "shop" in tags and tags["shop"] not in ("mall", "department_store"):
+            kind = POI_KIND
+        if kind is not None:
+            category = 0 if kind == 21 else (1 if kind == 22 else (2 if kind == POI_KIND else 255))
+            self.layers.furniture.append((Point(x, y), kind, category))
         found = place_kind(tags)
         if not found:
             return

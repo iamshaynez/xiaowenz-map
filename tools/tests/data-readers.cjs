@@ -107,13 +107,13 @@ const index = JSON.parse(fs.readFileSync(path.join(baked, 'index.json'), 'utf8')
     if (t.BLDB) {
       const b = data.readBuildings(t.BLDB);
       const wide = t.BLDB.view.getUint8(t.BLDB.offset + 12, true) === 4 ? 4 : 2;
-      assert.equal(t.BLDB.bytes.length, 13 + b.buildings * 11 + b.vertices.length * 2 + b.indices.length * wide);
-      assert.equal(b.props.length, b.buildings * 9);
+      assert.equal(t.BLDB.bytes.length, 13 + b.buildings * 14 + b.vertices.length * 2 + b.indices.length * wide);
+      assert.equal(b.props.length, b.buildings * data.PROP_COLS);
       assert.ok(b.vertices.every(Number.isFinite) && b.vertices.filter((_, k) => k % 6 < 2).every(v => Math.abs(v) < 1366), 'building corners in range');
       assert.equal(b.vertices.length % 6, 0);
       assert.ok(b.indices.every(i => i < b.vertices.length / 6), 'building index in range');
       assert.ok(b.vertices.filter((_, k) => k % 6 === 5).every(i => i >= 0 && i < b.buildings), 'vertex building index in range');
-      assert.ok(Array.from(b.props.filter((_, k) => k % 9 === 1)).every(h => h > 0 && h < 1000), 'building heights in range');
+      assert.ok(Array.from(b.props.filter((_, k) => k % data.PROP_COLS === 1)).every(h => h > 0 && h < 1000), 'building heights in range');
       buildings += b.buildings;
     }
     if (t.ROOF) {

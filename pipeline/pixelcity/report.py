@@ -187,7 +187,7 @@ def build(city, log=print):
             add(f"{water['name']}水面（OSM 多边形）：{lake[0].area / 1e6:.2f} 平方公里。")
     add(f"桥面、高架（浮在地面上的路和铁路）：{len(g.decks):,} 段。")
     add("")
-    add(f"水的颜色按水体分：湖、运河、池塘各有自己的青绿，只有名字里带{"、".join(f"“{word}”" for word in rivers)}的江用江水的土黄色（城市定义的 `look.rivers`）；OSM 把别的水道也标成“河”的，按运河的颜色画。")
+    add(f"水的颜色按水体分：湖、运河、池塘各有自己的青绿，只有名字里带{"、".join(f"“{word}”" for word in rivers)}的江用江水的土黄色（城市定义的 `look.rivers`）；OSM 把别的水道也标成“河”的，按运河的颜色画。一整块没有名字的大水面认它里面那条有名字的水道（2026-11-28 起）：钱塘江、黄浦江的江面由此认了江色。")
     add("")
     add("## 地形与土地覆盖\n")
     add(f"- Copernicus GLO-30，网格 {grid.shape[1]} × {grid.shape[0]}，30 米一格，{grid.min()} 到 {grid.max()} 米。最高 {int(grid.max())} 米。")

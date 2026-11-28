@@ -26,16 +26,32 @@ WATER_TOLERANCE_M = 6.0
 MIN_WATER_LINE_M = 150.0
 BOAT_WIDTH_M = {CANAL: 6.0, RIVER: 60.0, LAKE: 12.0}   # the room a route gives its boats: a canal is narrow, the river is not
 
+# a street's kind of life, from the city's own circles (city.json "look"): the byte rides in the PATH
+# section's spare slot, and the page reads it to thicken or quiet the street
+STREET_NONE, STREET_COMMERCIAL, STREET_OLD, STREET_TOURIST = 0, 1, 2, 3
+
+
+def street_kind_of(city, x, y):
+    """Which street-life circle a point of the world sits in: old street first, then commercial, then tourist."""
+    from .classify import circles
+    for kind, name in ((STREET_OLD, "oldStreet"), (STREET_COMMERCIAL, "commercial"), (STREET_TOURIST, "tourist")):
+        for circle in circles(city, name):
+            if (x - circle["x"]) ** 2 + (y - circle["y"]) ** 2 <= circle["radius"] ** 2:
+                return kind
+    return STREET_NONE
+
 
 def collect(ground_data, osm, city, height, lake_routes=(), log=print):
-    """-> list of (line, class, width, heights) in world metres; heights: a sampler giving the line's level."""
+    """-> list of (line, class, width, heights, kind) in world metres; heights: a sampler giving the line's level."""
     lines = []
 
     def add(line, cls, width, level):
         """Keep a line as its parts, each a line of its own: a way cut in two by the region's edge moves nothing across the gap."""
         for part in shapely.get_parts(line):
             if not part.is_empty:
-                lines.append((part, int(cls), float(width), level))
+                middle = part.interpolate(0.5, normalized=True)
+                kind = street_kind_of(city, middle.x, middle.y) if cls in CAR_CLASSES + FOOT_CLASSES else STREET_NONE
+                lines.append((part, int(cls), float(width), level, kind))
 
     # streets. ground.py kept the centrelines but not the tags; a centreline's middle lies on the mapped
     # way it was cut from, so the way is found again by that (within half a metre, since cutting moves the
@@ -87,24 +103,24 @@ def collect(ground_data, osm, city, height, lake_routes=(), log=print):
 
 
 def section(lines, x0, y0, height_of):
-    """-> bytes: u32 count, then per line u16 points, u8 class, u8 spare, f32 width, f32 length, and per point
+    """-> bytes: u32 count, then per line u16 points, u8 class, u8 street kind, f32 width, f32 length, and per point
     x, y relative to the tile's corner, z, distance from the start of the line (float each)."""
     out = bytearray(struct.pack("<I", len(lines)))
-    for line, cls, width, level in lines:
+    for line, cls, width, level, kind in lines:
         pts = numpy.asarray(line.coords, dtype="<f8")
         step = numpy.hypot(*numpy.diff(pts, axis=0).T)
         dist = numpy.concatenate([[0.0], numpy.cumsum(step)])
         pts[:, 0] -= x0
         pts[:, 1] -= y0
         z = numpy.broadcast_to(numpy.asarray(level(pts[:, 0] + x0, pts[:, 1] + y0), dtype=float), (len(pts),))
-        out += struct.pack("<HBBff", len(pts), cls, 0, width, float(dist[-1]))
+        out += struct.pack("<HBBff", len(pts), cls, kind, width, float(dist[-1]))
         out += numpy.column_stack([pts, z, dist]).astype("<f4").tobytes()
     return bytes(out)
 
 
 def group_by_tile(lines, tx0, ty0, nx, ny):
     """-> (order, starts): the lines sorted by the tile holding their middle, and where each tile's run begins."""
-    mid = numpy.array([line.interpolate(0.5, normalized=True).coords[0] for line, _, _, _ in lines]).reshape(-1, 2)
+    mid = numpy.array([line.interpolate(0.5, normalized=True).coords[0] for line, _, _, _, _ in lines]).reshape(-1, 2)
     ix = numpy.clip(numpy.floor(mid[:, 0] / TILE_M).astype(int), tx0, tx0 + nx - 1) - tx0
     iy = numpy.clip(numpy.floor(mid[:, 1] / TILE_M).astype(int), ty0, ty0 + ny - 1) - ty0
     key = ix * ny + iy
@@ -128,4 +144,4 @@ if __name__ == "__main__":
     height = ground.sample_terrain(grid, info)
     routes = c.curated("routes.json")
     lines = collect(ground_data, osm, c, height, json.loads(routes.read_text(encoding="utf-8"))["routes"] if routes else [])
-    print(f"{len(lines)} lines, {sum(line.length for line, _, _, _ in lines):.0f} km, in {time.time() - t0:.0f} s")
+    print(f"{len(lines)} lines, {sum(line.length for line, _, _, _, _ in lines):.0f} km, in {time.time() - t0:.0f} s")

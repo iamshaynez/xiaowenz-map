@@ -2,7 +2,7 @@
 // Tiles are fetched the first time they are needed and kept; when the cache is full the ones used
 // longest ago are let go. Where a file is fetched from the city says (world/source.js): by the manifest
 // of the city, which names every file of it.
-import { TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBrands, readBuildings, readCells, readGrid, readMassing, readMesh, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
+import { PROP_COLS, TERRAIN_RINGS, innerGrid, loadContainer, readBase, readBoxes, readBrands, readBuildings, readCells, readFacades, readGrid, readMassing, readMesh, readNodes, readPaths, readPlaces, readRibbons, readTrees, surfaceOn } from './data.js';
 
 export const DISTRICT_SCALE = 0.125;    // from this zoom up (1 pixel under 8 m) real outlines replace the overview
 export const BOX_SCALE = 0.04;          // from this zoom up the overview draws its boxes (1 pixel under 25 m)
@@ -174,11 +174,11 @@ function solidRaster(size, buildings, water) {
   if (buildings && buildings.indices.length) {
     const v = buildings.vertices, props = buildings.props;
     mark(v, buildings.indices, 6, (a, b, c, verts) => {
-      if (props && props[verts[a + 5] * 9 + 8] >= 32) return false;   // a landmark built by hand stands here instead
+      if (props && props[verts[a + 5] * PROP_COLS + 8] >= 32) return false;   // a landmark built by hand stands here instead
       const nx = verts[a + 3], ny = verts[a + 4];
       return nx * nx + ny * ny < 0.9;   // a roof, flat or pitched: a wall projects to a line, not an area
     }, (a, verts) => {
-      const b = verts[a + 5] * 9;       // this corner's building: base z plus its height, in decimetres
+      const b = verts[a + 5] * PROP_COLS;   // this corner's building: base z plus its height, in decimetres
       return Math.min(6553, props[b] + props[b + 1]) * 10;
     });
   }
@@ -446,8 +446,19 @@ export class World {
     if (sections.BASE) tile.base = byteTexture(gl, 32, 32, readBase(sections.BASE));
     if (buildings && buildings.indices.length) {
       tile.buildings = assemble(gl, [{ data: buildings.vertices, layout: [[0, 3], [1, 2], [2, 1]] }], buildings.indices);
-      tile.props = floatTexture(gl, 9, buildings.buildings, buildings.props);
+      tile.props = floatTexture(gl, PROP_COLS, buildings.buildings, buildings.props);
+      if (sections.FCLD) {
+        const facades = readFacades(sections.FCLD);
+        if (facades.byteLength) {
+          tile.facade = assemble(gl, [
+            { data: UNIT_BOX, layout: [[0, 3], [1, 2]] },
+            { data: facades, stride: 48, layout: [[2, 4, gl.FLOAT, 0], [3, 4, gl.FLOAT, 16], [4, 4, gl.FLOAT, 32]], divisor: 1 },
+          ]);
+          tile.facade.count = facades.byteLength / 48;
+        }
+      }
     }
+    if (sections.NODE) tile.nodes = readNodes(sections.NODE);
     if (sections.ROOF) {
       const boxes = readBoxes(sections.ROOF);
       if (boxes.length) {
@@ -507,7 +518,7 @@ export class World {
     tile.floor = tile.grid ? tile.grid.heights.reduce((min, h) => Math.min(min, h), Infinity) : 0;
     tile.top = tile.grid ? tile.grid.heights.reduce((max, h) => Math.max(max, h), -Infinity) : 0;
     if (tile.props) {
-      for (let k = 0; k < tile.props.length; k += 9) tile.top = Math.max(tile.top, tile.props[k] + tile.props[k + 1]);
+      for (let k = 0; k < tile.props.length; k += PROP_COLS) tile.top = Math.max(tile.top, tile.props[k] + tile.props[k + 1]);
       tile.top += 4;                     // room for what stands on the roofs
     }
     return tile;
@@ -522,6 +533,7 @@ export class World {
     release(gl, tile.treeMesh);
     if (tile.stripes) release(gl, tile.stripes.mesh);   // the streets' own markings (world/streets.js)
     if (tile.furniture) { release(gl, tile.furniture.mesh); release(gl, tile.furniture.lit); }   // 街具（life/furniture.js）
+    release(gl, tile.facade);             // 立面件（阳台、外机、晾衣）
     for (const name of ['heights', 'base', 'props']) if (tile[name]) gl.deleteTexture(tile[name]);
   }
 }

@@ -27,7 +27,8 @@ const SHADOW_SIZE = 1024;                // the sun's picture, in texels
 // -0.12 seen through its camera, so a shadow points the same way as in the reference at every zoom.
 export const SHADOW = [1.004, 0.834];
 const SHADOW_SLACK_M = 0.05;             // how much nearer the sun something must stand than a point to shade it
-const CAR_SCALE = 1.2, PERSON_SCALE = 5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
+const CAR_SCALE = 1.2, PERSON_SCALE = 3.5, LAKE_BOAT_SCALE = 0.8;   // from these zooms up: cars, people, the lake's own boats
+const FACADE_SCALE = 1.5;              // from this zoom up what hangs on the walls is drawn (a balcony box is two pixels)
 const STRIPE_SCALE = 0.55;             // from this zoom up the streets wear their markings (a pixel is under 2 m)
 const PROPS_SCALE = 1.1;               // from this zoom up the street furniture stands up (a signal box is three pixels tall)
 const BRAND_SCALE = 0.8;               // from this zoom up a brand's flag is drawn (a pixel is 1.25 m), logo and all
@@ -122,6 +123,7 @@ export class CityRenderer extends StyleRenderer {
       pale: place('concrete_pale'), silver: place('metal_pale'), wood: place('wood_dark'),
       navy: place('brand_navy'), blue: place('brand_blue'), green: place('brand_green'), gold: place('brand_gold'),
       red: place('brand_red'), yellow: place('taxi_yellow'), greenLight: place('signal_green'), lit: place('window_lit'),
+      lantern: place('temple_red'), cloth: place('cloth_c'),
     };
     this.propsColours.green = this.propsColours.greenLight;
     this.treeCell = index.treeCell;
@@ -593,6 +595,16 @@ export class CityRenderer extends StyleRenderer {
         lit += tile.furniture.litCount;
       }
     }
+    // 立面件：阳台、外机、晾衣，挂墙上的盒子，与街具同一只着色器
+    if (this.walkActive() || city.scale >= FACADE_SCALE) {
+      for (const tile of tiles) {
+        if (!tile.facade?.count) continue;
+        boxes.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(tile.facade.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.facade.count);
+        drawn += tile.facade.count;
+      }
+    }
     gl.bindVertexArray(null);
     this.drawn.furniture = drawn;
     this.drawn.furnitureLit = lit;
@@ -711,7 +723,7 @@ export class CityRenderer extends StyleRenderer {
       gl.bindVertexArray(this.lifeMesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, this.traffic.count);
     }
-    // 街具也接影：交通灯、候车亭、隔离栏和树一样，在太阳的画里占一个位置
+    // 街具与立面件也接影：交通灯、候车亭、阳台和树一样，在太阳的画里占一个位置
     if (withLife && (this.walkActive() || city.scale >= PROPS_SCALE)) {
       const props = this.programs.shadowLife.use();
       this.applyCamera(props, { shadowMap: false });
@@ -720,6 +732,16 @@ export class CityRenderer extends StyleRenderer {
         props.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
         gl.bindVertexArray(tile.furniture.mesh.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.furniture.count);
+      }
+    }
+    if (withLife && (this.walkActive() || city.scale >= FACADE_SCALE)) {
+      const props = this.programs.shadowLife.use();
+      this.applyCamera(props, { shadowMap: false });
+      for (const tile of tiles) {
+        if (!tile.facade?.count) continue;
+        props.set('uOffset', [tile.x0 - city.x, tile.y0 - city.y]);
+        gl.bindVertexArray(tile.facade.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 30, tile.facade.count);
       }
     }
     gl.bindVertexArray(null);

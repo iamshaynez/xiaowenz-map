@@ -284,17 +284,26 @@ class CompactFormsTest(unittest.TestCase):
                                [5.0, 5.0, 350.13, 0.6, 0.8, 1], [-60.0, 1060.0, 819.0, 1.0, 0.0, 2]], dtype="<f4")
         indices = numpy.array([0, 1, 2, 0, 2, 3, 4, 3, 2], dtype=numpy.uint32)
         payload = struct.pack("<IIIB", 3, 5, 9, 2) + compact.building_properties(props) + compact.building_vertices(corners) + compact.indices(indices, 5)[0]
-        self.assertEqual(len(payload), 13 + 33 + 60 + 18)            # against 12 + 108 + 120 + 36 in floats
+        self.assertEqual(len(payload), 13 + 42 + 60 + 18)            # against 12 + 108 + 120 + 36 in floats
         back, vertices, backIndices = compact.read_buildings(payload)
         self.assertTrue(numpy.isclose(back[:, 0], props[:, 0], atol=0.0126).all())
         self.assertTrue(numpy.isclose(back[:, 1], props[:, 1], atol=0.0051).all())
-        self.assertEqual(back[:, 2:].tolist(), props[:, 2:].tolist())
+        self.assertEqual(back[:, 2:9].tolist(), props[:, 2:].tolist())   # nine old properties as they went in
+        self.assertTrue((back[:, 9:] == 0).all())                        # the three street columns ride zero
         self.assertTrue(numpy.isclose(vertices[:, :2], corners[:, :2], atol=0.021).all())
         self.assertTrue(numpy.isclose(vertices[:, 2], corners[:, 2], atol=0.0126).all())
         self.assertTrue(numpy.isclose(vertices[:, 3:5], corners[:, 3:5], atol=0.0001).all())
         self.assertEqual(vertices[:, 5].tolist(), corners[:, 5].tolist())
         self.assertEqual(vertices[0, 3:5].tolist(), [0.0, -1.0])      # a wall's normal stays exactly a unit vector
         self.assertEqual(backIndices.tolist(), indices.tolist())
+
+    def test_street_columns_land_at_bytes_11_to_13(self):
+        props = numpy.array([[2.0, 15.3, 5, 2, 0, 1, 2, 7, 16, 5, 1, 99]])
+        raw = compact.building_properties(props)
+        self.assertEqual(len(raw), 14)
+        self.assertEqual(raw[11], 5)                 # frontage bits
+        self.assertEqual(raw[12], 1)                 # ground-floor use
+        self.assertEqual(raw[13], 99)                # the variant byte
 
     def test_a_walls_foot_and_its_buildings_base_are_one_number(self):
         # the mesh is built in single precision: a base a hair under a rounding boundary of the integer comes

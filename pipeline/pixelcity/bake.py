@@ -14,11 +14,12 @@ from . import compact
 from .city import MARGIN_M, TILE_M
 
 MAGIC = b"HZT1"                  # the first four bytes of every baked file
-FORMAT = 2                      # the version that follows the magic: 2 is the compact forms of compact.py (the page refuses 1)
+FORMAT = 3                      # the version that follows the magic: 3 carries the street tier (14-byte building properties,
+                                # PATH kind, FACADE and NODE sections); the page refuses anything older
 COARSE_TOLERANCE_M = 1.5   # outlines are simplified to this at the district tier
 MIN_PART_M2 = 3.0          # polygon pieces smaller than this are dropped
 MIN_COURTYARD_M2 = 400.0   # courtyards smaller than this are roofed over at the district tier
-PROP_FLOATS = 9            # base, height, levels, archetype, roof, wall, roofColour, seed, flags
+PROP_FLOATS = 12           # base, height, levels, archetype, roof, wall, roofColour, seed, flags, frontage, groundUse, variant
 FLAG_ROOFTOP = 1           # flags: not a building but something standing on a roof, put there by rule
 FLAG_CLEARED = 32          # flags: not drawn, because a landmark put together by hand stands in its place
 ROOF_FLAT, ROOF_GABLE, ROOF_HIP, ROOF_SAW, ROOF_GREAT = 0, 1, 2, 3, 4   # as classify.py; a pitched roof is drawn over outlines that fill a rectangle
@@ -354,6 +355,103 @@ def rooftop_props(geoms, props, colour_index, seed=20261123):
     if not out_rows:
         return numpy.zeros(0, dtype=object), numpy.zeros((0, props.shape[1] + 1))
     return numpy.asarray(out_geoms, dtype=object), numpy.array(out_rows, dtype=numpy.float64)
+
+
+# ---- what hangs on the street-facing walls -----------------------------------------------------------------------
+# 阳台给老式多层，晾衣给农居与老民居，空调外机给大多数。只有临街的面挂东西——frontage 位掩码
+# 是按楼的四条边三米内有没有车行道算的（scene.bake）。记录是生命体盒子的格式（12 个浮点），页面
+# 用画车和人的同一个着色器画，所以光、描边、影子都一样。
+BAY_M = 3.3                    # metres along a facade between bay slots
+BAYS_MOST = 8                  # a facade wears at most this many bays: a factory front is not a street of shops
+BALCONY_CHANCE = 0.35          # chance a bay slot of a walk-up carries a balcony
+AC_CHANCE = 0.18               # chance a bay slot carries an air-conditioning unit
+LAUNDRY_CHANCE = 0.45          # chance a village house's frontage hangs laundry
+BALCONY_STOREYS = 8            # no balconies above this storey (towers' are enclosed; the wall reads fine)
+AC_STOREYS = 5                 # nor air-conditioners
+WALKUP, FARMHOUSE, TOWER, OFFICE, INDUSTRIAL, PUBLIC, TEMPLE, STATION, JIANGNAN, SHED = 1, 3, 4, 5, 6, 7, 8, 9, 2, 10
+
+
+def facade_boxes(geoms, props, ground_data, colour_index, seed=20261124):
+    """Boxes hung on the street-facing walls, as life-box records: 12 floats a box, x, y, z, heading x, y,
+    half length, half width, height, wall colour, top colour, kind, pitch. Only walls whose side touches a
+    road carry anything, and nothing hangs on a building that gave way to a landmark.
+    """
+    rng = numpy.random.default_rng(seed)
+    geoms = numpy.asarray(geoms, dtype=object)
+    frontage = props[:, 9].astype(numpy.int64)
+    cleared = (props[:, 8].astype(numpy.int64) & FLAG_CLEARED) != 0
+    hangable = (frontage != 0) & ~cleared
+    records = []
+    for n in numpy.flatnonzero(hangable):
+        west, south, east, north = shapely.bounds(geoms[n]).tolist()
+        base, height, levels, archetype, seed_b = (props[n, 0], props[n, 1], max(props[n, 2], 1.0), int(props[n, 3]), int(props[n, 7]))
+        floor_h = height / levels
+        frontage_bits = int(frontage[n])
+        along_x = east - west >= north - south            # the long sides carry the frontage
+        pale, grey = colour_index["concrete_pale"], colour_index["concrete_grey"]
+        metal, dark = colour_index["metal_pale"], colour_index["metal_dark"]
+        cloths = [colour_index[f"cloth_{c}"] for c in "abcd"]
+        # which sides carry: the bit for each of the four sides; a side only when it is a long side of the
+        # box (short ends get nothing — the data's outlines are boxes, the actual building may not be)
+        sides = []
+        if along_x:
+            if frontage_bits & 1: sides.append((north, 0.0, 1.0, west, east))    # north edge, heading +x
+            if frontage_bits & 4: sides.append((south, 0.0, -1.0, west, east))   # south edge, heading -x
+        else:
+            if frontage_bits & 2: sides.append((east, 1.0, 0.0, south, north))   # east edge, heading +y
+            if frontage_bits & 8: sides.append((west, -1.0, 0.0, south, north))  # west edge, heading -y
+        for at, hx, hy, lo, hi in sides:
+            length = hi - lo
+            bays = min(BAYS_MOST, max(1, int(length / BAY_M)))
+            for k in range(bays):
+                middle = lo + (k + 0.5) * (length / bays)
+                # the wall's outward direction: north side grows +y, south -y, east +x, west -x
+                if along_x:
+                    out_x, out_y = 0.0, (0.24 if at == north else -0.24)
+                else:
+                    out_x, out_y = (0.24 if at == east else -0.24), 0.0
+                cx, cy = middle + out_x * 0.4, at + out_y * 0.4
+                bay_w = (length / bays) * 0.62
+                # balcony: a railed box a hand's depth out of the wall, one bay wide, at a hashed storey
+                if archetype in (WALKUP, JIANGNAN, PUBLIC) and levels <= BALCONY_STOREYS + 1 and rng.random() < BALCONY_CHANCE:
+                    storey = 1 + int(rng.integers(0, max(1, min(levels, BALCONY_STOREYS) - 1)))
+                    z = base + storey * floor_h + 0.15
+                    records.append([cx, cy, z, hx, hy, bay_w, 0.22, 0.95, pale, grey, 3, 0.0])
+                # laundry: a village house hangs its washing on the frontage, two or three pieces on a line
+                if archetype in (FARMHOUSE, JIANGNAN) and levels <= 3 and rng.random() < LAUNDRY_CHANCE:
+                    for piece in range(int(rng.integers(1, 4))):
+                        z = base + 2.4 + rng.uniform(0, 0.5)
+                        offset = rng.uniform(-0.8, 0.8) * (length / bays)
+                        records.append([cx + hx * offset, cy + hy * offset, z, hx, hy, 0.19, 0.03, 0.42,
+                                        cloths[int(rng.integers(0, 4))], cloths[0], 3, 0.0])
+                # air-conditioning unit: most facades wear one at a hashed storey of the lower ones
+                if archetype != TEMPLE and rng.random() < AC_CHANCE:
+                    storey = 1 + int(rng.integers(0, max(1, min(levels, AC_STOREYS) - 1)))
+                    z = base + storey * floor_h + 0.9
+                    records.append([cx + out_x * 0.55, cy + out_y * 0.55, z, hx, hy, 0.38, 0.17, 0.62, metal, dark, 3, 0.0])
+    return numpy.asarray(records, dtype=numpy.float64).reshape(-1, 12)
+
+
+def facade_section(records, ox, oy):
+    """The facade boxes of one tile as life-box records: u32 count, then 12 floats each (x, y relative to
+    the tile's corner). The page draws them with the moving things' own shader."""
+    if not len(records):
+        return struct.pack("<I", 0)
+    rows = records.copy()
+    rows[:, 0] -= ox
+    rows[:, 1] -= oy
+    return struct.pack("<I", len(rows)) + rows.astype("<f4").tobytes()
+
+
+def nodes_section(nodes, ox, oy):
+    """The street furniture the map has real points for, as the page's furniture section reads them: u32
+    count, then 6 bytes a node — x, y relative to the tile's corner (i16, 4 cm), the kind, and the
+    category (what colour a shop's signboard is; 255 where the kind has none)."""
+    rows = []
+    for point, kind, category in nodes:
+        xy = compact.i16([point.x - ox, point.y - oy], compact.XY_PER_M, "a furniture node's place in its tile")
+        rows.append(struct.pack("<hhBBB", int(xy[0]), int(xy[1]), int(kind), int(category) & 255, 0))
+    return struct.pack("<I", len(rows)) + b"".join(rows)
 
 
 def roof_boxes_section(geoms, props, ox, oy):

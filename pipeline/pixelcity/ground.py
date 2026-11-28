@@ -38,7 +38,7 @@ GROUND_COLOURS = {
 }
 # how far each class floats above the terrain, in metres; what floats higher is drawn over what is lower
 LIFT = {URBAN: 0.02, GRASS: 0.03, FOREST: 0.03, FARMLAND: 0.03, YARD: 0.03, SAND: 0.03, ROCK: 0.03, WETLAND: 0.03, CEMETERY: 0.03, TEA: 0.03,
-        PITCH: 0.04, SIDEWALK: 0.05, PATH: 0.066, ROAD_PEDESTRIAN: 0.068, ROAD_SERVICE: 0.070, ROAD_MINOR: 0.072,
+        PITCH: 0.04, SIDEWALK: 0.17, PATH: 0.066, ROAD_PEDESTRIAN: 0.068, ROAD_SERVICE: 0.070, ROAD_MINOR: 0.072,
         ROAD_SECONDARY: 0.076, ROAD_MAJOR: 0.080, RAIL: 0.09, WALL: 0.0,
         WATER_LAKE: 0.10, WATER_RIVER: 0.10, WATER_CANAL: 0.10, WATER_POND: 0.10}
 
@@ -262,6 +262,17 @@ def prepare(osm, bounds, rivers=(), log=print):
                          for geom, t in osm.water_lines if not t.get("tunnel") and geom.length >= 1]
     classes = numpy.asarray([water_class(t, geom.area, rivers) for geom, t in osm.water if geom.area > 12]
                            + [WATER_CANAL] * (len(shapes) - len(polygons)))
+    # 一整块没有名字的水面，认它里面那条有名字的水道：钱塘江、黄浦江的江面在 OSM 里无名，名字只在
+    # 沿江的水道线上，"名字里带钱塘才是江"的规则对那块大水面一直不生效（REVIEW-QUEUE 32、37）
+    if rivers:
+        river_lines = shapely.union_all([geom for geom, t in osm.water_lines
+                                         if not t.get("tunnel") and any(word in str(t.get("name", "")) for word in rivers)] or [])
+        if not river_lines.is_empty:
+            unnamed = numpy.asarray([not str(t.get("name", "")).strip() for geom, t in osm.water if geom.area > 12])
+            crosses = numpy.asarray([geom.intersects(river_lines) for geom, t in osm.water if geom.area > 12])
+            take = unnamed & crosses
+            if take.any():
+                classes[:len(take)] = numpy.where(take, WATER_RIVER, classes[:len(take)])
     shapes = numpy.asarray(shapes, dtype=object)
     alive = ~shapely.is_empty(shapes)
     shapes, classes = shapes[alive], classes[alive]
@@ -488,6 +499,72 @@ def mesh(ground, classes, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M, rec
     if not verts:
         return numpy.zeros((0, 5), dtype="<f4"), numpy.zeros(0, dtype="<u4")
     return numpy.concatenate(verts), numpy.concatenate(index)
+
+
+def kerb_mesh(ground, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M):
+    """The kerb: a vertical face along the edges of the carriageway that a pavement stands beside — from
+    just under the road's own surface up to the pavement's lift, a hand's height of stone between the two.
+
+    The band breaks wherever the pavement does: at a junction mouth the ground outside the road belongs to
+    the crossing road, not to a kerb, and gets no band. -> (vertices, indices) as mesh() returns them.
+    """
+    query = shapely.box(x0 - margin, y0 - margin, x0 + size + margin, y0 + size + margin)
+    ways = [part for cls in (ROAD_MAJOR, ROAD_SECONDARY, ROAD_MINOR, ROAD_SERVICE, ROAD_PEDESTRIAN) if cls in ground.layers
+            for part in ground.in_box(cls, query)]
+    walks = [part for part in ground.in_box(SIDEWALK, query)]
+    if not ways or not walks:
+        return numpy.zeros((0, 5), dtype="<f4"), numpy.zeros(0, dtype="<u4")
+    roads = shapely.union_all(ways)
+    shapely.prepare(roads)
+    pavement = shapely.union_all(walks)
+    shapely.prepare(pavement)
+    quads, quads_base = [], []
+    kerb_top = LIFT[SIDEWALK]
+    for cls in (ROAD_MAJOR, ROAD_SECONDARY, ROAD_MINOR, ROAD_SERVICE, ROAD_PEDESTRIAN):
+        if cls not in ground.layers:
+            continue
+        lift = LIFT[cls]
+        for part in ground.in_box(cls, query):
+            clipped = part.intersection(query)
+            if clipped.is_empty:
+                continue
+            for polygon in shapely.get_parts(clipped):
+                for ring in (polygon.exterior, *polygon.interiors):
+                    pts = numpy.asarray(ring.coords)
+                    a, b = pts[:-1], pts[1:]
+                    mid = (a + b) / 2
+                    dx, dy = b[:, 0] - a[:, 0], b[:, 1] - a[:, 1]
+                    length = numpy.hypot(dx, dy)
+                    keep = length > 0.4
+                    if not keep.any():
+                        continue
+                    a, b, mid, dx, dy = a[keep], b[keep], mid[keep], dx[keep], dy[keep]
+                    nx, ny = dy / length[keep], -dx / length[keep]      # one of the two sides; both are tried below
+                    ground_top = height(mid[:, 0], mid[:, 1])
+                    for sign in (1.0, -1.0):
+                        px, py = mid[:, 0] + nx * sign * 0.6, mid[:, 1] + ny * sign * 0.6
+                        ok = shapely.contains_xy(pavement, px, py) & ~shapely.contains_xy(roads, px, py)
+                        if not ok.any():
+                            continue
+                        xa, ya = a[ok, 0], a[ok, 1]
+                        xb, yb = b[ok, 0], b[ok, 1]
+                        za = ground_top[ok] + kerb_top
+                        zb = height(xb, yb) + kerb_top
+                        ba = ground_top[ok] + lift - 0.04
+                        bb = height(xb, yb) + lift - 0.04
+                        quads.append(numpy.column_stack([
+                            numpy.column_stack([xa, ya, za]), numpy.column_stack([xa, ya, ba]),
+                            numpy.column_stack([xb, yb, zb]), numpy.column_stack([xb, yb, bb])]).reshape(-1, 3))
+                        quads_base.append(numpy.tile(float(WALL), len(xa) * 4))
+    if not quads:
+        return numpy.zeros((0, 5), dtype="<f4"), numpy.zeros(0, dtype="<u4")
+    corners = numpy.concatenate(quads)                     # four corners a segment: top-a, bottom-a, top-b, bottom-b
+    base = numpy.concatenate(quads_base)
+    n = len(corners)
+    verts = numpy.column_stack([corners[:, 0] - x0, corners[:, 1] - y0, corners[:, 2], base, numpy.ones(n)]).astype("<f4")
+    quad = numpy.arange(n, dtype="<u4").reshape(-1, 4)     # corners: 0 top-a, 1 bottom-a, 2 top-b, 3 bottom-b
+    index = numpy.concatenate([quad[:, 0], quad[:, 1], quad[:, 2], quad[:, 0], quad[:, 2], quad[:, 3]])
+    return verts, index
 
 
 def deck_mesh(ground, x0, y0, height, size=1000.0, margin=TILE_MARGIN_M):
